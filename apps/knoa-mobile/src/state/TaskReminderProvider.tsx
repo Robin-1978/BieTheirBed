@@ -193,6 +193,12 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (status === "ready") void reconcileNotifications().catch(() => undefined);
+    const interval = setInterval(() => {
+      if (appIsActiveRef.current && status === "ready") {
+        void reconcileNotifications().catch(() => undefined);
+      }
+    }, 15_000);
+    return () => clearInterval(interval);
   }, [reconcileNotifications, status]);
 
   useEffect(() => {

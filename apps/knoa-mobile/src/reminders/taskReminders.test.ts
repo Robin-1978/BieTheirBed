@@ -137,4 +137,21 @@ describe("task reminders", () => {
     const allRead = markAllTaskRemindersRead(list);
     expect(allRead.every((item) => item.read)).toBe(true);
   });
+
+  it("syncs read status from incoming notification for same reminderId and executionId", () => {
+    const list: TaskReminder[] = [
+      { ...reminder(1), reminderId: "intent:1", executionId: "exec-1", read: false },
+      { ...reminder(2), reminderId: "intent:2", executionId: "exec-2", read: false },
+    ];
+    // 同一个 reminderId 在服务端已被已读
+    const incoming1: TaskReminder = { ...reminder(1), reminderId: "intent:1", executionId: "exec-1", read: true };
+    const res1 = mergeTaskReminder(list, incoming1);
+    expect(res1[0]?.read).toBe(true);
+    expect(res1[1]?.read).toBe(false);
+
+    // 另一个设备确认了 exec-2 的已读事件
+    const incoming2: TaskReminder = { ...reminder(3), reminderId: "intent:3", executionId: "exec-2", read: true };
+    const res2 = mergeTaskReminder(res1, incoming2);
+    expect(res2.find((item) => item.executionId === "exec-2")?.read).toBe(true);
+  });
 });

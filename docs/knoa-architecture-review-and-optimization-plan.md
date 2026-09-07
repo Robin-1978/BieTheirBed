@@ -239,5 +239,7 @@ gantt
    - **保留期优化**：将任务执行 Trace 与对话明细默认保留期由 90天/30天优化至 7 天（`task_trace_retention_days=7`，`conversation_detail_retention_days=7`），支持环境变量灵活调整；
    - **多级平滑瘦身与关联表清理**：针对过期已完结（completed/failed/cancelled）任务实施自动分级压缩，保留权威 `final_output`、执行摘要与关键里程碑（plan, tool_call, artifact, warning），安全抹除中间冗余推理草稿与 `runtime_task_tool_steps` 的庞大 arguments/result JSON，释放海量存储；
    - **启动主动维护与周期巡检**：守护进程在冷启动时立即触发首轮自动化清理与 WAL 检查点整理，并在后台按需低频巡检，杜绝存储膨胀。
-3. **全双工双向连接与跨端统一已读中心**：
-   - 升级支持端到端 WebSocket，并将未读状态收敛至中心节点，彻底解决多机角标不同步。
+3. **跨端统一已读状态同步与角标治理 [COMPLETED 2026-09-07]**：
+   - **单向只增已读对齐**：移动端 `mergeTaskReminder` 升级支持服务端已读权威（`read: true`）覆盖已有本地待办与同一 `executionId` 的衍生通知，杜绝其他设备已读后本地角标依然滞留；
+   - **节点级角标精准隔离**：底部导航栏与任务列表未读横幅完全收敛至当前选中 Node（`currentNodeUnread`），彻底解决“跨设备其他节点任务导致无脑显示 9+ 未读但点进列表为空”的负向体验；
+   - **一键全读与跨端自动重对齐**：支持针对当前节点或跨节点一键标记全部已读（`markAllRead(targetNodeId)`），并在前台周期性（15s）自动拉取对齐 Hub/Node 端最新通知状态。

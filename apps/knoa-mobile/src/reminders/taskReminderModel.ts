@@ -19,11 +19,19 @@ export function mergeTaskReminder(
   reminders: TaskReminder[],
   incoming: TaskReminder,
 ): TaskReminder[] {
-  if (reminders.some((reminder) => reminder.reminderId === incoming.reminderId)) {
-    return reminders;
-  }
+  let found = false;
+  let next = reminders.map((reminder) => {
+    if (reminder.reminderId === incoming.reminderId) {
+      found = true;
+      // 服务端或远端多机已读状态同步覆盖（只增不退：未读可变已读，已读不回退为未读）
+      if (!reminder.read && incoming.read) {
+        return { ...reminder, read: true };
+      }
+      return reminder;
+    }
+    return reminder;
+  });
 
-  let next = reminders;
   if (incoming.category === "completed" || incoming.category === "failed" || incoming.category === "approval") {
     next = next.map((reminder) => {
       if (
@@ -35,6 +43,26 @@ export function mergeTaskReminder(
       }
       return reminder;
     });
+  }
+
+  // 节点已读广播 / 全局已读标记同步：
+  // 若传入的通知在服务端/Hub端已经被确认已读（incoming.read === true），
+  // 必须确保本地已有相同 reminderId 或相同 executionId 的待办也被对齐更新为已读
+  if (incoming.read) {
+    next = next.map((reminder) => {
+      if (
+        (reminder.reminderId === incoming.reminderId ||
+         (incoming.executionId && reminder.executionId === incoming.executionId)) &&
+        !reminder.read
+      ) {
+        return { ...reminder, read: true };
+      }
+      return reminder;
+    });
+  }
+
+  if (found) {
+    return next;
   }
 
   return [...next, incoming]
