@@ -88,3 +88,7 @@ tools:
     effect: local_write
     capabilities: [mcp, network, host_write]
     risk: medium
+  jira.analyze_local_logs:
+    effect: local_write
+    capabilities: [mcp, host_write]
+    risk: low

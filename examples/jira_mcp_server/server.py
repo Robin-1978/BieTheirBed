@@ -644,6 +644,26 @@ class JiraMCPApplication:
                         open_world_hint=True,
                     ),
                 ),
+                types.Tool(
+                    name="jira.analyze_local_logs",
+                    description=(
+                        "Inspect the issue's evidence directory, automatically unpack archive logs (.tar.gz, .zip), "
+                        "and extract crash backtraces, FATAL errors, and diagnostic lines."
+                    ),
+                    input_schema=_object_schema(
+                        {
+                            "issue_key": {"type": "string"},
+                            "auto_unpack": {"type": "boolean"},
+                        },
+                        ["issue_key"],
+                    ),
+                    annotations=types.ToolAnnotations(
+                        read_only_hint=False,
+                        destructive_hint=False,
+                        idempotent_hint=True,
+                        open_world_hint=True,
+                    ),
+                ),
             ]
         )
 
@@ -756,6 +776,11 @@ class JiraMCPApplication:
                     str(arguments.get("issue_key", "")),
                     str(arguments.get("download_url", "")),
                     str(arguments.get("filename", "")),
+                )
+            elif name == "jira.analyze_local_logs":
+                payload = await self.jira.analyze_local_logs(
+                    str(arguments.get("issue_key", "")),
+                    auto_unpack=bool(arguments.get("auto_unpack", True)),
                 )
             else:
                 raise LookupError("Unknown Jira tool")
