@@ -194,17 +194,92 @@ class AppConfig(BaseModel):
                 platform_capability_ceiling=frozenset({"*"}),
                 delegation=DelegationPolicy(
                     allowed=True,
-                    targets=frozenset({"worker", "codex"}),
+                    targets=frozenset({"worker", "coder", "researcher", "codex"}),
                     max_depth=1,
                     max_children=3,
                     max_parallel_children=3,
                     max_deadline_seconds=1800,
                 ),
             ),
+            "coder": NodeAgent(
+                kind="knoa",
+                display_name="Knoa Coder",
+                instructions=(
+                    "You are Knoa Coder, an autonomous elite software engineer. "
+                    "Work only on the assigned objective. "
+                    "Inspect existing code before making changes; never assume signatures or behavior. "
+                    "Prefer minimal, cohesive edits on existing files; preserve existing APIs and style. "
+                    "Verify every change with appropriate tests, builds, or syntax checks before completing. "
+                    "Converge rapidly and deliver a concise result containing root cause, modified files, "
+                    "and test verification evidence."
+                ),
+                visibility="delegate",
+                enabled=True,
+                model_binding=ModelBindingSpec(
+                    ownership="platform",
+                    model="@default",
+                ),
+                max_concurrency=4,
+                allowed_platform_tools=frozenset({
+                    "read_file",
+                    "edit_file",
+                    "write_file",
+                    "grep_search",
+                    "glob_files",
+                    "run_command",
+                    "read_artifact",
+                }),
+                platform_capability_ceiling=frozenset({
+                    "host_read",
+                    "host_write",
+                    "shell",
+                }),
+                runtime_limits=AgentRuntimeLimits(
+                    max_iterations=30,
+                ),
+                delegation=DelegationPolicy(allowed=False),
+            ),
+            "researcher": NodeAgent(
+                kind="knoa",
+                display_name="Knoa Researcher",
+                instructions=(
+                    "You are Knoa Researcher, an autonomous elite information and intelligence specialist. "
+                    "Work only on the assigned investigation objective. "
+                    "Search and fetch across multiple authoritative web sources, cross-checking key claims and dates. "
+                    "Strip noisy marketing, boilerplate, and ads. Focus on verifiable facts, numbers, and primary signals. "
+                    "Converge rapidly within 2 to 4 focused search/fetch iterations; stop immediately if a site is blocked. "
+                    "Deliver a highly structured, objective Markdown briefing: core takeaway first, supporting details with dates, "
+                    "and transparent caveats for uncertain data."
+                ),
+                visibility="delegate",
+                enabled=True,
+                model_binding=ModelBindingSpec(
+                    ownership="platform",
+                    model="@default",
+                ),
+                max_concurrency=4,
+                allowed_platform_tools=frozenset({
+                    "web_search",
+                    "web_fetch",
+                    "read_artifact",
+                }),
+                platform_capability_ceiling=frozenset({
+                    "network",
+                }),
+                runtime_limits=AgentRuntimeLimits(
+                    max_iterations=20,
+                ),
+                delegation=DelegationPolicy(allowed=False),
+            ),
             "worker": NodeAgent(
                 kind="knoa",
                 display_name="Knoa Worker",
-                instructions="You are a focused subagent. Execute the assigned goal independently in an isolated context and return a concise, structured summary of findings and outcomes to the orchestrator.",
+                instructions=(
+                    "You are Knoa Worker, an autonomous general-purpose execution subagent for composite workflows. "
+                    "Work only on the assigned objective in an isolated context when tasks require combined capabilities. "
+                    "Coordinate tools across web research, file manipulation, script execution, and desktop operations safely. "
+                    "Converge rapidly and deliver a concise, structured result containing key outcomes and evidence to the orchestrator."
+                ),
                 visibility="delegate",
                 enabled=True,
                 model_binding=ModelBindingSpec(
@@ -214,6 +289,9 @@ class AppConfig(BaseModel):
                 max_concurrency=4,
                 allowed_platform_tools=frozenset({"*"}),
                 platform_capability_ceiling=frozenset({"*"}),
+                runtime_limits=AgentRuntimeLimits(
+                    max_iterations=30,
+                ),
                 delegation=DelegationPolicy(allowed=False),
             ),
             "reviewer_agent": NodeAgent(
