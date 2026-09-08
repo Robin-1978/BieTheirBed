@@ -723,6 +723,69 @@ async def test_text_model_reports_vision_unavailable_without_dedicated_tool(
 
 
 @pytest.mark.asyncio
+async def test_failed_image_inspect_ends_turn_without_retrying_into_context_overflow(
+    tmp_path: Path,
+) -> None:
+    class FailingImageClient(ImageClient):
+        async def call_tool(self, call):
+            self.calls.append(call)
+            return ToolStepResult(
+                call_id=call.call_id,
+                tool_name=call.name,
+                status="completed",
+                output={
+                    "error": "Dedicated vision model is not configured",
+                    "artifact_id": "image-a",
+                },
+            )
+
+    class InspectOnceProvider(Provider):
+        def stream(self, request, cancellation):
+            del cancellation
+
+            async def iterate():
+                self.requests.append(request)
+                yield ProviderChunk(
+                    tool_calls=(ProposedToolCall(
+                        call_id="inspect-failed",
+                        name="image_inspect",
+                        arguments={"artifact_id": "image-a", "question": "What is visible?"},
+                    ),),
+                    finish_reason="tool_calls",
+                    terminal=True,
+                )
+
+            return iterate()
+
+    provider = InspectOnceProvider()
+    client = FailingImageClient()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        ImageConnector(client),
+        system_prompt="system",
+        health_probe=healthy,
+        supports_vision=False,
+    )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-image-failed", binding_epoch=1)
+    )
+    turn = await runtime.start_turn(RuntimeTurnRequest(
+        session=session,
+        operation_id="operation-image-failed",
+        input=(TextPart(text="What does this show?"), image_part()),
+        mcp=grant(),
+    ))
+
+    events = [event async for event in turn.events]
+
+    assert events[-1].status == "failed"
+    assert events[-1].error_code == "image_inspect_failed"
+    assert len(provider.requests) == 1
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_knoa_runtime_interrupts_active_turn_with_explicit_terminal(
     tmp_path: Path,
 ) -> None:
@@ -1217,7 +1280,6 @@ async def test_knoa_runtime_tool_budget_exhaustion_triggers_final_synthesis_pass
     # The turn must be COMPLETED with final_output synthesized, NOT failed!
     assert finished.status == "completed"
     assert "最终综合对比报告" in finished.final_output
-
 
 
 

@@ -127,6 +127,19 @@ def test_ice_servers_configuration(monkeypatch) -> None:
         {"urls": ["turn:turn.example.com:3478"], "username": "alice", "credential": "secretpassword"}
     ]
 
+    # The config default is an empty list; it must not disable the built-in
+    # STUN fallback (the regression in 413a748).
+    monkeypatch.delenv("KNOA_ICE_SERVERS", raising=False)
+    monkeypatch.delenv("KNOA_TURN_URL", raising=False)
+    monkeypatch.setattr(
+        p2p_module,
+        "_STUN_SERVERS",
+        [p2p_module.RTCIceServer(urls="stun:default.example.com:3478")],
+    )
+    assert serialize_ice_servers(build_ice_servers([])) == [
+        {"urls": ["stun:default.example.com:3478"]}
+    ]
+
     # 2. Env variable KNOA_ICE_SERVERS
     monkeypatch.setenv(
         "KNOA_ICE_SERVERS",
@@ -146,4 +159,3 @@ def test_ice_servers_configuration(monkeypatch) -> None:
     assert serialize_ice_servers(servers) == [
         {"urls": ["turn:relay.example.com:3478"], "username": "knoa_user", "credential": "knoa_pass"}
     ]
-

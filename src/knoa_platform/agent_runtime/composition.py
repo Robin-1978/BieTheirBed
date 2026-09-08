@@ -424,6 +424,26 @@ def _resolve_managed_model(
     )
 
 
+def _vision_model_alias(managed: ManagedConfig) -> str:
+    """Return the configured vision model, or a safe automatic fallback.
+
+    Older installations may have a populated model catalog but no
+    ``vision_model`` field.  In that case image_inspect was registered with an
+    unavailable broker even when a vision-capable model already existed.
+    Prefer an explicitly configured alias, then aliases that advertise
+    ``vision`` in their name, and finally the stable catalog order.
+    """
+    if managed.vision_model and managed.vision_model in managed.models:
+        return managed.vision_model
+    candidates = [
+        alias for alias, model in managed.models.items() if model.supports_vision is True
+    ]
+    if not candidates:
+        return ""
+    named = [alias for alias in candidates if "vision" in alias.lower()]
+    return sorted(named or candidates)[0]
+
+
 def _build_agent_runtime_set(
     managed: ManagedConfig,
     *,
@@ -916,8 +936,9 @@ def build_core_runtime(
         # budget instead of silently clamping every inspection to 1024 tokens.
         max_output_tokens=managed.operational.max_output_tokens,
     )
-    if managed.vision_model:
-        vision_config = _resolve_managed_model(managed, managed.vision_model, config)
+    vision_alias = _vision_model_alias(managed)
+    if vision_alias:
+        vision_config = _resolve_managed_model(managed, vision_alias, config)
         vision_broker.configure(
             provider_factory(vision_config),
             model_alias=vision_config.alias,
@@ -1275,11 +1296,12 @@ def build_core_runtime(
                     "runtime_preflight_failed",
                     "One or more Agent Runtime generations are unhealthy",
                 )
-            if candidate.vision_model:
+            candidate_vision_alias = _vision_model_alias(candidate)
+            if candidate_vision_alias:
                 vision_health = await provider_factory(
                     _resolve_managed_model(
                         candidate,
-                        candidate.vision_model,
+                        candidate_vision_alias,
                         config,
                     )
                 ).health_check()
@@ -1421,10 +1443,11 @@ def build_core_runtime(
         resolver_holder["current"] = next_resolver
         managed_holder["current"] = candidate
         model_holder["current"] = new_model
-        if candidate.vision_model:
+        vision_alias = _vision_model_alias(candidate)
+        if vision_alias:
             vision_config = _resolve_managed_model(
                 candidate,
-                candidate.vision_model,
+                vision_alias,
                 config,
             )
             vision_broker.configure(
