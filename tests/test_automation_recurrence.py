@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
 
 from knoa_platform.automation import ScheduleKind, ScheduleSpec, next_fire_at
+
+UTC = timezone.utc
 
 
 def _timestamp(value: str) -> float:
