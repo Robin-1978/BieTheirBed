@@ -345,6 +345,9 @@ async def test_knoa_runtime_owns_session_checkpoint_and_one_terminal_event(
         "role": "assistant",
         "content": "hello",
     }
+    # Verify runtime_context was NOT saved in checkpoint messages (preventing cumulative duplicate injection)
+    for m in checkpoint.payload["messages"]:
+        assert not KnoaAgentRuntime._is_runtime_context_message(m)
 
 
 @pytest.mark.asyncio

@@ -55,6 +55,7 @@ const emptyEditor = (): Editor => ({
   secretVersion: 0,
   secret: "",
   supportsVision: false,
+  contextWindow: 65536,
   setAsDefault: false,
 });
 
@@ -134,6 +135,7 @@ export default function ModelsScreen() {
       secretVersion: provider.secret_version,
       secret: "",
       supportsVision: Boolean(model.supports_vision),
+      contextWindow: (model.context_window as number | undefined) ?? 65536,
       setAsDefault: document.default_model === alias,
     });
     setSharingAlias("");
@@ -382,6 +384,15 @@ function ModelEditor({ editor, setEditor, working, onSave, onCancel }: { editor:
       <Field label={t("settings.models.modelName")} value={editor.modelId} onChange={(modelId) => setEditor({ ...editor, modelId })} placeholder={t("settings.models.modelNamePlaceholder")} />
       <Field label={editor.driver === "llamacpp" ? t("settings.models.localEndpoint") : t("settings.models.apiEndpoint")} value={editor.endpoint} onChange={(endpoint) => setEditor({ ...editor, endpoint })} placeholder={editor.driver === "llamacpp" ? t("settings.models.localEndpointPlaceholder") : t("settings.models.apiEndpointPlaceholder")} />
       {needsSecret ? <Field label={t("settings.models.apiKey")} value={editor.secret} onChange={(secret) => setEditor({ ...editor, secret })} placeholder={editor.originalAlias ? t("settings.models.apiKeyKeepEmpty") : t("settings.models.apiKeyPlaceholder")} secure /> : null}
+      <Field
+        label={t("settings.models.contextWindow")}
+        value={editor.contextWindow ? String(editor.contextWindow) : ""}
+        onChange={(val) => {
+          const num = parseInt(val.replace(/[^0-9]/g, ""), 10);
+          setEditor({ ...editor, contextWindow: isNaN(num) ? null : num });
+        }}
+        placeholder={t("settings.models.contextWindowPlaceholder")}
+      />
       <Toggle label={t("settings.models.supportsVision")} detail={t("settings.models.supportsVisionDetail")} value={editor.supportsVision} onChange={(supportsVision) => setEditor({ ...editor, supportsVision })} />
       <Toggle label={t("settings.models.setDefaultModel")} detail={t("settings.models.setDefaultModelDetail")} value={editor.setAsDefault} onChange={(setAsDefault) => setEditor({ ...editor, setAsDefault })} />
       <View style={styles.actions}><AppPressable style={styles.secondary} onPress={onCancel}><Text style={styles.secondaryText}>{t("common.cancel")}</Text></AppPressable><AppPressable disabled={working} style={styles.primarySmall} onPress={() => void onSave()}>{working ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.primaryText}>{t("settings.common.checkAndSave")}</Text>}</AppPressable></View>

@@ -113,9 +113,9 @@ class KnoaAgentRuntime(AgentRuntime):
         max_iterations: int = 8,
         max_tool_calls: int = 50,
         max_output_tokens: int = 1024,
-        temperature: float = 0.2,
-        context_window: int = 8192,
-        clock: Callable[[], float] = time.time,
+    temperature: float = 0.2,
+    context_window: int = 65536,
+    clock: Callable[[], float] = time.time,
         turn_id_factory: Callable[[], str] | None = None,
         tool_inventory: ToolInventory | None = None,
         agent_id: str = "knoa",
@@ -866,8 +866,9 @@ class KnoaAgentRuntime(AgentRuntime):
             "occurred_at": self._clock(),
         }
 
-    @staticmethod
+    @classmethod
     def _checkpoint_messages(
+        cls,
         checkpoint: ContextCheckpoint | None,
     ) -> list[dict[str, Any]]:
         if checkpoint is None:
@@ -877,7 +878,21 @@ class KnoaAgentRuntime(AgentRuntime):
             isinstance(message, dict) for message in messages
         ):
             raise RuntimeError("Knoa Agent checkpoint is invalid")
-        return [dict(message) for message in messages]
+        # Prune any historical runtime_context user messages to prevent
+        # multi-turn cumulative bloating and maintain clean immutable history
+        return [
+            dict(message) for message in messages
+            if not cls._is_runtime_context_message(message)
+        ]
+
+    @staticmethod
+    def _is_runtime_context_message(message: dict[str, Any]) -> bool:
+        if message.get("role") != "user":
+            return False
+        content = message.get("content")
+        if isinstance(content, str):
+            return content.strip().startswith("<runtime_context>")
+        return False
 
     @staticmethod
     def _durable_user_message(request: RuntimeTurnRequest) -> dict[str, Any]:
@@ -980,17 +995,21 @@ class KnoaAgentRuntime(AgentRuntime):
         summary: str,
         covered_messages: int,
     ) -> None:
-        serialized = json.dumps(messages, ensure_ascii=False, sort_keys=True, default=str)
+        clean_messages = [
+            m for m in messages
+            if not self._is_runtime_context_message(m)
+        ]
+        serialized = json.dumps(clean_messages, ensure_ascii=False, sort_keys=True, default=str)
         checkpoint = ContextCheckpoint(
             runtime_session_ref=request.session.runtime_session_ref,
             state_version=self._STATE_VERSION,
-            source_cursor=covered_messages + len(messages),
+            source_cursor=covered_messages + len(clean_messages),
             agent_config_digest=hashlib.sha256(
                 self._system_prompt.encode("utf-8")
             ).hexdigest(),
             model_context_digest=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
             payload={
-                "messages": messages,
+                "messages": clean_messages,
                 "summary": summary,
                 "covered_messages": covered_messages,
             },

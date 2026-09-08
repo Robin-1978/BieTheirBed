@@ -24,8 +24,8 @@ class _Sessions:
     def __init__(self) -> None:
         self.calls = []
 
-    def create(self, principal_id: str, *, activate: bool = True) -> RuntimeScope:
-        self.calls.append((principal_id, activate))
+    def create(self, principal_id: str, *, activate: bool = True, agent_id: str = "knoa") -> RuntimeScope:
+        self.calls.append((principal_id, activate, agent_id))
         return RuntimeScope(principal_id=principal_id, session_handle="detached-a")
 
 
@@ -232,7 +232,7 @@ async def test_create_task_uses_detached_session_and_stable_task_definition() ->
         launch={"kind": "immediate"},
     )
 
-    assert sessions.calls == [("personal:owner", False)]
+    assert sessions.calls == [("personal:owner", False, "knoa")]
     assert executions.created[0][1]["goal"] == "整理资料"
     assert result["task_id"] == "task-a"
     assert result["execution_id"] == "execution-a"
@@ -264,6 +264,28 @@ async def test_create_task_builds_one_time_launch_policy() -> None:
         "at": "2030-01-02T10:30:00Z",
     }
     assert result["next_fire_at"] == "2030-01-02T10:30:00Z"
+
+
+@pytest.mark.asyncio
+async def test_create_task_assigns_specified_agent_id() -> None:
+    sessions = _Sessions()
+    tasks = _Executions()
+    schedules = _Schedules()
+    tool = CreateTaskTool(sessions, tasks, schedules)
+
+    result = await tool.execute_scoped(
+        RuntimeScope(principal_id="personal:owner", session_handle="chat-a"),
+        title="Morning report",
+        goal="每日财经早报",
+        agent_id="researcher",
+        launch={"kind": "cron", "cron": "0 9 * * *", "timezone": "Asia/Shanghai"},
+    )
+
+    assert result["task_id"] == "task-a"
+    # Ensure detached session was created with agent_id="researcher"
+    assert sessions.calls[0] == ("personal:owner", False, "researcher")
+    # Ensure task definition was created with agent_id="researcher"
+    assert tasks.created[0][1]["agent_id"] == "researcher"
 
 
 @pytest.mark.asyncio

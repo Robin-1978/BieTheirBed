@@ -141,7 +141,7 @@ def test_coder_agent_registered_in_catalog() -> None:
     assert "glob_files" in coder.allowed_platform_tools
     assert "run_command" in coder.allowed_platform_tools
 
-    # Test researcher agent is registered and has minimal toolset
+    # Test researcher agent is registered and has specialized toolset
     assert "researcher" in catalog.agents
     researcher = catalog.agents["researcher"]
     assert researcher.enabled is True
@@ -149,9 +149,10 @@ def test_coder_agent_registered_in_catalog() -> None:
     assert "web_search" in researcher.allowed_platform_tools
     assert "web_fetch" in researcher.allowed_platform_tools
     assert "read_artifact" in researcher.allowed_platform_tools
+    assert "notify" in researcher.allowed_platform_tools
     assert "run_command" not in researcher.allowed_platform_tools
     assert "write_file" not in researcher.allowed_platform_tools
-    assert researcher.platform_capability_ceiling == frozenset({"network"})
+    assert researcher.platform_capability_ceiling == frozenset({"network", "desktop_control"})
 
     # Test worker agent has full composite toolset with strict delegation disabled
     assert "worker" in catalog.agents
