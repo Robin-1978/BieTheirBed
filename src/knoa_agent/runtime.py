@@ -602,6 +602,38 @@ class KnoaAgentRuntime(AgentRuntime):
                         }
                         model_messages.append(result_message)
                         durable_messages.append(result_message)
+                        if (
+                            proposed.name == "image_inspect"
+                            and (
+                                str(result.status) != "completed"
+                                or (
+                                    isinstance(result.output, dict)
+                                    and bool(result.output.get("error"))
+                                )
+                            )
+                        ):
+                            # Do not let a failed inspection spin through all
+                            # iterations and duplicate its error into history.
+                            # Persist one bounded result so a later turn can
+                            # retry after connectivity/configuration is fixed.
+                            if not saved_checkpoint and durable_messages:
+                                await self._save_aborted_turn_checkpoint(
+                                    request,
+                                    checkpoint,
+                                    durable_messages,
+                                    summary=summary,
+                                    covered_messages=covered_messages,
+                                    reason="image_inspect_failed",
+                                    partial_content=last_meaningful_content,
+                                )
+                                saved_checkpoint = True
+                            yield TurnFinished(
+                                **self._event_base(request, runtime_turn_ref),
+                                status="failed",
+                                error_code="image_inspect_failed",
+                            )
+                            terminal_emitted = True
+                            return
                         verify_call = self._gui_verification_call(
                             tool_name=str(proposed.name),
                             tool_args=dict(proposed.arguments),
@@ -957,6 +989,10 @@ class KnoaAgentRuntime(AgentRuntime):
                             "type": "image",
                             "image_url": f"data:{media_type};base64,{encoded}",
                             "media_type": media_type,
+                            # Preserve dimensions for accurate, bounded
+                            # image-token estimation in native vision turns.
+                            "width": int(content.get("width", 0) or 0),
+                            "height": int(content.get("height", 0) or 0),
                         }
                     )
                     if isinstance(part, ArtifactPart):

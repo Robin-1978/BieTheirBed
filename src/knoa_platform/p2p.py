@@ -58,7 +58,9 @@ def build_ice_servers(
 ) -> list[RTCIceServer]:
     if RTCIceServer is None:
         return []
-    if configured is not None:
+    # ``[]`` is the config model's default for "unset".  Treat it like
+    # ``None`` so a default/environment STUN or TURN set remains available.
+    if configured:
         servers: list[RTCIceServer] = []
         for item in configured:
             if isinstance(item, dict) and "urls" in item:
@@ -69,7 +71,8 @@ def build_ice_servers(
                         credential=item.get("credential"),
                     )
                 )
-        return servers
+        if servers:
+            return servers
 
     servers: list[RTCIceServer] = []
     env_servers = os.environ.get("KNOA_ICE_SERVERS")
@@ -630,7 +633,7 @@ async def _send_json(channel: Any, message: dict[str, Any]) -> None:
 async def _wait_for_ice_gathering(
     peer: RTCPeerConnection,
     *,
-    timeout: float = 1.2,
+    timeout: float = 3.0,
 ) -> None:
     if peer.iceGatheringState == "complete":
         return

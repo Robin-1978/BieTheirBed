@@ -65,8 +65,8 @@ const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
 const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
-const P2P_ICE_GATHERING_TIMEOUT_MS = 1_200;
-const P2P_CHANNEL_OPEN_TIMEOUT_MS = 2_500;
+const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
+const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
 const TRANSPORT_READY_WAIT_TIMEOUT_MS = 1_000;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
@@ -449,7 +449,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         this.setP2PDiagnostic("ready");
       }
     })().catch((error) => {
-      this.p2pRetryAfter = Date.now() + 180_000;
+      this.p2pRetryAfter = Date.now() + 60_000;
       this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
     }).finally(() => {
       if (this.upgradePromise === pending) this.upgradePromise = null;

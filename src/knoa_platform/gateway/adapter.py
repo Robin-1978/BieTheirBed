@@ -708,7 +708,11 @@ class SecureGatewayAdapter(
             TransportHealthMiddleware,
             health=self._transport_health,
         )
-        self._p2p = P2PServer(self.app, ice_servers=config.ice_servers)
+        # An empty list means "not configured".  Passing [] through to
+        # aiortc disables all STUN/TURN candidates and makes P2P work only on
+        # the same host/LAN.  Let P2PServer resolve environment/default ICE
+        # servers until an explicit non-empty configuration is supplied.
+        self._p2p = P2PServer(self.app, ice_servers=config.ice_servers or None)
         self._node_hub = NodeHubService(
             self._node_hub_store,
             self._node_identity,
