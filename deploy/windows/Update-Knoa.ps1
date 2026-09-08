@@ -186,6 +186,24 @@ if (-not (Test-Administrator)) {
 
 $updateLogRoot = Join-Path $env:ProgramData "Knoa\Logs\Updates"
 New-Item -ItemType Directory -Force -Path $updateLogRoot | Out-Null
+
+# Auto-prune older update transcripts, keeping the most recent 10 logs and dropping older than 14 days
+try {
+    $existingLogs = Get-ChildItem -Path $updateLogRoot -Filter "update-*.log" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if ($existingLogs -and $existingLogs.Count -gt 10) {
+        $cutoffDate = (Get-Date).AddDays(-14)
+        $candidates = $existingLogs | Select-Object -Skip 10
+        foreach ($staleLog in $candidates) {
+            if ($staleLog.LastWriteTime -lt $cutoffDate) {
+                Remove-Item -LiteralPath $staleLog.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+} catch {
+    # Pruning failure must never block update
+}
+
 Start-Transcript -Path (Join-Path $updateLogRoot ("update-" + [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss") + ".log")) | Out-Null
 
 $state = $null

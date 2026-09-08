@@ -125,3 +125,33 @@ async def test_gateway_android_release_uses_public_immutable_byte_ranges(
     assert ranged.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert ranged.headers["x-content-type-options"] == "nosniff"
     assert wrong_digest.status_code == 404
+
+
+def test_android_release_repository_prunes_older_versions(tmp_path) -> None:
+    repository = AndroidReleaseRepository(tmp_path / "releases")
+    apk = tmp_path / "knoa.apk"
+    _apk(apk, b"APK-DATA")
+
+    # Publish versions 1, 2, 3, 4 with keep_history=2
+    for code in (1, 2, 3, 4):
+        repository.publish(
+            apk,
+            version_name=f"0.{code}.0",
+            version_code=code,
+            keep_history=2,
+        )
+
+    # Only versions 3 and 4 should remain
+    assert repository.list_version_codes() == (3, 4)
+    assert not (tmp_path / "releases" / "knoa-1.apk").exists()
+    assert not (tmp_path / "releases" / "1.json").exists()
+    assert not (tmp_path / "releases" / "knoa-2.apk").exists()
+    assert not (tmp_path / "releases" / "2.json").exists()
+    assert (tmp_path / "releases" / "knoa-3.apk").exists()
+    assert (tmp_path / "releases" / "3.json").exists()
+    assert (tmp_path / "releases" / "knoa-4.apk").exists()
+    assert (tmp_path / "releases" / "4.json").exists()
+    assert repository.latest().version_code == 4
+    assert repository.get(4).version_code == 4
+    assert repository.get(3).version_code == 3
+
