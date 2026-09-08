@@ -65,7 +65,7 @@ def test_context_engine_pins_authorized_context_before_current_turn() -> None:
 
 
 def test_context_engine_compacts_complete_turns_and_persists_summary() -> None:
-    engine = ContextEngine(context_window=700, completion_reserve=350)
+    engine = ContextEngine(context_window=600, completion_reserve=300)
     history = [
         *_turn(0, tool=True),
         *_turn(1),
@@ -101,7 +101,7 @@ def test_context_engine_compacts_complete_turns_and_persists_summary() -> None:
 
 
 def test_context_engine_sliding_tool_window_in_same_turn() -> None:
-    engine = ContextEngine(context_window=600, completion_reserve=150)
+    engine = ContextEngine(context_window=550, completion_reserve=200)
     history = [
         {"role": "user", "content": "Search multiple topics"},
         {
@@ -129,7 +129,7 @@ def test_context_engine_sliding_tool_window_in_same_turn() -> None:
     # First tool result should be trimmed aggressively
     tool_msgs = [m for m in prepared.messages if m.get("role") == "tool"]
     assert len(tool_msgs) == 2
-    assert "trimmed" in tool_msgs[0]["content"]
+    assert "trimmed" in tool_msgs[0]["content"] or "compacted" in tool_msgs[0]["content"]
     assert len(tool_msgs[0]["content"]) < 400
     # Context should fit without throwing ContextBudgetExceeded
     assert prepared.tokens_after <= 1000

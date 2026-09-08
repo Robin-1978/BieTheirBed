@@ -262,9 +262,11 @@ class AppConfig(BaseModel):
                     "web_search",
                     "web_fetch",
                     "read_artifact",
+                    "notify",
                 }),
                 platform_capability_ceiling=frozenset({
                     "network",
+                    "desktop_control",
                 }),
                 runtime_limits=AgentRuntimeLimits(
                     max_iterations=20,

@@ -11,6 +11,7 @@ export type ModelEditorValue = {
   secretRef: string;
   secretVersion: number;
   supportsVision: boolean;
+  contextWindow?: number | null;
   setAsDefault: boolean;
 };
 
@@ -61,6 +62,7 @@ export function upsertModel(
     provider: value.providerId,
     model: value.modelId.trim(),
     supports_vision: value.supportsVision,
+    context_window: value.contextWindow ? Number(value.contextWindow) : null,
   };
   if (value.setAsDefault) document.default_model = value.alias;
   return document;

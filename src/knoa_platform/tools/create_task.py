@@ -105,10 +105,14 @@ class CreateTaskTool(ToolBase):
         except LaunchPolicyError as exc:
             return {"error": str(exc)}
         request_key = secrets.token_urlsafe(18)
+        raw_agent_id = str(kwargs.get("agent_id") or "").strip()
+        target_agent_id = raw_agent_id if raw_agent_id else "knoa"
+
         detached = await asyncio.to_thread(
             self._sessions.create,
             scope.principal_id,
             activate=False,
+            agent_id=target_agent_id,
         )
         try:
             task, execution, provider = await self._lifecycle.create_definition(
@@ -117,6 +121,7 @@ class CreateTaskTool(ToolBase):
                 title=title,
                 goal=goal,
                 launch_policy=resolved.policy,
+                agent_id=target_agent_id,
             )
         except Exception:
             logger.exception("Failed to create the Task and its launch provider")
@@ -157,6 +162,13 @@ class CreateTaskTool(ToolBase):
                         "minLength": 1,
                         "maxLength": 200,
                         "description": "A short user-facing Task title.",
+                    },
+                    "agent_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional specialized agent ID to execute this Task "
+                            "(e.g. 'researcher' for web reports, 'coder' for code tasks, 'knoa' for default)."
+                        ),
                     },
                     "launch": launch_schema(),
                 },
