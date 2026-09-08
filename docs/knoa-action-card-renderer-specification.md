@@ -63,6 +63,156 @@ sequenceDiagram
 
 ---
 
+### 1.4 实战演练：两者协同联动的端到端真实案例 (End-to-End Collaboration Walkthrough)
+
+以下以工业机器人真实段错误工单（如 `TESTISSUE-125380`）为例，展示 Action Card 成果交付与底层 Permission Approval 安全放行的完整全生命周期：
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent as Coder Agent / Jira MCP
+    participant Core as Knoa Core Engine
+    participant Reviewer as 安全审批审查器 (Approval Reviewer)
+    participant Client as 移动端通用 App
+    participant Human as 用户 (人类主权)
+
+    Note over Agent: 1. 深度分析现场日志，完成代码比对与定位
+    Agent->>Core: 生成上层业务物料: ActionCard
+    Core->>Client: 下发 ActionCard (Markdown + CodeDiff + 交互表单 + 动作按钮)
+    Note over Client,Human: 2. 人类检视完整证据链与代码 Diff
+    Human->>Client: 填写处置意见：“已确认硬件断电，系空指针崩溃”<br/>点击按钮【确认回写工单并流转】
+    Client->>Core: 提交 invoke_action(tool="jira.update_issue", args={...})
+    
+    Note over Core,Reviewer: 3. 底层安全门禁拦截与权限审批
+    Core->>Reviewer: 评估写操作敏感性 (Write Protection Policy)
+    Reviewer-->>Core: 命中高危外部副作用策略 (Risk: Medium, Decision: Escalate)
+    Core->>Client: 下发拦截式安全审批卡片: ChatApprovalSnapshot
+    Note over Client,Human: 4. 人类核对脱敏后的真实调用参数与安全规则
+    Human->>Client: 点击【允许执行 (Allow)】
+    Client->>Core: 提交 resolve_approval(approved=true)
+    
+    Note over Core: 5. 确定性放行与闭环
+    Core->>Agent: 放行工具执行，真正向 Jira API 发送写请求
+    Agent-->>Core: 写操作完成 (HTTP 200)
+    Core-->>Client: 推送卡片状态更新: status="executed"
+    Note over Client: ActionCard 变为只读终态，呈现绿色勾选徽标
+```
+
+#### 1.4.1 代码示例：Agent 如何用 ActionCardBuilder 组装业务交付物料
+
+```python
+from knoa_platform.action_card import ActionCardBuilder, ActionCardLevel
+
+def build_jira_investigation_card(issue_key: str, robot_sn: str, diff_patch: str) -> dict:
+    card = (
+        ActionCardBuilder(
+            title="现场机器人段错误排查结论与回写草稿",
+            level=ActionCardLevel.CRITICAL,
+        )
+        .set_subtitle(f"工单: {issue_key} · 机器SN: {robot_sn}")
+        .set_source(plugin_name="jira", agent_name="coder")
+        .add_callout(
+            "在 motion_controller.cc:88 捕获到 SIGSEGV 段错误，伴随电机通信超时异常。",
+            level="error",
+        )
+        .add_markdown(
+            "### 三段式排查报告 (草稿)\n"
+            "1. **现象描述**：机器人上位机在乘梯建图时发生崩溃，进程退出重连；\n"
+            "2. **根因分析**：未对电机反馈指针作判空校验，空指针解引用引发段错误；\n"
+            "3. **解决方案**：增加判空保护与通信超时重试机制。\n"
+        )
+        .add_key_value([
+            {"key": "影响版本", "value": "v2.6.4-rc1", "style": "code"},
+            {"key": "代码责任人", "value": "robotdev@gs-robot.com", "style": "bold"},
+            {"key": "提交记录", "value": "4e6d92a: feat(pnc): add timeout check", "style": "muted"},
+        ])
+        .add_code_diff(
+            filename="src/navigation/motion_controller.cc",
+            language="cpp",
+            unified_diff=diff_patch,
+        )
+        .add_input(
+            id="human_comment",
+            label="补充处置说明 (将随工单一同记录)",
+            input_type="textarea",
+            placeholder="现场已确认电机硬件断电无损...",
+            required=False,
+        )
+        .add_action_button(
+            id="btn_writeback",
+            label="确认回写工单并流转",
+            style="primary",
+            tool_name="jira.update_issue",
+            arguments={"issue_key": issue_key, "action": "writeback_and_resolve"},
+            confirm_dialog={
+                "title": "回写确认",
+                "message": f"确定将上述三段式结论回写到 {issue_key} 并流转状态吗？",
+            },
+            include_form_inputs=True,
+        )
+        .add_action_button(
+            id="btn_dismiss",
+            label="暂不处理",
+            style="outline",
+            action_type="dismiss",
+        )
+        .build()
+    )
+    return card.to_dict()
+```
+
+#### 1.4.2 数据契约对比：ActionCard vs ChatApprovalSnapshot
+
+- **上层 ActionCard Payload (业务看板，由前端通用渲染)**：
+```json
+{
+  "schema_version": "1.0",
+  "card_id": "card_diag_125380",
+  "title": "现场机器人段错误排查结论与回写草稿",
+  "level": "critical",
+  "status": "pending",
+  "source": { "plugin_name": "jira", "agent_name": "coder", "created_at": 1788889900 },
+  "blocks": [
+    { "type": "callout", "level": "error", "text": "在 motion_controller.cc:88 捕获到 SIGSEGV 段错误" },
+    { "type": "markdown", "content": "### 三段式排查报告 (草稿)\n1. 现象描述..." },
+    { "type": "code_diff", "filename": "motion_controller.cc", "unified_diff": "@@ -87,2 +87,5 @@..." }
+  ],
+  "inputs": [
+    { "id": "human_comment", "label": "补充处置说明", "input_type": "textarea" }
+  ],
+  "actions": [
+    { "id": "btn_writeback", "label": "确认回写工单并流转", "style": "primary", "action_type": "invoke_tool", "tool_name": "jira.update_issue" }
+  ]
+}
+```
+
+- **底层 ChatApprovalSnapshot Payload (安全拦截，由平台安全核心接管)**：
+```json
+{
+  "approval_id": "appr_77a91bf",
+  "tool_name": "jira.update_issue",
+  "arguments": {
+    "issue_key": "TESTISSUE-125380",
+    "action": "writeback_and_resolve",
+    "human_comment": "已确认硬件断电，系空指针崩溃"
+  },
+  "display": {
+    "tool_title": "Jira 工单回写与状态流转",
+    "target": "TESTISSUE-125380",
+    "risk_level": "medium",
+    "summary": "向 Jira 工单写入三段式排查报告并将工单流转至待验证",
+    "reviewer_decision": "escalate",
+    "reviewer_reason": "检测到对生产系统存在外部副作用的写操作，必须经由人类二次放行"
+  }
+}
+```
+
+**结论**：
+- **Action Card** 是用户看到的**完整业务案卷与交互工作台**；
+- **ChatApproval** 是当用户在工作台上按下扳机后，系统底层的**安全防走火保险栓**。两者层级分明、互不冗余、紧密咬合。
+
+---
+
 ## 2. Action Card 协议核心元语 (UI Primitives Specification)
 
 Action Card 由四大通用交互元语构成，客户端必须严格按照本节规范进行组件映射与布局渲染（代码契约见 `src/knoa_platform/action_card/models.py` 与 `src/knoa_platform/action_card/schema.py`）：
