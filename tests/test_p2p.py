@@ -159,3 +159,9 @@ def test_ice_servers_configuration(monkeypatch) -> None:
     assert serialize_ice_servers(servers) == [
         {"urls": ["turn:relay.example.com:3478"], "username": "knoa_user", "credential": "knoa_pass"}
     ]
+
+
+def test_unconnected_peer_watchdog_allows_slow_ice() -> None:
+    # ICE checks on mobile/NATed networks can legitimately take longer than
+    # ten seconds.  A shorter watchdog closes the peer before ICE can finish.
+    assert p2p_module._UNCONNECTED_PEER_CLEANUP_TIMEOUT >= 30.0

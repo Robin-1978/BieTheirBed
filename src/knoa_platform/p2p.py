@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 _CHUNK_BYTES = 48 * 1024
 _MAX_BODY_BYTES = 64 * 1024 * 1024
 _BUFFER_HIGH_WATER = 1024 * 1024
+_UNCONNECTED_PEER_CLEANUP_TIMEOUT = 60.0
 _STUN_SERVERS = (
     []
     if RTCIceServer is None
@@ -217,13 +218,30 @@ class P2PServer:
             _require_p2p()
             peer = RTCPeerConnection(RTCConfiguration(iceServers=self._ice_servers))
             self._peers.add(peer)
+            cleanup_task: asyncio.Task[None] | None = None
+
+            async def close_peer(reason: str) -> None:
+                """Remove and close a peer exactly once.
+
+                ICE can still have scheduled STUN retransmits when a peer is
+                closed.  Cancelling the watchdog here prevents it from racing
+                the state callbacks and avoids closing a connection while it
+                is still checking candidates.
+                """
+                nonlocal cleanup_task
+                self._peers.discard(peer)
+                if cleanup_task is not None and cleanup_task is not asyncio.current_task():
+                    cleanup_task.cancel()
+                    cleanup_task = None
+                if peer.connectionState != "closed":
+                    logger.debug("Closing P2P peer reason=%s", reason)
+                    await peer.close()
 
             @peer.on("connectionstatechange")
             async def connection_state_change() -> None:
                 if peer.connectionState in {"failed", "closed", "disconnected"}:
                     logger.info("P2P peer closed connection_state=%s", peer.connectionState)
-                    self._peers.discard(peer)
-                    await peer.close()
+                    await close_peer(f"connection_state={peer.connectionState}")
 
             @peer.on("iceconnectionstatechange")
             async def ice_connection_state_change() -> None:
@@ -232,8 +250,7 @@ class P2PServer:
                         "P2P peer closed ice_connection_state=%s",
                         peer.iceConnectionState,
                     )
-                    self._peers.discard(peer)
-                    await peer.close()
+                    await close_peer(f"ice_connection_state={peer.iceConnectionState}")
 
             @peer.on("datachannel")
             def data_channel(channel: Any) -> None:
@@ -250,13 +267,18 @@ class P2PServer:
                     )
 
             async def _auto_cleanup_unconnected(p: RTCPeerConnection) -> None:
-                await asyncio.sleep(10.0)
-                if p.connectionState != "connected":
-                    logger.debug("Cleaning up unestablished P2P peer after 10s timeout")
-                    self._peers.discard(p)
-                    await p.close()
+                try:
+                    await asyncio.sleep(_UNCONNECTED_PEER_CLEANUP_TIMEOUT)
+                    if p.connectionState != "connected":
+                        logger.debug(
+                            "Cleaning up unestablished P2P peer after %.0fs timeout",
+                            _UNCONNECTED_PEER_CLEANUP_TIMEOUT,
+                        )
+                        await close_peer("unconnected_timeout")
+                except asyncio.CancelledError:
+                    return
 
-            asyncio.create_task(
+            cleanup_task = asyncio.create_task(
                 _auto_cleanup_unconnected(peer),
                 name="knoa-p2p-auto-cleanup",
             )
@@ -285,8 +307,7 @@ class P2PServer:
                 self._last_error,
             )
             if peer is not None:
-                self._peers.discard(peer)
-                await peer.close()
+                await close_peer("answer_failed")
             raise
 
     async def close(self) -> None:
