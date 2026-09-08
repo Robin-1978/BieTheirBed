@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -50,6 +51,69 @@ _STUN_SERVERS = (
         RTCIceServer(urls="stun:stun1.l.google.com:19302"),
     ]
 )
+
+
+def build_ice_servers(
+    configured: list[dict[str, Any]] | None = None,
+) -> list[RTCIceServer]:
+    if RTCIceServer is None:
+        return []
+    if configured is not None:
+        servers: list[RTCIceServer] = []
+        for item in configured:
+            if isinstance(item, dict) and "urls" in item:
+                servers.append(
+                    RTCIceServer(
+                        urls=item["urls"],
+                        username=item.get("username"),
+                        credential=item.get("credential"),
+                    )
+                )
+        return servers
+
+    servers: list[RTCIceServer] = []
+    env_servers = os.environ.get("KNOA_ICE_SERVERS")
+    if env_servers:
+        try:
+            parsed = json.loads(env_servers)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict) and "urls" in item:
+                        servers.append(
+                            RTCIceServer(
+                                urls=item["urls"],
+                                username=item.get("username"),
+                                credential=item.get("credential"),
+                            )
+                        )
+        except Exception:
+            pass
+    if not servers:
+        turn_url = os.environ.get("KNOA_TURN_URL")
+        if turn_url:
+            servers.append(
+                RTCIceServer(
+                    urls=turn_url,
+                    username=os.environ.get("KNOA_TURN_USERNAME"),
+                    credential=os.environ.get("KNOA_TURN_CREDENTIAL"),
+                )
+            )
+    if not servers:
+        servers = list(_STUN_SERVERS)
+    return servers
+
+
+def serialize_ice_servers(servers: list[RTCIceServer]) -> list[dict[str, Any]]:
+    result = []
+    for s in servers:
+        urls = s.urls if isinstance(s.urls, (list, tuple)) else [s.urls]
+        item: dict[str, Any] = {"urls": urls}
+        if s.username:
+            item["username"] = s.username
+        if s.credential:
+            item["credential"] = s.credential
+        result.append(item)
+    return result
 _FORWARDED_REQUEST_HEADERS = {
     "accept",
     "authorization",
@@ -106,13 +170,17 @@ def _require_p2p() -> None:
 class P2PServer:
     """Answer WebRTC offers and dispatch data-channel requests to one ASGI app."""
 
-    def __init__(self, app: Any) -> None:
+    def __init__(self, app: Any, *, ice_servers: list[dict[str, Any]] | None = None) -> None:
         self._app = app
+        self._ice_servers = build_ice_servers(ice_servers)
         self._peers: set[RTCPeerConnection] = set()
         self._offers_total = 0
         self._answers_total = 0
         self._last_error = ""
         self._last_failure_at = 0.0
+
+    def ice_servers_for_client(self) -> list[dict[str, Any]]:
+        return serialize_ice_servers(self._ice_servers)
 
     def status(self) -> dict[str, Any]:
         states: dict[str, int] = {}
@@ -144,7 +212,7 @@ class P2PServer:
         peer: RTCPeerConnection | None = None
         try:
             _require_p2p()
-            peer = RTCPeerConnection(RTCConfiguration(iceServers=_STUN_SERVERS))
+            peer = RTCPeerConnection(RTCConfiguration(iceServers=self._ice_servers))
             self._peers.add(peer)
 
             @peer.on("connectionstatechange")
@@ -362,7 +430,8 @@ class P2PServer:
 class P2PClient:
     """Initiate one reusable WebRTC data channel and expose bounded HTTP RPC."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, ice_servers: list[dict[str, Any]] | None = None) -> None:
+        self._ice_servers = build_ice_servers(ice_servers)
         self._peer: RTCPeerConnection | None = None
         self._channel: Any | None = None
         self._pending: dict[str, dict[str, Any]] = {}
@@ -387,7 +456,7 @@ class P2PClient:
         if self.connected:
             return
         await self.close()
-        peer = RTCPeerConnection(RTCConfiguration(iceServers=_STUN_SERVERS))
+        peer = RTCPeerConnection(RTCConfiguration(iceServers=self._ice_servers))
         channel = peer.createDataChannel("knoa-http-v1", ordered=True)
         self._peer = peer
         self._channel = channel

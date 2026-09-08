@@ -387,6 +387,7 @@ class AppConfig(BaseModel):
     gateway_public_url: str = ""
     gateway_tls_cert_file: str = ""
     gateway_tls_key_file: str = ""
+    ice_servers: list[dict[str, Any]] = Field(default_factory=list)
     capability_mcp_host: str = "127.0.0.1"
     capability_mcp_port: int = 9530
     feishu_enabled: bool = False
@@ -881,6 +882,7 @@ def _env_overrides() -> dict[str, Any]:
         ),
         "KNOA_SUPPORTS_VISION": ("supports_vision", bool),
         "KNOA_VISION_MODEL": ("vision_model", str),
+        "KNOA_ICE_SERVERS": ("ice_servers", "json"),
     }
     overrides: dict[str, Any] = {}
     for env_key, (field_name, field_type) in mapping.items():
@@ -889,6 +891,8 @@ def _env_overrides() -> dict[str, Any]:
             try:
                 if field_type is bool:
                     overrides[field_name] = raw.strip().lower() in ("1", "true", "yes", "y", "on")
+                elif field_type == "json":
+                    overrides[field_name] = json.loads(raw)
                 else:
                     overrides[field_name] = field_type(raw)
             except (ValueError, TypeError):

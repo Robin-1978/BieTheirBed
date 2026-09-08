@@ -115,3 +115,66 @@ class TestShellStderr:
         t = ShellTool()
         result = await t.execute(command="Write-Error 'test error'")
         assert result.get("returncode", 0) != 0 or "error" in result.get("stderr", "").lower()
+
+
+class TestShellReadOnlyPolicy:
+    def test_read_only_inspection_commands(self):
+        from knoa_platform.tools.base import ToolEffect, ToolRisk
+        from knoa_platform.tools.shell import is_read_only_shell_command
+
+        t = ShellTool()
+
+        read_commands = [
+            "ls -la /home/robin/.local/share/knoa/ 2>/dev/null; echo ====; find /home/robin/.local/share/knoa -maxdepth 3 -type d 2>/dev/null | head -40",
+            "find /home/robin/.local/share/knoa -maxdepth 4 \\( -iname \"*.log\" -o -iname \"*.db\" \\) 2>/dev/null | head -50",
+            "echo ====CONTROL_DB_TABLES====; sqlite3 /home/robin/.local/share/knoa/hosted-hub/control.db \".tables\" 2>&1",
+            "sqlite3 -header -column /home/robin/.local/share/knoa/hosted-hub/tenants/ws_8bl_VSJVTyBYHu37Aq7tGwKF/hub.db \"SELECT * FROM nodes;\" 2>&1",
+            "sqlite3 /path/db.sqlite \".schema nodes\" 2>&1; echo ====DEPLOYMENTS====; sqlite3 -header -column /path/db.sqlite \"SELECT * FROM deployments;\" 2>&1 | head -40",
+            "cat /tmp/test.log | grep -i error",
+            "git status",
+            "git log -n 5",
+            "git diff HEAD~1",
+            "ps aux | grep knoa",
+            "df -h",
+            "uptime",
+            "tail -n 100 /tmp/file.log",
+        ]
+
+        for cmd in read_commands:
+            assert is_read_only_shell_command(cmd) is True, f"Expected read-only for: {cmd}"
+            policy = t.policy_for({"command": cmd})
+            assert policy.effect == ToolEffect.READ_ONLY
+            assert policy.risk == ToolRisk.LOW
+            assert policy.requires_confirmation is False
+
+    def test_write_and_side_effect_commands_require_confirmation(self):
+        from knoa_platform.tools.base import ToolEffect, ToolRisk
+        from knoa_platform.tools.shell import is_read_only_shell_command
+
+        t = ShellTool()
+
+        write_commands = [
+            "rm -rf /tmp/test",
+            "sqlite3 db.sqlite \"INSERT INTO users VALUES (1);\"",
+            "sqlite3 db.sqlite \"DROP TABLE nodes;\"",
+            "sqlite3 db.sqlite \"UPDATE nodes SET name='x';\"",
+            "sqlite3 db.sqlite \"DELETE FROM nodes;\"",
+            "ls -la > /tmp/output.txt",
+            "echo hello > /tmp/file",
+            "find /tmp -delete",
+            "find /tmp -exec rm {} \\;",
+            "git commit -m test",
+            "git push origin master",
+            "echo $(rm -rf /)",
+            "echo `whoami`",
+            "curl -X POST https://example.com/api",
+            "systemctl restart knoa",
+            "",
+        ]
+
+        for cmd in write_commands:
+            assert is_read_only_shell_command(cmd) is False, f"Expected write/risky for: {cmd}"
+            policy = t.policy_for({"command": cmd})
+            assert policy.effect == ToolEffect.LOCAL_WRITE
+            assert policy.risk == ToolRisk.HIGH
+            assert policy.requires_confirmation is True

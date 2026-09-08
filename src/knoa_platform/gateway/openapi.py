@@ -83,6 +83,7 @@ from knoa_platform.gateway.protocol import (
     PairCompleteResponse,
     PauseTaskRequest,
     P2PAnswerResponse,
+    P2PIceServersResponse,
     P2POfferRequest,
     PreviewInvocationPolicyRequest,
     PrepareCapabilityRequest,
@@ -404,6 +405,16 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "200": _json_response("WebRTC answer", P2PAnswerResponse),
                         **_errors("400", "401", "415", "429", "503"),
+                    },
+                }
+            },
+            "/v1/p2p/ice-servers": {
+                "get": {
+                    "operationId": "getGatewayP2PIceServers",
+                    "security": bearer,
+                    "responses": {
+                        "200": _json_response("Configured WebRTC ICE and TURN servers", P2PIceServersResponse),
+                        **_errors("401", "429"),
                     },
                 }
             },

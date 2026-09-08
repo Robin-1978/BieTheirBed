@@ -56,5 +56,11 @@ class P2PRoutes:
             )
         return JSONResponse({"answer": answer})
 
+    async def _p2p_ice_servers(self, request: Request) -> JSONResponse:
+        authenticated = self._authorize(request, limit=60)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        return JSONResponse({"ice_servers": self._p2p.ice_servers_for_client()})
+
 
 __all__ = ["P2PRoutes"]

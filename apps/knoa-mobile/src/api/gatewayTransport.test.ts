@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bindingUsesHubEndpoint, p2pOfferHeaders, preferredTransport } from "./gatewayRouting";
+import { bindingUsesHubEndpoint, isPrivateNetworkUrl, p2pOfferHeaders, preferredTransport } from "./gatewayRouting";
 
 describe("Gateway transport routing", () => {
   it("routes a legacy Node binding through Relay when its endpoint became the Hosted Hub", () => {
@@ -35,5 +35,17 @@ describe("Gateway transport routing", () => {
     expect(preferredTransport({ lanReady: false, p2pReady: true, relayReady: true })).toBe("p2p");
     expect(preferredTransport({ lanReady: false, p2pReady: false, relayReady: true })).toBe("relay");
     expect(preferredTransport({ lanReady: false, p2pReady: false, relayReady: false })).toBe("direct");
+  });
+
+  it("identifies private network addresses correctly", () => {
+    expect(isPrivateNetworkUrl("http://localhost:9531")).toBe(true);
+    expect(isPrivateNetworkUrl("http://127.0.0.1:9531")).toBe(true);
+    expect(isPrivateNetworkUrl("http://10.12.10.63:9531")).toBe(true);
+    expect(isPrivateNetworkUrl("http://192.168.1.100:9531")).toBe(true);
+    expect(isPrivateNetworkUrl("http://172.20.0.5:9531")).toBe(true);
+
+    expect(isPrivateNetworkUrl("https://knoa.tinydotdot.com")).toBe(false);
+    expect(isPrivateNetworkUrl("https://node.example.com:9531")).toBe(false);
+    expect(isPrivateNetworkUrl("invalid-url")).toBe(false);
   });
 });
