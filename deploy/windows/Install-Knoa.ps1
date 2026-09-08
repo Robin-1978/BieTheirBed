@@ -154,6 +154,47 @@ function Stop-KnoaService([string]$ServiceId) {
     }
 }
 
+function Get-ListeningPids([int[]]$Ports) {
+    $owners = @{}
+    foreach ($port in $Ports) { $owners[$port] = @() }
+    foreach ($connection in (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)) {
+        $port = [int]$connection.LocalPort
+        if ($owners.ContainsKey($port)) { $owners[$port] += [int]$connection.OwningProcess }
+    }
+    return $owners
+}
+
+function Stop-KnoaPortOwners([int[]]$Ports) {
+    foreach ($entry in (Get-ListeningPids $Ports).GetEnumerator()) {
+        foreach ($ownerPid in ($entry.Value | Select-Object -Unique)) {
+            if ($ownerPid -le 0 -or $ownerPid -eq $PID) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+            $commandLine = [string]$process.CommandLine
+            $processName = [string]$process.Name
+            $executablePath = [string]$process.ExecutablePath
+            $isKnoaRelated = ($commandLine -and $commandLine -match "(?i)knoa|Run-Knoa") -or
+                ($processName -match "(?i)^python|^powershell|^conhost") -or
+                ($executablePath -and $executablePath -match "(?i)knoa")
+            if (-not $isKnoaRelated -and $commandLine) {
+                throw "Foreign process $ownerPid owns Knoa port $($entry.Key): $commandLine"
+            }
+            & taskkill.exe /F /T /PID $ownerPid 2>$null | Out-Null
+        }
+    }
+}
+
+function Wait-KnoaPortsReleased([int[]]$Ports, [int]$TimeoutSeconds = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        Stop-KnoaPortOwners $Ports
+        $owners = Get-ListeningPids $Ports
+        if (($owners.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum -eq 0) { return }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $detail = ($owners.GetEnumerator() | Where-Object { $_.Value.Count } | ForEach-Object { "$($_.Key):$($_.Value -join ',')" }) -join '; '
+    throw "Knoa ports were not released before installation: $detail"
+}
+
 function Install-KnoaP2PFirewallRule([string]$ProgramPath) {
     $ruleName = "KnoaNodeWebRtcP2P"
     Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue | `
@@ -306,13 +347,18 @@ $nodeWrapper = Join-Path $serviceRoot "KnoaNode\KnoaNode.exe"
 # processes before performing an in-place runtime update.
 if ($installHub) { Stop-KnoaService "KnoaHostedHub" }
 if ($installNode) { Stop-KnoaService "KnoaNode" }
+$lifecycleService = Get-Service -Name "KnoaHostLifecycle" -ErrorAction SilentlyContinue
+if ($lifecycleService) { Stop-KnoaService "KnoaHostLifecycle" }
 if ($installNode) {
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | `
         Where-Object {
             $_.CommandLine -like "*Run-KnoaDesktopCompanion.ps1*" -or
             $_.CommandLine -like "*knoa_platform.desktop_companion*"
         } | `
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        ForEach-Object {
+            & taskkill.exe /F /T /PID $_.ProcessId 2>$null | Out-Null
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
 }
 
 # Stray Knoa runtime and wrapper processes from an interrupted earlier update
@@ -327,16 +373,28 @@ for ($hop = 0; $cursor -and ($hop -lt 16) -and ($protectedProcessIds -notcontain
 }
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | `
     Where-Object {
-        $_.ExecutablePath -and
         ($protectedProcessIds -notcontains $_.ProcessId) -and (
-            $_.ExecutablePath.StartsWith($InstallRoot, [StringComparison]::OrdinalIgnoreCase) -or
-            $_.ExecutablePath.StartsWith($serviceRoot, [StringComparison]::OrdinalIgnoreCase)
+            ($_.ExecutablePath -and (
+                $_.ExecutablePath.StartsWith($InstallRoot, [StringComparison]::OrdinalIgnoreCase) -or
+                $_.ExecutablePath.StartsWith($serviceRoot, [StringComparison]::OrdinalIgnoreCase)
+            )) -or
+            ($_.CommandLine -and $_.CommandLine -match "(?i)knoa_platform|Run-Knoa|desktop_companion") -or
+            ($_.Name -match "(?i)^python" -and $_.CommandLine -match "(?i)knoa")
         )
     } | `
     ForEach-Object {
-        Write-Host "Stopping stray Knoa process $($_.ProcessId): $($_.ExecutablePath)"
+        Write-Host "Stopping stray Knoa process $($_.ProcessId): $($_.CommandLine)"
+        & taskkill.exe /F /T /PID $_.ProcessId 2>$null | Out-Null
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
+
+$portsToRelease = @()
+if ($installHub) { $portsToRelease += $HubPort, 9532 }
+if ($installNode) { $portsToRelease += $NodeCorePort, $NodeGatewayPort, $NodeMcpPort, 9541 }
+if ($sourceInstall) { $portsToRelease += 9533 }
+if ($portsToRelease.Count -gt 0) {
+    Wait-KnoaPortsReleased ($portsToRelease | Select-Object -Unique)
+}
 
 $legacyTaskNames = @()
 if ($installHub) { $legacyTaskNames += "Knoa Hosted Hub" }

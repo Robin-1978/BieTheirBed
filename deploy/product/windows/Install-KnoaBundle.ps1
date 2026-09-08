@@ -65,7 +65,12 @@ function Stop-KnoaPortOwners([int[]]$Ports) {
             if ($ownerPid -le 0 -or $ownerPid -eq $PID) { continue }
             $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
             $commandLine = [string]$process.CommandLine
-            if ($commandLine -and $commandLine -notmatch "(?i)knoa|Run-Knoa") {
+            $processName = [string]$process.Name
+            $executablePath = [string]$process.ExecutablePath
+            $isKnoaRelated = ($commandLine -and $commandLine -match "(?i)knoa|Run-Knoa") -or
+                ($processName -match "(?i)^python|^powershell|^conhost") -or
+                ($executablePath -and $executablePath -match "(?i)knoa")
+            if (-not $isKnoaRelated -and $commandLine) {
                 throw "Foreign process $ownerPid owns Knoa port $($entry.Key): $commandLine"
             }
             & taskkill.exe /F /T /PID $ownerPid 2>$null | Out-Null
