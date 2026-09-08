@@ -1035,6 +1035,7 @@ async def test_reference_server_runs_over_real_stdio_mcp(
         "jira.list_oss_objects",
         "jira.list_tempo_records",
         "jira.download_tempo_records",
+        "jira.analyze_local_logs",
     ]
 
 
@@ -1224,5 +1225,42 @@ async def test_enhanced_jira_tools_end_to_end(tmp_path: Path) -> None:
         assert sn_res.structured_content["issues"][0]["key"] == "PROJECT-100"
     finally:
         await app.jira.close()
+
+
+def test_local_log_analyzer_unpacks_and_finds_crashes(tmp_path: Path) -> None:
+    import io
+    import tarfile
+    from examples.jira_mcp_server.log_analyzer import analyze_directory_logs
+
+    evidence_dir = tmp_path / "evidence" / "SELLSERVIC-999"
+    evidence_dir.mkdir(parents=True)
+
+    log_content = (
+        "[2026-09-08 14:00:00] [INFO] System initialized successfully\n"
+        "[2026-09-08 14:01:23] [ERROR] [planner_core.cc:142] Failed to find valid trajectory\n"
+        "[2026-09-08 14:01:24] [FATAL] [motion_controller.cc:88] Motor feedback timeout!\n"
+        "[2026-09-08 14:01:25] *** Aborted at 1788888888 (unix time) ***\n"
+        "[2026-09-08 14:01:25] SIGSEGV (@0x0) received by PID 1234 stack trace:\n"
+        "[2026-09-08 14:01:25]     @ 0x7f8812345678 google::DumpStackTraceAndExit()\n"
+    ).encode("utf-8")
+
+    archive_path = evidence_dir / "robot_logs.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as tar:
+        tarinfo = tarfile.TarInfo(name="app/navigation.log")
+        tarinfo.size = len(log_content)
+        tar.addfile(tarinfo, io.BytesIO(log_content))
+
+    result = analyze_directory_logs(evidence_dir, auto_unpack=True)
+    assert result["status"] == "success"
+    assert result["unpacked_archives_count"] >= 1
+    assert result["crashes_count"] >= 1
+    assert result["fatals_count"] >= 1
+    assert result["errors_count"] >= 1
+
+    crash_item = result["crashes"][0]
+    assert "SIGSEGV" in crash_item["text"] or "Aborted" in crash_item["text"]
+    assert result["fatals"][0]["source_file"] == "motion_controller.cc"
+    assert result["fatals"][0]["source_line"] == 88
+
 
 

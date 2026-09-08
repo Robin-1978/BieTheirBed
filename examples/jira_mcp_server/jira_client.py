@@ -54,6 +54,7 @@ try:
         extract_tempo_share_links,
         list_tempo_records,
     )
+    from .log_analyzer import analyze_directory_logs
 except ImportError:
     from field_mapper import (  # type: ignore[no-redef]
         BUILTIN_FIELD_ALIASES,
@@ -70,6 +71,7 @@ except ImportError:
         extract_tempo_share_links,
         list_tempo_records,
     )
+    from log_analyzer import analyze_directory_logs  # type: ignore[no-redef]
 
 
 def _required_env(name: str) -> str:
@@ -829,6 +831,13 @@ class JiraClient:
             "issue_key": key,
             **downloaded,
         }
+
+    async def analyze_local_logs(
+        self, issue_key: str, *, auto_unpack: bool = True
+    ) -> dict[str, Any]:
+        key = validate_issue_key(issue_key)
+        evidence_dir = self.settings.attachment_root / key
+        return analyze_directory_logs(evidence_dir, auto_unpack=auto_unpack)
 
     async def get_comments(
         self, issue_key: str, *, limit: int = 50
