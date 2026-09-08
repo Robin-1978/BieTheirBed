@@ -152,7 +152,10 @@ from knoa_platform.tools.clipboard import ClipboardTool
 from knoa_platform.tools.configuration import ConfigurationTool
 from knoa_platform.tools.create_task import CreateTaskTool
 from knoa_platform.tools.describe_tool import DescribeTool
+from knoa_platform.tools.edit_file import EditFileTool
 from knoa_platform.tools.exchange import ExchangeTool
+from knoa_platform.tools.glob_files import GlobFilesTool
+from knoa_platform.tools.grep_search import GrepSearchTool
 from knoa_platform.tools.hotkey import HotkeyTool
 from knoa_platform.tools.image_inspect import ImageInspectTool
 from knoa_platform.tools.mcp_connect import (
@@ -584,8 +587,11 @@ def _build_registry(
     registry = ToolRegistry()
     for tool in (
         ReadFileTool(working_directory=config.working_directory),
-        ReadArtifactTool(artifacts),
+        EditFileTool(working_directory=config.working_directory),
         WriteFileTool(working_directory=config.working_directory),
+        GrepSearchTool(working_directory=config.working_directory),
+        GlobFilesTool(working_directory=config.working_directory),
+        ReadArtifactTool(artifacts),
         ShellTool(default_timeout=config.shell_timeout),
         WebSearchTool(),
         WebFetchTool(),

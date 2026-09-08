@@ -6,7 +6,10 @@ from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolR
 
 class WriteFileTool(ToolBase):
     name = "write_file"
-    description = "Create or overwrite a local file anywhere on the host."
+    description = (
+        "Create a new local file or completely overwrite. "
+        "For modifying existing files or code, use 'edit_file' instead."
+    )
     effect = ToolEffect.LOCAL_WRITE
     capabilities = frozenset({ToolCapability.HOST_WRITE})
     risk = ToolRisk.MEDIUM
