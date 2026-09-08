@@ -12,12 +12,18 @@ def maintain_sqlite_database(path: str | Path) -> None:
     database = Path(path).expanduser().resolve()
     if not database.is_file():
         return
+    wal_file = database.with_name(f"{database.name}-wal")
+    checkpoint_mode = (
+        "TRUNCATE"
+        if (wal_file.is_file() and wal_file.stat().st_size > 10 * 1024 * 1024)
+        else "PASSIVE"
+    )
     with connect_sqlite(
         database,
         row_factory=False,
         busy_timeout_ms=5_000,
     ) as connection:
-        connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        connection.execute(f"PRAGMA wal_checkpoint({checkpoint_mode})")
         connection.execute("PRAGMA optimize")
 
 

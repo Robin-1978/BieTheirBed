@@ -60,6 +60,7 @@ class AndroidReleaseRepository:
         min_supported_version_code: int = 1,
         release_notes: str = "",
         clock=time.time,
+        keep_history: int = 3,
     ) -> AndroidRelease:
         version_name = version_name.strip()
         if not _VERSION_NAME.fullmatch(version_name):
@@ -139,7 +140,50 @@ class AndroidReleaseRepository:
             destination.unlink(missing_ok=True)
             version_manifest.unlink(missing_ok=True)
             raise
+        if keep_history > 0:
+            try:
+                self.prune(keep=keep_history)
+            except Exception:
+                pass
         return release
+
+    def list_version_codes(self) -> tuple[int, ...]:
+        """Return all published version codes in ascending order."""
+        if not self._root.is_dir():
+            return ()
+        codes: list[int] = []
+        for candidate in self._root.glob("*.json"):
+            if candidate.name == "latest.json":
+                continue
+            name_stem = candidate.stem
+            if name_stem.isdigit():
+                codes.append(int(name_stem))
+        codes.sort()
+        return tuple(codes)
+
+    def prune(self, *, keep: int = 3) -> tuple[int, int]:
+        """Prune older APK packages and manifests, retaining the latest `keep` versions.
+
+        Returns (pruned_apks_count, pruned_manifests_count).
+        """
+        if keep < 1:
+            raise ValueError("Keep count must be at least 1")
+        codes = self.list_version_codes()
+        if len(codes) <= keep:
+            return (0, 0)
+        to_prune = codes[:-keep]
+        pruned_apks = 0
+        pruned_manifests = 0
+        for code in to_prune:
+            apk_path = self._root / f"knoa-{code}.apk"
+            manifest_path = self._manifest_path(code)
+            if apk_path.is_file():
+                apk_path.unlink(missing_ok=True)
+                pruned_apks += 1
+            if manifest_path.is_file():
+                manifest_path.unlink(missing_ok=True)
+                pruned_manifests += 1
+        return (pruned_apks, pruned_manifests)
 
     def latest(self, *, optional: bool = False) -> AndroidRelease | None:
         return self._read_manifest(self._root / "latest.json", optional=optional)

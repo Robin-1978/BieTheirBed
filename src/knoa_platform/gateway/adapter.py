@@ -884,6 +884,13 @@ class SecureGatewayAdapter(
         pruned = self._audit.prune()
         if self._auth_repository is not None:
             pruned += self._auth_repository.cleanup_expired()
+        if self._releases is not None:
+            try:
+                pruned_apks, _ = self._releases.prune(keep=3)
+                if pruned_apks:
+                    logger.info("Pruned %d stale mobile release APKs", pruned_apks)
+            except Exception:
+                logger.warning("Mobile release pruning failed", exc_info=True)
         maintain_sqlite_database(self._database)
         if pruned:
             logger.info("Pruned %d stale Gateway database records", pruned)
