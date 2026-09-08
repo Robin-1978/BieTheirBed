@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     StringConstraints,
     TypeAdapter,
+    field_validator,
     model_validator,
 )
 
@@ -667,6 +668,16 @@ class CreateTaskRequest(CoreModel):
     origin: TaskOrigin = TaskOrigin.USER
     agent_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None = None
 
+    @field_validator("origin", mode="before")
+    @classmethod
+    def _coerce_origin(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return TaskOrigin(value)
+            except ValueError:
+                return value
+        return value
+
     @model_validator(mode="after")
     def require_input_or_attachment(self) -> CreateTaskRequest:
         if not self.input.strip() and not self.attachments:
@@ -867,6 +878,16 @@ class SetProductTaskStateRequest(CoreModel):
     task_id: TaskId
     state: TaskDefinitionState
 
+    @field_validator("state", mode="before")
+    @classmethod
+    def _coerce_state(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return TaskDefinitionState(value)
+            except ValueError:
+                return value
+        return value
+
 
 class DeleteProductTaskRequest(CoreModel):
     api_version: Literal["v1"] = "v1"
@@ -883,6 +904,16 @@ class ExecuteProductTaskRequest(CoreModel):
     # Preserves the true provenance when the Gateway starts an execution it
     # just created (e.g. immediate create-after-preflight).
     launch_reason: TaskLaunchReason = TaskLaunchReason.MANUAL
+
+    @field_validator("launch_reason", mode="before")
+    @classmethod
+    def _coerce_launch_reason(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return TaskLaunchReason(value)
+            except ValueError:
+                return value
+        return value
 
 
 class GetProductTaskExecutionRequest(CoreModel):
