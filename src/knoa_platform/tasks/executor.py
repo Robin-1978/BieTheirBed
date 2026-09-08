@@ -338,6 +338,19 @@ class TaskExecutor:
                 session_handle=task.session_handle,
             )
             terminal: TurnFinished | None = None
+            assigned_agent_id = await asyncio.to_thread(
+                self._sessions.agent_id, scope
+            )
+            assigned_policy = (
+                self._agents.resolve_policy(scope, assigned_agent_id)
+                if hasattr(self._agents, "resolve_policy")
+                else None
+            )
+            invocation_kind = (
+                assigned_policy.invocation_kind
+                if assigned_policy is not None
+                else ("delegate" if task.origin is TaskOrigin.AGENT else "user")
+            )
             async for runtime_event in self._agents.execute_turn(
                 ExecuteAgentTurn(
                     scope=scope,
@@ -348,14 +361,9 @@ class TaskExecutor:
                     attachments=task.attachments,
                     tools_enabled=task.tools_enabled,
                     cancellation=cancellation,
-                    invocation_kind=(
-                        "delegate"
-                        if task.origin is TaskOrigin.AGENT
-                        else "user"
-                    ),
-                    agent_id=await asyncio.to_thread(
-                        self._sessions.agent_id, scope
-                    ),
+                    invocation_kind=invocation_kind,
+                    agent_id=assigned_agent_id,
+                    resolved_policy=assigned_policy,
                     confirmation=self._approvals,
                     tool_commit=self._tool_commits,
                     interaction=self._interactions,
