@@ -531,7 +531,15 @@ class NodeRelayManager:
                     message = json.loads(raw)
                     frame = RelayFrame.model_validate(message.get("frame"))
                     frame.validate_bounds()
-                    await self._receive_frame(websocket, enrollment, sessions, frame)
+                    try:
+                        await self._receive_frame(websocket, enrollment, sessions, frame)
+                    except Exception as frame_exc:  # noqa: BLE001
+                        logger.warning(
+                            "Relay frame handling failed (session=%s, stream=%s): %s",
+                            frame.session_id,
+                            frame.stream_id,
+                            frame_exc,
+                        )
             finally:
                 publisher.cancel()
                 await asyncio.gather(publisher, return_exceptions=True)

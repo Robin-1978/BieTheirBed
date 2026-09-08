@@ -246,6 +246,18 @@ class P2PServer:
                         name="knoa-p2p-message",
                     )
 
+            async def _auto_cleanup_unconnected(p: RTCPeerConnection) -> None:
+                await asyncio.sleep(10.0)
+                if p.connectionState != "connected":
+                    logger.debug("Cleaning up unestablished P2P peer after 10s timeout")
+                    self._peers.discard(p)
+                    await p.close()
+
+            asyncio.create_task(
+                _auto_cleanup_unconnected(peer),
+                name="knoa-p2p-auto-cleanup",
+            )
+
             await peer.setRemoteDescription(RTCSessionDescription(sdp=sdp, type="offer"))
             answer = await peer.createAnswer()
             await peer.setLocalDescription(answer)
@@ -618,7 +630,7 @@ async def _send_json(channel: Any, message: dict[str, Any]) -> None:
 async def _wait_for_ice_gathering(
     peer: RTCPeerConnection,
     *,
-    timeout: float = 3.0,
+    timeout: float = 1.2,
 ) -> None:
     if peer.iceGatheringState == "complete":
         return

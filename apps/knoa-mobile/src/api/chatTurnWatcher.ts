@@ -135,7 +135,7 @@ export class ChatTurnWatcher {
   }
 
   private retryDelays(): readonly number[] {
-    const delays = this.input.retryDelays ?? [750, 1500, 3000];
+    const delays = this.input.retryDelays ?? [750, 1500, 2500, 3000, 3000, 4000, 5000, 5000, 5000, 5000];
     return delays.length ? delays : [750];
   }
 

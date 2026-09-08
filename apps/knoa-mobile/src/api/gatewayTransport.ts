@@ -65,8 +65,8 @@ const decoder = new TextDecoder();
 const REQUEST_CHUNK_BYTES = 192 * 1024;
 const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
-const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
-const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
+const P2P_ICE_GATHERING_TIMEOUT_MS = 1_200;
+const P2P_CHANNEL_OPEN_TIMEOUT_MS = 2_500;
 const TRANSPORT_READY_WAIT_TIMEOUT_MS = 1_000;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
@@ -449,7 +449,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
         this.setP2PDiagnostic("ready");
       }
     })().catch((error) => {
-      this.p2pRetryAfter = Date.now() + 60_000;
+      this.p2pRetryAfter = Date.now() + 180_000;
       this.setP2PDiagnostic("cooldown", errorText(error), this.p2pRetryAfter);
     }).finally(() => {
       if (this.upgradePromise === pending) this.upgradePromise = null;
@@ -495,10 +495,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
     lastError = "",
     retryAt = 0,
   ): void {
-    if (state === "connecting") this.p2pAttemptStartedAt = Date.now();
+    if (state === "connecting") {
+      this.p2pAttemptStartedAt = Date.now();
+    }
     const elapsedMs = this.p2pAttemptStartedAt
       ? Math.max(0, Date.now() - this.p2pAttemptStartedAt)
       : 0;
+    if (state !== "connecting") {
+      this.p2pAttemptStartedAt = 0;
+    }
     this.onP2PDiagnostic?.({ state, lastError, retryAt, elapsedMs });
   }
 
@@ -508,10 +513,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
     retryAt = 0,
     endpoint?: string,
   ): void {
-    if (state === "scanning") this.lanAttemptStartedAt = Date.now();
+    if (state === "scanning") {
+      this.lanAttemptStartedAt = Date.now();
+    }
     const elapsedMs = this.lanAttemptStartedAt
       ? Math.max(0, Date.now() - this.lanAttemptStartedAt)
       : 0;
+    if (state !== "scanning") {
+      this.lanAttemptStartedAt = 0;
+    }
     this.onLanDiagnostic?.({ state, lastError, retryAt, endpoint, elapsedMs });
   }
 
@@ -520,10 +530,15 @@ export class ConnectionResolverTransport implements GatewayTransport {
     lastError = "",
     retryAt = 0,
   ): void {
-    if (state === "connecting") this.relayAttemptStartedAt = Date.now();
+    if (state === "connecting") {
+      this.relayAttemptStartedAt = Date.now();
+    }
     const elapsedMs = this.relayAttemptStartedAt
       ? Math.max(0, Date.now() - this.relayAttemptStartedAt)
       : 0;
+    if (state !== "connecting") {
+      this.relayAttemptStartedAt = 0;
+    }
     this.onRelayDiagnostic?.({ state, lastError, retryAt, elapsedMs });
   }
 }
