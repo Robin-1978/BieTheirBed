@@ -31,7 +31,7 @@ import {
   packetAad,
   packetNonce,
 } from "./relayCrypto";
-import { bindingUsesHubEndpoint, p2pOfferHeaders, preferredTransport } from "./gatewayRouting";
+import { bindingUsesHubEndpoint, isPrivateNetworkUrl, p2pOfferHeaders, preferredTransport } from "./gatewayRouting";
 import { relayResponseBody } from "./relayResponse";
 import type { PairingPayload } from "./models";
 import { discoverNodeOnLan } from "./mdnsDiscovery";
@@ -67,7 +67,7 @@ const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
 const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
 const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
-const TRANSPORT_READY_WAIT_TIMEOUT_MS = 3_000;
+const TRANSPORT_READY_WAIT_TIMEOUT_MS = 1_000;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },
@@ -92,6 +92,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private relayAttemptStartedAt = 0;
   private lastAttemptId = "";
   private lastRequestId = "";
+  private cachedIceServers: Array<{ urls: string | string[]; username?: string; credential?: string }> | null = null;
 
   constructor(
     private readonly binding: NodeDeviceBinding,
@@ -237,14 +238,17 @@ export class ConnectionResolverTransport implements GatewayTransport {
         void this.startRecovery(baseUrl, init);
       }
     }
+    const directUrl = this.binding.directGatewayUrl || this.lanGatewayUrl || baseUrl;
+    const isPrivate = isPrivateNetworkUrl(directUrl);
+    const directTimeoutMs = isPrivate && !this.lanGatewayUrl ? 1200 : 4500;
     try {
       const response = await withConnectTimeout(
         (signal) => this.direct.request(
-          this.binding.directGatewayUrl || this.lanGatewayUrl || baseUrl,
+          directUrl,
           path,
           this.tag(init, this.lanGatewayUrl ? "mdns" : "direct", signal),
         ),
-        4500,
+        directTimeoutMs,
       );
       this.setActive("direct");
       return response;
@@ -365,14 +369,17 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private startRelayUpgrade(baseUrl: string, init: RequestInit): void {
     if (this.binding.directGatewayUrl || this.relay?.ready() || this.relayUpgradePromise
       || !new Headers(init.headers).get("authorization")) return;
+    if (!this.relay) {
+      this.relay = new RelayTransport(this.binding, "session");
+      this.setRelayDiagnostic("connecting");
+    }
+    const relay = this.relay;
     const pending = (async () => {
-      const response = await this.relayRequest(baseUrl, "/v1/session", {
-        method: "GET",
-        headers: this.tag(init, "relay").headers,
-      });
-      if (!response.ok) throw new Error(`Relay 探测被 Node 拒绝（HTTP ${response.status}）`);
+      await relay.connect();
       this.updatePreferredActive(true);
-    })().catch(() => undefined).finally(() => {
+    })().catch((error) => {
+      this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000);
+    }).finally(() => {
       if (this.relayUpgradePromise === pending) this.relayUpgradePromise = null;
     });
     this.relayUpgradePromise = pending;
@@ -385,6 +392,23 @@ export class ConnectionResolverTransport implements GatewayTransport {
     const pending = (async () => {
       const attemptId = Crypto.randomUUID();
       const startedAt = Date.now();
+      if (!this.cachedIceServers) {
+        try {
+          const res = await this.relayRequest(baseUrl, "/v1/p2p/ice-servers", {
+            method: "GET",
+            headers: p2pOfferHeaders(init.headers),
+          });
+          if (res.ok) {
+            const data = await res.json() as { ice_servers?: Array<{ urls: string | string[]; username?: string; credential?: string }> };
+            if (Array.isArray(data.ice_servers) && data.ice_servers.length > 0) {
+              this.cachedIceServers = data.ice_servers;
+            }
+          }
+        } catch {
+          // ignore error and fallback to default ICE_SERVERS
+        }
+      }
+      const iceServers = this.cachedIceServers ?? ICE_SERVERS;
       const p2p = new WebRtcGatewayTransport();
       try {
         await p2p.connect(async (offer) => {
@@ -401,7 +425,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
           if (!response.ok) throw new Error(payload.detail || payload.error || "Node P2P signaling rejected");
           if (!payload.answer?.sdp || payload.answer.type !== "answer") throw new Error("Node P2P answer invalid");
           return { type: "answer" as const, sdp: payload.answer.sdp };
-        });
+        }, iceServers);
         recordTransportDiagnostic({ attemptId, requestId: this.lastRequestId, transport: "p2p", stage: "ice", startedAt, endedAt: Date.now(), outcome: "ok", reasonCode: "data_channel_ready" });
         this.setP2PDiagnostic("ready");
         const probe = await p2p.request(baseUrl, "/v1/session", {
@@ -599,9 +623,12 @@ class WebRtcGatewayTransport implements GatewayTransport {
       && this.channel?.readyState === "open";
   }
 
-  async connect(exchange: (offer: { type: "offer"; sdp: string }) => Promise<{ type: "answer"; sdp: string }>): Promise<void> {
+  async connect(
+    exchange: (offer: { type: "offer"; sdp: string }) => Promise<{ type: "answer"; sdp: string }>,
+    iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }> = ICE_SERVERS,
+  ): Promise<void> {
     this.close();
-    const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const peer = new RTCPeerConnection({ iceServers });
     const channel = peer.createDataChannel("knoa-http-v1", { ordered: true });
     this.peer = peer;
     this.channel = channel;
@@ -819,7 +846,7 @@ class RelayTransport implements GatewayTransport {
     this.fail(new Error("Relay 连接已关闭"));
   }
 
-  private async connect(): Promise<void> {
+  async connect(): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN && this.encryptKey && this.decryptKey) return;
     if (this.connectPromise) return this.connectPromise;
     const pending = this.open();

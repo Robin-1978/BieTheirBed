@@ -81,6 +81,16 @@ class P2PAnswerResponse(BaseModel):
     answer: P2PAnswer
 
 
+class P2PIceServerConfig(BaseModel):
+    urls: list[str] | str
+    username: str | None = None
+    credential: str | None = None
+
+
+class P2PIceServersResponse(BaseModel):
+    ice_servers: list[P2PIceServerConfig]
+
+
 class PairChallengeRequest(GatewayRequest):
     grant_id: str = Field(min_length=1, max_length=128)
 

@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shlex
 import signal
 import subprocess
 from typing import Any
 
 from knoa_platform.platform_ import get_platform
 from knoa_platform.service.process_output import decode_process_output
-from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolRisk
+from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolPolicy, ToolRisk
 
 
 _DEFAULT_TIMEOUT = 30
@@ -118,6 +119,133 @@ do shell script "{escaped_cmd}" with administrator privileges
             return {"error": str(e), "returncode": -1}
 
 
+_SAFE_READ_COMMANDS = frozenset(
+    {
+        # File / Directory listing & inspection
+        "ls", "dir", "pwd", "cat", "head", "tail", "more", "less",
+        "find", "du", "df", "stat", "file", "which", "whereis", "type",
+        "wc", "diff", "cmp", "sort", "uniq", "cut", "tr", "column",
+        "readlink", "realpath", "basename", "dirname", "tree",
+        # Pattern search
+        "grep", "egrep", "fgrep", "rg", "ag", "ack",
+        # Text output
+        "echo", "printf",
+        # System & Process inspection
+        "uname", "hostname", "whoami", "id", "uptime", "date",
+        "env", "printenv", "ps", "top", "htop", "pgrep", "pstree",
+        "ss", "netstat", "ip", "ifconfig", "lsof", "free", "vmstat",
+        # Specialized query tools (checked separately)
+        "git", "sqlite3",
+    }
+)
+
+_SQL_WRITE_PATTERNS = re.compile(
+    r"\b(insert|update|delete|drop|alter|create|replace|attach|detach|vacuum|\.read|\.import|\.output|\.once)\b|"
+    r"pragma\s+[a-z_]+\s*=",
+    re.IGNORECASE,
+)
+
+_GIT_READ_SUBCOMMANDS = frozenset(
+    {
+        "status", "log", "diff", "branch", "show", "rev-parse",
+        "describe", "tag", "ls-files", "check-ignore",
+    }
+)
+
+_SEPARATORS = {";", "&&", "||", "|", "&"}
+
+
+def is_read_only_shell_command(cmd: str) -> bool:
+    """Analyze a shell command string to determine if it is purely read-only."""
+    if not cmd or not isinstance(cmd, str):
+        return False
+    # Check for dangerous shell substitutions
+    if "$(" in cmd or "`" in cmd or "<(" in cmd or ">(" in cmd:
+        return False
+
+    try:
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except Exception:
+        return False
+
+    if not tokens:
+        return False
+
+    # Split into subcommands
+    subcmds: list[list[str]] = []
+    current: list[str] = []
+    for t in tokens:
+        if t in _SEPARATORS:
+            if current:
+                subcmds.append(current)
+                current = []
+        else:
+            current.append(t)
+    if current:
+        subcmds.append(current)
+
+    for sub in subcmds:
+        if not sub:
+            continue
+        # Check redirections
+        i = 0
+        cleaned_tokens: list[str] = []
+        while i < len(sub):
+            tok = sub[i]
+            if tok in {">", ">>", ">&"}:
+                target = sub[i + 1] if i + 1 < len(sub) else ""
+                if target in {"/dev/null", "1", "2", "&1", "&2", "NUL", "nul"}:
+                    i += 2
+                    continue
+                return False
+            if tok in {"1", "2"} and i + 1 < len(sub) and sub[i + 1] in {">", ">>", ">&"}:
+                target = sub[i + 2] if i + 2 < len(sub) else ""
+                if target in {"/dev/null", "1", "2", "&1", "&2", "NUL", "nul"}:
+                    i += 3
+                    continue
+                return False
+            cleaned_tokens.append(tok)
+            i += 1
+
+        if not cleaned_tokens:
+            continue
+
+        # Skip leading environment variable assignments (e.g. LC_ALL=C)
+        idx = 0
+        while idx < len(cleaned_tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*", cleaned_tokens[idx]):
+            idx += 1
+
+        if idx >= len(cleaned_tokens):
+            continue
+
+        cmd_name = cleaned_tokens[idx]
+        cmd_base = cmd_name.split("/")[-1].split("\\")[-1]
+        if cmd_base not in _SAFE_READ_COMMANDS:
+            return False
+
+        args = cleaned_tokens[idx + 1 :]
+
+        if cmd_base == "find":
+            if any(a in {"-delete", "-exec", "-execdir", "-ok", "-okdir"} for a in args):
+                return False
+        elif cmd_base == "git":
+            git_sub = None
+            for a in args:
+                if not a.startswith("-"):
+                    git_sub = a
+                    break
+            if not git_sub or git_sub not in _GIT_READ_SUBCOMMANDS:
+                return False
+        elif cmd_base == "sqlite3":
+            full_sqlite_args = " ".join(args)
+            if _SQL_WRITE_PATTERNS.search(full_sqlite_args):
+                return False
+
+    return True
+
+
 class ShellTool(ToolBase):
     name = "run_command"
     description = (
@@ -137,6 +265,16 @@ class ShellTool(ToolBase):
 
     def __init__(self, default_timeout: int = 30) -> None:
         self._default_timeout = default_timeout
+
+    def policy_for(self, arguments: dict[str, Any]) -> ToolPolicy:
+        command = arguments.get("command", "")
+        if isinstance(command, str) and is_read_only_shell_command(command):
+            return ToolPolicy(
+                effect=ToolEffect.READ_ONLY,
+                capabilities=frozenset({ToolCapability.SHELL, ToolCapability.HOST_READ}),
+                risk=ToolRisk.LOW,
+            )
+        return self.policy
 
     async def execute(self, **kwargs: Any) -> Any:
         command = kwargs.get("command", "")

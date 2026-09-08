@@ -1735,3 +1735,37 @@ def test_gateway_adapter_requires_owner_only_tls_private_key(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="owner-only"):
         SecureGatewayAdapter(config, authentication=_Authentication())
+
+
+@pytest.mark.asyncio
+async def test_gateway_adapter_serves_p2p_ice_servers(tmp_path) -> None:
+    config = _config(tmp_path).model_copy(
+        update={
+            "ice_servers": [
+                {
+                    "urls": "turn:turn.knoa.internal:3478",
+                    "username": "user1",
+                    "credential": "pass1",
+                }
+            ]
+        }
+    )
+    adapter = SecureGatewayAdapter(config, authentication=_Authentication())
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = {"Authorization": "Bearer v1.gws-a." + "t" * 43}
+    async with httpx.AsyncClient(transport=transport, base_url="http://node") as http:
+        rejected = await http.get("/v1/p2p/ice-servers")
+        accepted = await http.get("/v1/p2p/ice-servers", headers=headers)
+
+    assert rejected.status_code == 401
+    assert accepted.status_code == 200
+    payload = accepted.json()
+    assert "ice_servers" in payload
+    assert payload["ice_servers"] == [
+        {
+            "urls": ["turn:turn.knoa.internal:3478"],
+            "username": "user1",
+            "credential": "pass1",
+        }
+    ]
+

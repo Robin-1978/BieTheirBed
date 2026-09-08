@@ -26,6 +26,21 @@ export function p2pOfferHeaders(input?: HeadersInit): Headers {
   return headers;
 }
 
+export function isPrivateNetworkUrl(rawUrl: string): boolean {
+  if (!rawUrl || typeof rawUrl !== "string") return false;
+  try {
+    const url = new URL(rawUrl);
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+    if (host.startsWith("10.")) return true;
+    if (host.startsWith("192.168.")) return true;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function normalizedEndpoint(value: string): string {
   const url = new URL(value);
   const path = url.pathname.replace(/\/+$/, "");

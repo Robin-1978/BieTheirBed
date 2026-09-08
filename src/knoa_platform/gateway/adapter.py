@@ -338,6 +338,7 @@ class SecureGatewayAdapter(
                 Route("/v1/auth/challenge", self._auth_challenge, methods=["POST"]),
                 Route("/v1/auth/complete", self._auth_complete, methods=["POST"]),
                 Route("/v1/p2p/offer", self._p2p_offer, methods=["POST"]),
+                Route("/v1/p2p/ice-servers", self._p2p_ice_servers, methods=["GET"]),
                 Route(
                     "/v1/resource-p2p/offer",
                     self._resource_p2p_offer,
@@ -707,7 +708,7 @@ class SecureGatewayAdapter(
             TransportHealthMiddleware,
             health=self._transport_health,
         )
-        self._p2p = P2PServer(self.app)
+        self._p2p = P2PServer(self.app, ice_servers=config.ice_servers)
         self._node_hub = NodeHubService(
             self._node_hub_store,
             self._node_identity,

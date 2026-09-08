@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -110,3 +111,39 @@ async def test_resource_p2p_rejects_non_resource_gateway_paths(monkeypatch) -> N
     finally:
         await client.close()
         await server.close()
+
+
+def test_ice_servers_configuration(monkeypatch) -> None:
+    from knoa_platform.p2p import build_ice_servers, serialize_ice_servers
+
+    # 1. Explicit configured list
+    configured = [
+        {"urls": "turn:turn.example.com:3478", "username": "alice", "credential": "secretpassword"}
+    ]
+    servers = build_ice_servers(configured)
+    assert len(servers) == 1
+    serialized = serialize_ice_servers(servers)
+    assert serialized == [
+        {"urls": ["turn:turn.example.com:3478"], "username": "alice", "credential": "secretpassword"}
+    ]
+
+    # 2. Env variable KNOA_ICE_SERVERS
+    monkeypatch.setenv(
+        "KNOA_ICE_SERVERS",
+        json.dumps([{"urls": "stun:stun.custom.com:3478"}]),
+    )
+    servers = build_ice_servers()
+    assert len(servers) == 1
+    assert serialize_ice_servers(servers) == [{"urls": ["stun:stun.custom.com:3478"]}]
+
+    # 3. Env variable KNOA_TURN_URL
+    monkeypatch.delenv("KNOA_ICE_SERVERS", raising=False)
+    monkeypatch.setenv("KNOA_TURN_URL", "turn:relay.example.com:3478")
+    monkeypatch.setenv("KNOA_TURN_USERNAME", "knoa_user")
+    monkeypatch.setenv("KNOA_TURN_CREDENTIAL", "knoa_pass")
+    servers = build_ice_servers()
+    assert len(servers) == 1
+    assert serialize_ice_servers(servers) == [
+        {"urls": ["turn:relay.example.com:3478"], "username": "knoa_user", "credential": "knoa_pass"}
+    ]
+
