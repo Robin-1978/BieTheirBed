@@ -1263,4 +1263,49 @@ def test_local_log_analyzer_unpacks_and_finds_crashes(tmp_path: Path) -> None:
     assert result["fatals"][0]["source_line"] == 88
 
 
+def test_local_log_analyzer_with_git_blame_and_snippet(tmp_path: Path) -> None:
+    import subprocess
+    from examples.jira_mcp_server.log_analyzer import analyze_directory_logs
+
+    # Setup mock git repo
+    repo_dir = tmp_path / "mock_repo"
+    repo_dir.mkdir()
+    subprocess.run(["git", "init"], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Robot Dev"], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "robotdev@gs-robot.com"], cwd=str(repo_dir), check=True, capture_output=True)
+
+    src_dir = repo_dir / "src" / "navigation"
+    src_dir.mkdir(parents=True)
+    source_file = src_dir / "motion_controller.cc"
+    lines = [f"// line {i}\n" for i in range(1, 100)]
+    lines[87] = "    throw std::runtime_error(\"Motor feedback timeout\"); // line 88\n"
+    source_file.write_text("".join(lines), encoding="utf-8")
+
+    subprocess.run(["git", "add", "."], cwd=str(repo_dir), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "feat(pnc): add motor feedback timeout check"], cwd=str(repo_dir), check=True, capture_output=True)
+
+    # Setup evidence dir
+    evidence_dir = tmp_path / "evidence" / "TEST-101"
+    evidence_dir.mkdir(parents=True)
+    log_file = evidence_dir / "error.log"
+    log_file.write_text(
+        "[2026-09-08 14:00:00] [FATAL] [motion_controller.cc:88] Motor feedback timeout!\n",
+        encoding="utf-8",
+    )
+
+    result = analyze_directory_logs(evidence_dir, auto_unpack=False, repo_root=repo_dir)
+    assert result["status"] == "success"
+    assert result["fatals_count"] == 1
+    fatal = result["fatals"][0]
+    assert "code_context" in fatal
+    ctx = fatal["code_context"]
+    assert ctx["line"] == 88
+    assert "src/navigation/motion_controller.cc" in ctx["repo_file"]
+    assert "Motor feedback timeout" in ctx["snippet"]
+    assert ctx["blame"] is not None
+    assert ctx["blame"]["author"] == "Robot Dev"
+    assert "add motor feedback timeout check" in ctx["blame"]["summary"]
+
+
+
 
