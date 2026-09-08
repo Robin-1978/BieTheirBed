@@ -12,7 +12,8 @@ class ReadArtifactTool(ToolBase):
     name = "read_artifact"
     description = (
         "Read text content from an attached file or tool result artifact. "
-        "Supports offset (1-based start line) and limit (line count) for pagination."
+        "Supports offset (1-based start line) and limit (line count) for pagination. "
+        "Inspect returned # showing, # has_more, and # next_offset headers; stop probing when has_more is False."
     )
     effect = ToolEffect.READ_ONLY
     risk = ToolRisk.LOW

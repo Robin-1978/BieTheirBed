@@ -1082,6 +1082,58 @@ def test_runtime_bound_tool_result_formats_dict_content_and_prevents_read_artifa
     assert "Full result recorded in tool event" in parsed_read["spill_notice"]
 
 
+def test_runtime_bound_tool_result_preserves_read_artifact_metadata_and_extracts_task_result(tmp_path):
+    from knoa_platform.agent_runtime.tool_step import ToolStepResult
+
+    # 1. Test read_artifact output dictionary formatting preserves pagination headers when exceeding max_chars
+    read_art_output = {
+        "artifact_id": "art-123456",
+        "name": "daily_report.txt",
+        "media_type": "text/markdown",
+        "content": "Line 1 of report\nLine 2 of report\n" + ("x" * 1000),
+        "showing": "lines 1-2 of 50",
+        "total_lines": 50,
+        "has_more": True,
+        "next_offset": 3,
+    }
+    step_art = ToolStepResult(
+        call_id="call-art-9",
+        tool_name="read_artifact",
+        status="completed",
+        code="ok",
+        output=read_art_output,
+    )
+    bounded_art = KnoaAgentRuntime._bound_tool_result_content(step_art, max_chars=1200)
+    assert "# artifact_id: art-123456" in bounded_art
+    assert "# showing: lines 1-2 of 50" in bounded_art
+    assert "# total_lines: 50" in bounded_art
+    assert "# has_more: True" in bounded_art
+    assert "# next_offset: 3" in bounded_art
+    assert "Line 1 of report" in bounded_art
+
+    # 2. Test task execution output dictionary formatting extracts 'result' as clean Markdown when exceeding max_chars
+    task_exec_output = {
+        "execution_id": "exec-abc",
+        "task_id": "agent-task-xyz",
+        "state": "completed",
+        "launch_reason": "manual",
+        "result": "# 📰 Morning News\n\n- AI updates\n- Financial highlights\n" + ("y" * 1500),
+        "failure_code": "",
+    }
+    step_task = ToolStepResult(
+        call_id="call-task-8",
+        tool_name="task",
+        status="completed",
+        code="ok",
+        output=task_exec_output,
+    )
+    bounded_task = KnoaAgentRuntime._bound_tool_result_content(step_task, max_chars=1200)
+    assert "# execution_id: exec-abc" in bounded_task
+    assert "# state: completed" in bounded_task
+    assert "# 📰 Morning News" in bounded_task
+    assert "{\"execution_id\":" not in bounded_task  # Extracted as clean Markdown, not escaped JSON
+
+
 @pytest.mark.asyncio
 async def test_knoa_runtime_tool_budget_exhaustion_triggers_final_synthesis_pass(tmp_path) -> None:
     class ToolBudgetProvider:
