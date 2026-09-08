@@ -182,74 +182,168 @@ flowchart TD
 
 ---
 
-## 6. L3 远期愿景架构：确定性验证器驱动的闭环演进 (Verifier-Driven Evolution & Autonomous Coworker)
+## 6. L3 远期愿景工程设计：确定性验证器驱动的闭环演进引擎 (Verifier-Driven Evolution Engine)
 
 ### 6.1 行业祛魅：为什么单纯的 "Memory / Reflection" 不是真自进化？
 截至 2026 年下半年，学术界与工业界（如 2026-08 《On the Fragility of Self-Improving Agents》、Microsoft Research 2026-06/08 综述与 EvoTest、SelfMem 等前沿成果）已经对所谓“自进化 Agent”进行了严肃反思与深度祛魅：
 
-1. **自嗨式反思与记忆的脆弱性**：
+1. **自嗨式反思与无约束记忆的脆弱性**：
    - 很多早期的“自省（Reflection）”或“纯记忆（Memory-only）”自进化实验，在更换任务顺序或多次复测后分数严重缩水。多步 Agent 本身噪声很大，叠加无约束的自我反思后，往往只是**记住了最近的局部经历、过拟合了任务次序，甚至形成模型间的互吹自嗨（Self-referential Feedback Loop）**。
+   - 在真实生产环境中，无约束的记忆膨胀只会导致上下文杂乱、规则自相矛盾，5 轮迭代后不仅没有变聪明，反而在简单任务上出现不可逆的漂移。
 2. **唯一真相来源：独立确定性验证器 (Independent Verifier)**：
    - Microsoft Research 的最新结论非常明确：**自我进化最有效的场景，必然存在独立于 Agent 自身的物理/逻辑 Verifier**。
-   - 如果缺乏可靠、独立、确定性的评价信号（如编译器、单元测试、数据断言、物理执行结果），所谓的“自我演进”必然退化为指标投机、幻觉自证，甚至随着迭代越来越差。
+   - 如果缺乏可靠、独立、确定性的评价信号（如编译器退出码、单元测试断言、Schema 校验、物理运行返回值），所谓的“自我演进”必然退化为指标投机、幻觉自证，甚至随着迭代越来越差。
 
-因此，Knoa 坚决不搞“大而全、宣传式的通用自进化”，而是构建**基于确定性验证器的硬核工程演进体系**。
+因此，Knoa 坚决抛弃“让 Agent 盲目自省改 Prompt”的伪概念，构建**基于“经验运行手册（Runbook）+ 独立验证器门禁”的四级工程落地方案**。
 
-```mermaid
-flowchart TD
-    subgraph ExecutionPlane["1. 确定性执行与追踪面"]
-        Agent[Knoa Agent: Coder / Worker] -->|运行任务| ExecEnv[执行沙箱 / 本地环境]
-        ExecEnv -->|输出全量调用与日志| Trace[Execution Trace]
-    end
+---
 
-    subgraph VerifierPlane["2. 独立验证器中枢 (Independent Verifier)"]
-        Trace --> Evaluator[独立评测器 (Compiler / Unit Tests / Assertions)]
-        Evaluator -->|硬核度量信号: 编译通过? 100个测试通过率?| Signal[Measurable Delta]
-    end
+### 6.2 物理存储架构：经验与验证器数据模型 (SQLite Schema)
+在 Knoa 的核心持久化层（`~/.knoa/data/assistant.db`）设计专用演进数据表，替代传统模糊的向量记忆：
 
-    subgraph EvolutionGate["3. 基准评测与晋级门禁 (Eval & Promotion Gate)"]
-        Signal --> Candidate[生成改进候选 (Runbook / Tool Patch / Prompt 微调)]
-        Candidate --> BenchmarkSuite[回归评测集 (100 Benchmark Evals)]
-        BenchmarkSuite --> PassRateCheck{通过率显著提升且零劣化?}
-        PassRateCheck -->|是 (如 92% -> 96%)| Promote[正式晋级 (Promote to Agent Profile)]
-        PassRateCheck -->|否 (退化或无提升)| Reject[废弃并告警 (Reject Candidate)]
-    end
+```sql
+-- 1. 任务执行轨迹与失败模式聚类表
+CREATE TABLE IF NOT EXISTS evolution_episodes (
+    episode_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,                  -- 如 'coder' 或 'worker'
+    input_intent TEXT NOT NULL,              -- 任务原始指令
+    step_count INTEGER NOT NULL,             -- 经历的探索步数
+    failure_signature TEXT NOT NULL,         -- 错误指纹 (如 'ImportError:UTC:datetime:py310')
+    stdout_stderr_digest TEXT NOT NULL,      -- 错误输出摘要
+    final_exit_code INTEGER NOT NULL,        -- 验证器退出码 (0 为修复成功)
+    verifier_cmd TEXT NOT NULL,              -- 验证器执行命令 (如 'pytest tests/test_xxx.py')
+    created_at REAL NOT NULL
+);
 
-    subgraph StagedAction["4. 物料化交付与审批 (Staged Action Cards)"]
-        Promote --> StagedCard[物料化决策卡片 (Action Card)]
-        StagedCard --> OperatorApprove{宿主人类确认}
-        OperatorApprove -->|批准| Production[投入生产使用]
-    end
+-- 2. 确定性经验运行手册表 (Deterministic Experience Runbooks)
+CREATE TABLE IF NOT EXISTS experience_runbooks (
+    runbook_id TEXT PRIMARY KEY,
+    signature_hash TEXT NOT NULL UNIQUE,     -- 规范化错误指纹哈希
+    error_pattern TEXT NOT NULL,             -- 触发正则 (如 'ImportError: cannot import name .UTC. from .datetime.')
+    context_preconditions_json TEXT NOT NULL,-- 前置上下文断言 (如 {"python_version": "<3.11"})
+    action_recipe_json TEXT NOT NULL,        -- 确定性修复/调用配方 (代码级修复策略或工具调用序列)
+    verification_command TEXT NOT NULL,      -- 回归验证命令 (如 'pytest tests/test_automation_recurrence.py')
+    test_fixture_payload TEXT NOT NULL,      -- 用于重现与回归的最小测试用例
+    success_count INTEGER DEFAULT 1,         -- 线上成功命中计数
+    failure_count INTEGER DEFAULT 0,         -- 线上失败计数 (触发熔断)
+    status TEXT NOT NULL,                    -- 'draft' (草稿), 'verified' (已验), 'promoted' (晋级), 'deprecated' (熔断废弃)
+    frozen_at REAL,                          -- 胜态锁定时间 (防止 LLM 随意篡改)
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runbook_signature ON experience_runbooks(signature_hash, status);
+
+-- 3. 演进回归基准评测集 (Agent Eval Benchmarks)
+CREATE TABLE IF NOT EXISTS agent_eval_benchmarks (
+    case_id TEXT PRIMARY KEY,
+    suite_name TEXT NOT NULL,                -- 评测套件 (如 'coder_python310_compat')
+    fixture_path TEXT NOT NULL,              -- 测试环境夹具
+    target_command TEXT NOT NULL,            -- 执行命令
+    expected_exit_code INTEGER NOT NULL,     -- 预期退出码
+    timeout_seconds REAL NOT NULL DEFAULT 30.0,
+    created_at REAL NOT NULL
+);
 ```
 
-### 6.2 任务可验证性分级矩阵 (Verifier Strength Matrix)
-Knoa 将任务严格按照“验证器强度”划定自进化的权限天花板，绝不跨越红线：
+---
+
+### 6.3 运行时双 Agent 闭环状态机 (Actor & Evolver Loop)
+
+根据 ICLR 2026 EvoTest 架构，将执行与演进在物理线程与生命周期上彻底解耦：
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> ActorExecuting: 任务分派 (Actor: Coder/Worker)
+    
+    state ActorExecuting {
+        [*] --> RunTool
+        RunTool --> ToolFailed: returncode != 0
+        ToolFailed --> QueryRunbook: 用错误指纹检索 SQLite
+        QueryRunbook --> MatchVerified: 命中 status=verified
+        MatchVerified --> ApplyRecipe: O(1) 确定性注入配方 (免 LLM 瞎猜)
+        ApplyRecipe --> RunTool
+        
+        QueryRunbook --> NoMatch: 未命中已知 Runbook
+        NoMatch --> LLMExploration: LLM 深度推理与多步试错
+        LLMExploration --> RecoveredSuccess: 最终通过 Verifier (exit=0)
+        LLMExploration --> HardFailure: 耗尽重试仍然失败
+    }
+    
+    RecoveredSuccess --> OfflineEvolver: 异步唤醒 Evolver (后台低峰期)
+    
+    state OfflineEvolver {
+        [*] --> ExtractPattern: 提炼错误签名与生效修复片段
+        ExtractPattern --> CreateDraft: 写入 experience_runbooks (status=draft)
+        CreateDraft --> SandboxedVerification: 在隔离 Worktree 运行 verification_command
+        SandboxedVerification --> RegressionSuite: 运行 100 个历史用例 Benchmark
+        RegressionSuite --> EvalPassCheck: 零劣化且通过率提升?
+        EvalPassCheck --> PromoteAndFreeze: 晋级为 status=verified 且 Auto-Freeze
+        EvalPassCheck --> DiscardCandidate: 废弃草稿
+    }
+    
+    PromoteAndFreeze --> StagedActionCard: 生成物料化卡片推送用户
+    StagedActionCard --> Idle
+    HardFailure --> Idle
+```
+
+#### 关键机制细则：
+1. **$O(1)$ 快速已知解命中（消除重复 Token 浪费）**：
+   - 当 Coder 执行终端命令或编译报错时，系统截取 `stderr` 计算正则指纹；
+   - 若 `experience_runbooks` 中存在 `status = 'verified'` 且前置条件满足的配方，直接在当前 Turn 注入提示：“检测到已知工程问题，标准修复手段为：...”。**跳过多轮瞎猜，单次解决率提升 80% 以上**。
+2. **离线胜态锁定（Auto-Freeze）与防退化**：
+   - 经验条目一旦通过回归集验证，立即置为 `status = 'verified'` 并写入 `frozen_at` 时间戳；
+   - 后续任何任务只允许**读取与执行**该条目，严禁任意 LLM 在无独立验证的前提下“重写”它。
+3. **线上熔断机制（Circuit Breaker）**：
+   - 若线上某次采用了 `verified` 的条目后，验证命令依然报错，系统将该条目的 `failure_count + 1`；
+   - 当 `failure_count >= 2` 时，触发熔断，状态自动降级为 `deprecated`，不再对外注入，并向管理员告警，**彻底阻断错误经验自我强化的滚雪球效应**。
+
+---
+
+### 6.4 真实生产场景对照：以实际工程问题为例
+
+| 维度 | 传统口号式“自进化” | Knoa 验证器驱动的落地实战 |
+|---|---|---|
+| **偶发异常** | `ImportError: cannot import name 'UTC' from 'datetime'` | 同左 |
+| **传统做法** | Agent 聊天打字反思：“我下次应该注意 Python 版本差异”，将一段话存入向量库 | 系统记录本次失败堆栈、环境版本（3.10.12）与最终修复代码 |
+| **经验提取** | 模糊自然语言文本：“写 Python 时注意 UTC 导入” | 结构化 Runbook：`{"regex": "ImportError.*UTC.*datetime", "python": "<3.11", "fix": "from datetime import datetime, timezone; UTC = timezone.utc", "verify": "pytest tests/..."}` |
+| **验证方式** | 无验证，直接当作“记忆” | 在隔离沙箱中执行 `pytest tests/test_automation_recurrence.py`，必须 `exit_code == 0` |
+| **回归保障** | 无回归，下次可能因为上下文过长产生新 Bug | 运行自动化回归测试集，确保既有 30+ 用例 100% 通过 |
+| **下次遇到** | 重新检索向量库，概率性遗忘或仍旧写错 | 正则直接 $O(1)$ 拦截，在生成代码前直接应用标准兼容头，**一次成功** |
+
+---
+
+### 6.5 任务类型分级矩阵 (Verifier Strength Matrix)
+
+Knoa 严格按照“验证器强度”划定自进化的权限天花板，绝不跨越红线：
 
 | 任务类型 | 验证器可信度 | 验证器实现来源 | 允许的演进等级 | Knoa 落地策略 |
 |---|---|---|---|---|
-| **C++ / Rust / Python 代码实现** | ★★★★★ (极高) | `compile` / `pytest` / ASan / CI 退出码 | **允许自动化生成补丁与单测闭环晋级** | 优先由 Coder Agent 承接失败回放 |
-| **SQL 查询与数据清洗转换** | ★★★★★ (极高) | Schema 约束 / 结果集哈希比对 / 语法检查 | **允许自动化修复与模式缓存** | 确定性函数沉淀 |
-| **现场日志分析与错误栈提取** | ★★★★☆ (高) | 日志行号真实性 / 错误码匹配 / 源码行定位 | **允许规则与特征签名自动提取** | 沉淀为特定异常的诊断 Runbook |
-| **GUI 自动化与系统状态运维** | ★★★★☆ (高) | 进程状态 / 端口监听 / 文件系统断言 | **仅限沙箱中验证通过后方可沉淀** | 确定性运维步骤 |
-| **行业调研与知识检索 (Researcher)** | ★★☆☆☆ (低) | 引用源 URL 可达性 / 交叉比对 / 用户点赞 | **仅做经验与参考源积累，严禁改写核心 Prompt** | 知识库更新 |
+| **C++ / Rust / Python 代码实现** | ★★★★★ (极高) | `compile` / `pytest` / ASan / CI 退出码 | **全自动闭环：Runbook 生成、沙箱验证、晋级生效** | 优先由 Coder Agent 闭环 |
+| **SQL 查询与数据清洗转换** | ★★★★★ (极高) | Schema 约束 / 结果集哈希比对 / 语法检查 | **全自动闭环：确定性函数沉淀** | 确定性函数沉淀 |
+| **现场日志分析与错误栈提取** | ★★★★☆ (高) | 日志行号真实性 / 错误码匹配 / 源码行定位 | **规则提取：生成特征诊断 Runbook** | 沉淀为故障排查手册 |
+| **GUI 自动化与系统状态运维** | ★★★★☆ (高) | 进程状态 / 端口监听 / 文件系统断言 | **受控演进：仅限沙箱中验证通过后方可沉淀** | 确定性运维步骤 |
+| **行业调研与知识检索 (Researcher)** | ★★☆☆☆ (低) | 引用源 URL 可达性 / 交叉比对 / 用户点赞 | **只积累源资料与点赞反馈，严禁改动核心逻辑** | 外部索引更新 |
 | **邮件撰写 / 人际沟通 / 开放文案** | ★☆☆☆☆ (极弱) | 主观审美偏好（缺乏客观真理） | **严格禁止自主修改行为逻辑** | 仅保留原始历史由用户判断 |
 
-### 6.3 演进工程铁律：从“可积累”到“自修改”
-Knoa 的能力演进遵循严密的工程递进次序，严禁倒置：
+---
 
-$$\text{Agent Profile} \longrightarrow \text{Execution Trace} \longrightarrow \text{Experience Library} \longrightarrow \text{Benchmark Eval} \longrightarrow \text{Verified Improvement} \longrightarrow \text{Self-Modification}$$
+### 6.6 四阶段实施路线图 (Actionable Milestones)
 
-1. **第一步：Trace 与经验可积累（已进入工程化）**：
-   - 记录每一次复杂排查与编写代码的执行轨迹，提炼高置信度的 `Error Signature`（错误特征签名）与 `Runbook`；
-2. **第二步：独立 Verifier 与 Benchmark 回归集（L3 关键基石）**：
-   - 沉淀失败用例库（Failures Cluster）。任何修改提议必须在包含数十到上百个真实用例的测试集上自动化运行；
-3. **第三步：门禁式晋级（Promotion Gate）**：
-   - 拒绝“我觉得我变强了”。只有在 Benchmark 上量化得分提升（如 $92\% \to 96\%$），并且在核心指标零劣化的前提下，系统才允许将经验或策略注入到下一代 Profile 中。
-
-### 6.4 协同辅助支柱：主动感知晨报与物料化决策
-在保持 Verifier 强约束的同时，保留两项务实的高价值功能：
-- **主动晨间早报 (Proactive Morning Standup)**：7×24h 守护进程在清晨低峰期通过轻量探针巡检 Git PR、Jira 工单增量与磁盘状态，合成结构化简报推送给移动端；
-- **物料化草稿沙盒 (Staged Action Cards)**：所有复杂诊断与修复全部打包为带 Diff、测试日志、回写工单文本的 Action Cards，交付用户一键批准，**把人类留在最终决策环路上（Human-in-the-loop）**。
+1. **Phase 1: 确定性 Runbook 注册与 $O(1)$ 注入引擎（零风险提效）**
+   - 在 `assistant.db` 中建立 `experience_runbooks` 表；
+   - 在 `knoa_platform` 工具调用前后挂载钩子：工具失败时查询错误签名，命中即注入确定性配方；
+   - 先人工录入 10 个高频工业故障（如 Python 3.10 UTC 兼容、WAL 检查点锁、ROS Bag 分卷错误）。
+2. **Phase 2: 失败探索捕获器与候选生成器（只生草稿，不自生效）**
+   - 主任务成功后，若步数 $\ge 5$ 且经历过中途失败，提取 `(Failure Trace -> Effective Fix)` 生成 `draft` 条目；
+   - 产出清晰的 Markdown 变动卡片供人类通过移动端 App / 飞书卡片点按批准。
+3. **Phase 3: 自动化沙箱回归评测器（Promotion Gate）**
+   - 引入轻量级沙箱环境（Worktree / 隔离容器），自动执行 `verification_command`；
+   - 建立 50 个经典场景的回归 Benchmark 集合，每次晋级前全自动跑分，通过率提升且零衰减方可置为 `verified`。
+4. **Phase 4: 线上熔断与自淘汰机制（Circuit Breaker）**
+   - 监控条目在线上应用的真实后续；
+   - 连续失败 2 次立即下线归档，彻底消除经验污染。
 
 ---
 
