@@ -1030,4 +1030,199 @@ async def test_reference_server_runs_over_real_stdio_mcp(
         "jira.assign_issue",
         "jira.list_transitions",
         "jira.transition_issue",
+        "jira.correlate_by_sn",
+        "jira.download_oss_evidence",
+        "jira.list_oss_objects",
+        "jira.list_tempo_records",
+        "jira.download_tempo_records",
     ]
+
+
+def test_field_mapper_cleans_custom_fields_and_extracts_signals() -> None:
+    from examples.jira_mcp_server.field_mapper import (
+        clean_custom_fields,
+        extract_domain_signals,
+    )
+
+    raw_fields = {
+        "summary": "Robot stopped",
+        "customfield_10708": {"value": "TBPR00-1234-567-M016"},
+        "customfield_10602": "上海某大型商场",
+        "customfield_10707": "Scrubber 50",
+        "customfield_99999": "待填写",
+        "customfield_88888": "不涉及",
+    }
+    field_names = {"customfield_99999": "无用字段", "customfield_88888": "测试项"}
+    cleaned = clean_custom_fields(raw_fields, field_names)
+    assert cleaned["机器SN"] == "TBPR00-1234-567-M016"
+    assert cleaned["客户名称"] == "上海某大型商场"
+    assert cleaned["归属产品"] == "Scrubber 50"
+    assert "无用字段" not in cleaned
+    assert "测试项" not in cleaned
+
+    texts = [
+        "现场机器在梯控乘梯时偶发停滞",
+        "PNC 运动规划报错，请研发看下",
+        "请补充现场网络与日志数据",
+    ]
+    signals = extract_domain_signals(texts)
+    assert signals["elevator_related"] is True
+    assert signals["motion_planning_related"] is True
+    assert signals["missing_data"] is True
+    assert signals["escalation_requested"] is True
+
+
+def test_oss_and_tempo_link_extraction() -> None:
+    from examples.jira_mcp_server.oss_downloader import extract_oss_links
+    from examples.jira_mcp_server.tempo_downloader import (
+        extract_tempo_share_links,
+        resolve_tempo_endpoint,
+    )
+
+    texts = [
+        "请查看现场日志: oss://gs-public-shared/defect_logs/2026/09/robot.log.tar.gz 另外看视频",
+        "更多详情参见 https://service.gs-robot.com/#/robot/shared-record-list/706ef3d2-1234-5678-abcd-ef0123456789/TBPR123456",
+    ]
+    oss = extract_oss_links(texts)
+    assert oss == ["oss://gs-public-shared/defect_logs/2026/09/robot.log.tar.gz"]
+
+    tempo = extract_tempo_share_links(texts)
+    assert len(tempo) == 1
+    assert tempo[0]["share_id"] == "706ef3d2-1234-5678-abcd-ef0123456789"
+    assert tempo[0]["sn"] == "TBPR123456"
+    assert resolve_tempo_endpoint("TBPR123456") == "https://bot.gs-robot.com"
+    assert resolve_tempo_endpoint("MSCU9999") == "https://bot.eu.gausium-robot.com"
+
+
+@pytest.mark.asyncio
+async def test_jira_client_correlate_by_sn_and_oss_download(tmp_path: Path) -> None:
+    from examples.jira_mcp_server.oss_downloader import download_oss_file
+
+    settings = _settings(tmp_path)
+    store = JiraStateStore(settings.state_path)
+    client = JiraClient(settings, store)
+
+    async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+        if path.endswith("/search"):
+            assert kwargs.get("params", {}).get("jql") == 'text ~ "TBPR00123" ORDER BY created DESC'
+            return {
+                "issues": [
+                    {
+                        "key": "SELLSERVIC-101",
+                        "fields": {
+                            "summary": "机器避障异常",
+                            "status": {"name": "Closed"},
+                            "priority": {"name": "High"},
+                            "resolution": {"name": "Fixed"},
+                            "created": "2026-09-01T10:00:00.000+0800",
+                        },
+                    }
+                ]
+            }
+        raise AssertionError(f"Unexpected request path: {path}")
+
+    client._request = fake_request  # type: ignore[method-assign]
+    correlated = await client.correlate_by_sn("TBPR00123")
+    assert len(correlated) == 1
+    assert correlated[0]["key"] == "SELLSERVIC-101"
+    assert correlated[0]["status"] == "Closed"
+
+    dummy_payload = b"LOG DATA ARCHIVE"
+    transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, headers={"content-length": str(len(dummy_payload))}, content=dummy_payload)
+    )
+    async with httpx.AsyncClient(transport=transport) as mock_http:
+        download_res = await download_oss_file(
+            "oss://gs-public-shared/logs/test.log",
+            tmp_path / "evidence/PROJECT-123/oss",
+            client=mock_http,
+        )
+        assert download_res["filename"] == "test.log"
+        assert download_res["size"] == len(dummy_payload)
+        assert Path(download_res["path"]).read_bytes() == dummy_payload
+
+
+@pytest.mark.asyncio
+async def test_enhanced_jira_tools_end_to_end(tmp_path: Path) -> None:
+    pytest.importorskip("starlette")
+    from mcp import types
+    from examples.jira_mcp_server.server import JiraMCPApplication
+
+    app = JiraMCPApplication(_settings(tmp_path))
+    try:
+        async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+            if path.endswith("/field"):
+                return [
+                    {"id": "customfield_10708", "name": "产品ID"},
+                    {"id": "customfield_10602", "name": "客户名称"},
+                ]
+            if "/issue/PROJECT-888" in path:
+                return {
+                    "key": "PROJECT-888",
+                    "fields": {
+                        "summary": "机器在梯控避障时偶发急停",
+                        "description": (
+                            "现场日志见 oss://gs-public-shared/logs/2026/bag.tar.gz "
+                            "请看 https://service.gs-robot.com/#/robot/shared-record-list/706ef3d2-1234-5678-abcd-ef0123456789/TBPR123456"
+                        ),
+                        "status": {"name": "In Progress"},
+                        "priority": {"name": "High"},
+                        "issuetype": {"name": "Defect"},
+                        "assignee": {"displayName": "Dev User", "name": "dev"},
+                        "reporter": {"displayName": "QA User", "name": "qa"},
+                        "created": "2026-09-08T10:00:00.000+0800",
+                        "updated": "2026-09-08T11:00:00.000+0800",
+                        "labels": ["hardware", "elevator"],
+                        "components": [{"name": "Motion"}],
+                        "customfield_10708": {"value": "TBPR123456"},
+                        "customfield_10602": "某大型机场",
+                        "customfield_99999": "待填写",
+                    },
+                }
+            if path.endswith("/search"):
+                return {
+                    "issues": [
+                        {
+                            "key": "PROJECT-100",
+                            "fields": {
+                                "summary": "同机型历史问题",
+                                "status": {"name": "Resolved"},
+                                "priority": {"name": "Medium"},
+                                "resolution": {"name": "Done"},
+                                "created": "2026-08-01T00:00:00.000+0800",
+                            },
+                        }
+                    ]
+                }
+            raise AssertionError(f"Unexpected path: {path}")
+
+        app.jira._request = fake_request  # type: ignore[method-assign]
+        context = type("Context", (), {"session": object(), "protocol_version": "2025-06-18"})()
+
+        # 1. Call jira.get_issue
+        res = await app._call_tool(
+            context,
+            types.CallToolRequestParams(name="jira.get_issue", arguments={"issue_key": "PROJECT-888"}),
+        )
+        data = res.structured_content
+        assert data["key"] == "PROJECT-888"
+        assert data["custom_fields"]["机器SN"] == "TBPR123456"
+        assert data["custom_fields"]["客户名称"] == "某大型机场"
+        assert "待填写" not in str(data["custom_fields"])
+        assert data["oss_links"] == ("oss://gs-public-shared/logs/2026/bag.tar.gz",)
+        assert len(data["shared_record_links"]) == 1
+        assert data["shared_record_links"][0]["sn"] == "TBPR123456"
+        assert data["domain_signals"]["elevator_related"] is True
+        assert data["domain_signals"]["motion_planning_related"] is True
+
+        # 2. Call jira.correlate_by_sn
+        sn_res = await app._call_tool(
+            context,
+            types.CallToolRequestParams(name="jira.correlate_by_sn", arguments={"serial_number": "TBPR123456"}),
+        )
+        assert len(sn_res.structured_content["issues"]) == 1
+        assert sn_res.structured_content["issues"][0]["key"] == "PROJECT-100"
+    finally:
+        await app.jira.close()
+
+

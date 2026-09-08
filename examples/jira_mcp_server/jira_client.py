@@ -42,6 +42,35 @@ _IMAGE_FORMAT_FOR_MIME = {
 _MAX_ANALYSIS_PROMPT_BYTES = 64 * 1024
 logger = logging.getLogger("jira-mcp-example.client")
 
+try:
+    from .field_mapper import (
+        BUILTIN_FIELD_ALIASES,
+        clean_custom_fields,
+        extract_domain_signals,
+    )
+    from .oss_downloader import download_oss_file, extract_oss_links, list_oss_objects
+    from .tempo_downloader import (
+        download_tempo_file,
+        extract_tempo_share_links,
+        list_tempo_records,
+    )
+except ImportError:
+    from field_mapper import (  # type: ignore[no-redef]
+        BUILTIN_FIELD_ALIASES,
+        clean_custom_fields,
+        extract_domain_signals,
+    )
+    from oss_downloader import (  # type: ignore[no-redef]
+        download_oss_file,
+        extract_oss_links,
+        list_oss_objects,
+    )
+    from tempo_downloader import (  # type: ignore[no-redef]
+        download_tempo_file,
+        extract_tempo_share_links,
+        list_tempo_records,
+    )
+
 
 def _required_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
@@ -267,6 +296,11 @@ class JiraStateStore:
                     comment_id TEXT NOT NULL,
                     updated_at REAL NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS field_metadata (
+                    field_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    fetched_at REAL NOT NULL
+                );
                 """
             )
             columns = {
@@ -445,6 +479,25 @@ class JiraStateStore:
                 (state, comment_id, time.time(), idempotency_key),
             )
 
+    def get_field_metadata(self, max_age_seconds: float = 86400.0) -> dict[str, str]:
+        with self._connect() as db:
+            cutoff = time.time() - max_age_seconds
+            rows = db.execute(
+                "SELECT field_id, display_name FROM field_metadata WHERE fetched_at >= ?",
+                (cutoff,),
+            ).fetchall()
+            return {str(row[0]): str(row[1]) for row in rows}
+
+    def save_field_metadata(self, mapping: dict[str, str]) -> None:
+        now = time.time()
+        with self._connect() as db:
+            db.executemany(
+                "INSERT INTO field_metadata(field_id, display_name, fetched_at) "
+                "VALUES (?, ?, ?) ON CONFLICT(field_id) DO UPDATE SET "
+                "display_name=excluded.display_name, fetched_at=excluded.fetched_at",
+                [(fid, name, now) for fid, name in mapping.items()],
+            )
+
 
 class JiraClient:
     def __init__(self, settings: JiraSettings, store: JiraStateStore) -> None:
@@ -593,6 +646,25 @@ class JiraClient:
             identity = f"initial:{issue.get('id', issue_key)}:{fields.get('created', '')}"
         return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
 
+    async def load_field_metadata(self) -> dict[str, str]:
+        cached = self.store.get_field_metadata()
+        if cached:
+            return cached
+        try:
+            fields_data = await self._request("GET", f"{self.api_root}/field")
+            if isinstance(fields_data, list):
+                mapping = {
+                    str(f["id"]): str(f["name"])
+                    for f in fields_data
+                    if isinstance(f, dict) and "id" in f and "name" in f
+                }
+                if mapping:
+                    self.store.save_field_metadata(mapping)
+                    return mapping
+        except Exception:
+            logger.debug("Failed to fetch Jira field definitions", exc_info=True)
+        return {}
+
     async def get_issue(
         self, issue_key: str, *, changelog: bool = False
     ) -> dict[str, Any]:
@@ -600,7 +672,7 @@ class JiraClient:
         params: dict[str, Any] = {
             "fields": (
                 "summary,description,status,priority,issuetype,assignee,reporter,"
-                "created,updated,labels,components,attachment,comment"
+                "created,updated,labels,components,attachment,comment,*navigable"
             )
         }
         if changelog:
@@ -613,10 +685,36 @@ class JiraClient:
         fields = (
             issue.get("fields", {}) if isinstance(issue.get("fields"), dict) else {}
         )
+        summary_text = str(fields.get("summary", ""))[:2000]
+        desc_text = _plain_text(fields.get("description"))[:50_000]
+
+        comments_obj = fields.get("comment", {})
+        comments_raw = (
+            comments_obj.get("comments", []) if isinstance(comments_obj, dict) else []
+        )
+        comment_texts = [
+            _plain_text(c.get("body", ""))
+            for c in comments_raw
+            if isinstance(c, dict)
+        ]
+        all_texts = [summary_text, desc_text] + comment_texts
+
+        field_names = await self.load_field_metadata()
+        custom_fields = clean_custom_fields(fields, field_names)
+        for val in custom_fields.values():
+            if isinstance(val, str):
+                all_texts.append(val)
+            elif isinstance(val, list):
+                all_texts.extend([str(item) for item in val if isinstance(item, str)])
+
+        oss_links = extract_oss_links(all_texts)
+        share_links = extract_tempo_share_links(all_texts)
+        signals = extract_domain_signals(all_texts)
+
         return {
             "key": key,
             "summary": str(fields.get("summary", ""))[:2000],
-            "description": _plain_text(fields.get("description"))[:50_000],
+            "description": desc_text,
             "status": _named(fields.get("status")),
             "priority": _named(fields.get("priority")),
             "issue_type": _named(fields.get("issuetype")),
@@ -628,7 +726,108 @@ class JiraClient:
             "components": tuple(
                 _named(item) for item in fields.get("components", [])[:100]
             ),
+            "custom_fields": custom_fields,
+            "oss_links": tuple(oss_links),
+            "shared_record_links": tuple(share_links),
+            "domain_signals": signals,
             "changelog": issue.get("changelog") if changelog else None,
+        }
+
+    async def correlate_by_sn(
+        self, serial_number: str, *, limit: int = 20
+    ) -> tuple[dict[str, Any], ...]:
+        sn = serial_number.strip()
+        if not sn:
+            raise ValueError("Serial number must not be empty")
+        safe_sn = re.sub(r'["\\]', "", sn)
+        bounded_limit = max(1, min(limit, 50))
+        jql = f'text ~ "{safe_sn}" ORDER BY created DESC'
+        payload = await self._request(
+            "GET",
+            f"{self.api_root}/search",
+            params={
+                "jql": jql,
+                "startAt": 0,
+                "maxResults": bounded_limit,
+                "fields": "summary,status,priority,resolution,created",
+            },
+        )
+        issues = payload.get("issues", []) if isinstance(payload, dict) else []
+        records = []
+        for item in issues:
+            if not isinstance(item, dict):
+                continue
+            item_fields = item.get("fields", {})
+            records.append(
+                {
+                    "key": str(item.get("key", "")),
+                    "summary": str(item_fields.get("summary", ""))[:2000],
+                    "status": _named(item_fields.get("status")),
+                    "priority": _named(item_fields.get("priority")),
+                    "resolution": _named(item_fields.get("resolution")),
+                    "created": str(item_fields.get("created", "")),
+                }
+            )
+        return tuple(records)
+
+    async def list_oss_objects(
+        self, prefix: str = "", *, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        return await list_oss_objects(prefix, limit=limit)
+
+    async def download_oss_evidence(
+        self, issue_key: str, oss_url: str
+    ) -> dict[str, Any]:
+        key = validate_issue_key(issue_key)
+        destination_dir = self.settings.attachment_root / key / "oss"
+        self._private_directory(destination_dir)
+        downloaded = await download_oss_file(
+            oss_url,
+            destination_dir,
+            max_bytes=max(self.settings.max_attachment_bytes * 50, 500 * 1024 * 1024),
+        )
+        return {
+            "issue_key": key,
+            **downloaded,
+        }
+
+    async def list_tempo_records(
+        self,
+        share_id: str,
+        sn: str,
+        *,
+        status: str | None = None,
+        file_type: str | None = None,
+        filename: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        return await list_tempo_records(
+            share_id,
+            sn,
+            status=status,
+            file_type=file_type,
+            filename=filename,
+            limit=limit,
+        )
+
+    async def download_tempo_file(
+        self,
+        issue_key: str,
+        download_url: str,
+        filename: str,
+    ) -> dict[str, Any]:
+        key = validate_issue_key(issue_key)
+        destination_dir = self.settings.attachment_root / key / "tempo"
+        self._private_directory(destination_dir)
+        downloaded = await download_tempo_file(
+            download_url,
+            filename,
+            destination_dir,
+            max_bytes=max(self.settings.max_attachment_bytes * 50, 500 * 1024 * 1024),
+        )
+        return {
+            "issue_key": key,
+            **downloaded,
         }
 
     async def get_comments(

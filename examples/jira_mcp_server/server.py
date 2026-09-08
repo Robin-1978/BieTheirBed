@@ -558,6 +558,92 @@ class JiraMCPApplication:
                         open_world_hint=True,
                     ),
                 ),
+                types.Tool(
+                    name="jira.correlate_by_sn",
+                    description=(
+                        "Search and correlate past Jira issues for a given robot Serial Number (SN) "
+                        "to analyze recurring defect patterns."
+                    ),
+                    input_schema=_object_schema(
+                        {
+                            "serial_number": {"type": "string"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                        },
+                        ["serial_number"],
+                    ),
+                    annotations=read_only,
+                ),
+                types.Tool(
+                    name="jira.download_oss_evidence",
+                    description=(
+                        "Download an oss://gs-public-shared/... log or bag file into the local issue evidence directory."
+                    ),
+                    input_schema=_object_schema(
+                        {
+                            "issue_key": {"type": "string"},
+                            "oss_url": {"type": "string"},
+                        },
+                        ["issue_key", "oss_url"],
+                    ),
+                    annotations=types.ToolAnnotations(
+                        read_only_hint=False,
+                        destructive_hint=False,
+                        idempotent_hint=True,
+                        open_world_hint=True,
+                    ),
+                ),
+                types.Tool(
+                    name="jira.list_oss_objects",
+                    description=(
+                        "List files and directories under an oss://gs-public-shared/ directory prefix."
+                    ),
+                    input_schema=_object_schema(
+                        {
+                            "prefix": {"type": "string"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                        ["prefix"],
+                    ),
+                    annotations=read_only,
+                ),
+                types.Tool(
+                    name="jira.list_tempo_records",
+                    description=(
+                        "Query and list shared robot log and bag records from a Tempo shared-record-list link."
+                    ),
+                    input_schema=_object_schema(
+                        {
+                            "share_id": {"type": "string"},
+                            "sn": {"type": "string"},
+                            "status": {"type": "string"},
+                            "file_type": {"type": "string"},
+                            "filename": {"type": "string"},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                        },
+                        ["share_id", "sn"],
+                    ),
+                    annotations=read_only,
+                ),
+                types.Tool(
+                    name="jira.download_tempo_records",
+                    description=(
+                        "Download a shared robot record file from a Tempo signed URL into the local issue evidence directory."
+                    ),
+                    input_schema=_object_schema(
+                        {
+                            "issue_key": {"type": "string"},
+                            "download_url": {"type": "string"},
+                            "filename": {"type": "string"},
+                        },
+                        ["issue_key", "download_url", "filename"],
+                    ),
+                    annotations=types.ToolAnnotations(
+                        read_only_hint=False,
+                        destructive_hint=False,
+                        idempotent_hint=True,
+                        open_world_hint=True,
+                    ),
+                ),
             ]
         )
 
@@ -636,6 +722,40 @@ class JiraMCPApplication:
                     str(arguments.get("issue_key", "")),
                     str(arguments.get("transition_id", "")),
                     fields=raw_fields,
+                )
+            elif name == "jira.correlate_by_sn":
+                payload = {
+                    "issues": await self.jira.correlate_by_sn(
+                        str(arguments.get("serial_number", "")),
+                        limit=int(arguments.get("limit", 20)),
+                    )
+                }
+            elif name == "jira.download_oss_evidence":
+                payload = await self.jira.download_oss_evidence(
+                    str(arguments.get("issue_key", "")),
+                    str(arguments.get("oss_url", "")),
+                )
+            elif name == "jira.list_oss_objects":
+                payload = {
+                    "objects": await self.jira.list_oss_objects(
+                        str(arguments.get("prefix", "")),
+                        limit=int(arguments.get("limit", 100)),
+                    )
+                }
+            elif name == "jira.list_tempo_records":
+                payload = await self.jira.list_tempo_records(
+                    str(arguments.get("share_id", "")),
+                    str(arguments.get("sn", "")),
+                    status=arguments.get("status"),
+                    file_type=arguments.get("file_type"),
+                    filename=arguments.get("filename"),
+                    limit=int(arguments.get("limit", 100)),
+                )
+            elif name == "jira.download_tempo_records":
+                payload = await self.jira.download_tempo_file(
+                    str(arguments.get("issue_key", "")),
+                    str(arguments.get("download_url", "")),
+                    str(arguments.get("filename", "")),
                 )
             else:
                 raise LookupError("Unknown Jira tool")

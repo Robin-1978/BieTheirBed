@@ -68,3 +68,23 @@ tools:
     effect: external_side_effect
     capabilities: [mcp, network]
     risk: high
+  jira.correlate_by_sn:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.download_oss_evidence:
+    effect: local_write
+    capabilities: [mcp, network, host_write]
+    risk: medium
+  jira.list_oss_objects:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.list_tempo_records:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  jira.download_tempo_records:
+    effect: local_write
+    capabilities: [mcp, network, host_write]
+    risk: medium
