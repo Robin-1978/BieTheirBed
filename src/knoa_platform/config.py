@@ -417,6 +417,24 @@ class AppConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_provider(self) -> AppConfig:
+        default_agents = type(self).model_fields["node_agents"].default_factory()
+        for builtin_id in ("coder", "researcher", "worker", "reviewer_agent"):
+            if builtin_id not in self.node_agents and builtin_id in default_agents:
+                self.node_agents[builtin_id] = default_agents[builtin_id]
+        if "knoa" in self.node_agents:
+            knoa = self.node_agents["knoa"]
+            if knoa.delegation.allowed:
+                merged_targets = frozenset(
+                    set(knoa.delegation.targets) | {"worker", "coder", "researcher"}
+                )
+                if merged_targets != knoa.delegation.targets:
+                    self.node_agents["knoa"] = knoa.model_copy(
+                        update={
+                            "delegation": knoa.delegation.model_copy(
+                                update={"targets": merged_targets}
+                            )
+                        }
+                    )
         if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", self.default_agent):
             raise ValueError("default_agent must be a stable safe Agent ID")
         catalog = self.node_agent_catalog()

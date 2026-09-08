@@ -169,6 +169,29 @@ class AgentExecutionService:
             await runtime.delete_session(binding.runtime_session())
         await asyncio.to_thread(self._bindings.delete, scope)
 
+    def resolve_policy(
+        self,
+        scope: RuntimeScope,
+        agent_id: str,
+        *,
+        invocation_kind: str | None = None,
+    ) -> ResolvedInvocationPolicy:
+        resolver = self._resolver_for()
+        agent = resolver.agent(agent_id)
+        kind = invocation_kind or agent.visibility
+        principal_capabilities = self._capabilities_for(scope)
+        available_tools = self._gateway.available_tool_names(principal_capabilities)
+        return resolver.resolve_policy(
+            agent_id,
+            invocation_kind=kind,
+            caller_id=scope.principal_id,
+            principal_capabilities=frozenset(
+                item.value for item in principal_capabilities
+            ),
+            available_tools=available_tools,
+            installed_skills=self._installed_skills(),
+        )
+
     async def _execute_turn_locked(
         self,
         request: ExecuteAgentTurn,
@@ -510,22 +533,22 @@ class AgentExecutionService:
             else self._manager.resolve_agent_id(requested_agent_id)
         )
         existing = await asyncio.to_thread(self._bindings.get, scope)
-        if existing is not None:
-            if existing.agent_id != selected_agent_id:
-                raise ValueError("Session is already bound to a different Agent")
-            if existing.agent_config_digest == agent_config_digest:
-                return existing
+        if (
+            existing is not None
+            and existing.agent_id == selected_agent_id
+            and existing.agent_config_digest == agent_config_digest
+        ):
+            return existing
         lock = await self._binding_lock(scope.session_handle)
         async with lock:
             existing = await asyncio.to_thread(self._bindings.get, scope)
-            if existing is not None:
-                if existing.agent_id != selected_agent_id:
-                    raise ValueError("Session is already bound to a different Agent")
-                if existing.agent_config_digest == agent_config_digest:
-                    return existing
-                binding_epoch = existing.binding_epoch + 1
-            else:
-                binding_epoch = 1
+            if (
+                existing is not None
+                and existing.agent_id == selected_agent_id
+                and existing.agent_config_digest == agent_config_digest
+            ):
+                return existing
+            binding_epoch = (existing.binding_epoch + 1) if existing is not None else 1
             agent_id = selected_agent_id
             runtime_lease = (
                 self._manager.lease_system(agent_id)

@@ -665,6 +665,58 @@ def _freeze_skill_digests(
     return managed.model_copy(update={"skills": frozen})
 
 
+def _sync_builtin_agents(
+    managed: ManagedConfig,
+    bootstrap_managed: ManagedConfig,
+) -> ManagedConfig:
+    merged_agents = dict(managed.agents.agents)
+    changed = False
+
+    default_model = managed.default_model
+    for agent_id, agent in bootstrap_managed.agents.agents.items():
+        if agent_id not in merged_agents:
+            binding = agent.model_binding
+            if binding.ownership == "platform" and binding.model not in managed.models:
+                binding = binding.model_copy(update={"model": default_model})
+                agent = agent.model_copy(update={"model_binding": binding})
+            merged_agents[agent_id] = agent
+            changed = True
+        elif agent_id in ("coder", "researcher"):
+            current = merged_agents[agent_id]
+            binding = current.model_binding
+            if binding.ownership == "platform" and binding.model not in managed.models:
+                binding = binding.model_copy(update={"model": default_model})
+            merged_agents[agent_id] = agent.model_copy(
+                update={
+                    "model_binding": binding,
+                    "enabled": current.enabled,
+                }
+            )
+            changed = True
+
+    if "knoa" in merged_agents:
+        knoa = merged_agents["knoa"]
+        if knoa.delegation.allowed:
+            merged_targets = frozenset(
+                set(knoa.delegation.targets) | {"worker", "coder", "researcher"}
+            )
+            if merged_targets != knoa.delegation.targets:
+                merged_agents["knoa"] = knoa.model_copy(
+                    update={
+                        "delegation": knoa.delegation.model_copy(
+                            update={"targets": merged_targets}
+                        )
+                    }
+                )
+                changed = True
+
+    if not changed:
+        return managed
+
+    updated_catalog = managed.agents.model_copy(update={"agents": merged_agents})
+    return managed.model_copy(update={"agents": updated_catalog})
+
+
 def _managed_skill_providers(
     managed: ManagedConfig,
     catalog: SkillCatalog,
@@ -812,10 +864,11 @@ def build_core_runtime(
         actor=config.owner_principal_id,
     )
     frozen_applied = _freeze_skill_digests(applied_config.document, packages)
+    frozen_applied = _sync_builtin_agents(frozen_applied, bootstrap_managed)
     applied_config = config_registry.adopt(
         frozen_applied,
         actor=config.owner_principal_id,
-        summary="Freeze managed Skill package content",
+        summary="Synchronize managed configuration and builtin agents",
     )
     managed = applied_config.document
     agent_resolver = NodeAgentResolver(
