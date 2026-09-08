@@ -58,6 +58,7 @@ from knoa_platform.tasks import (
     TaskDefinitionState,
     TaskEvent,
     TaskLaunchPolicy,
+    TaskLaunchReason,
     TaskPreflightResult,
     TaskOrigin,
     TaskState,
@@ -187,7 +188,10 @@ class GatewayCoreClient(Protocol):
 
     async def delete_product_task(self, task_id: str) -> None: ...
     async def execute_product_task(
-        self, task_id: str, *, launch_reason: str = "manual"
+        self,
+        task_id: str,
+        *,
+        launch_reason: TaskLaunchReason | str = TaskLaunchReason.MANUAL,
     ) -> ProductTaskExecutionSnapshot: ...
     async def get_product_task_execution(self, execution_id: str) -> ProductTaskExecutionSnapshot: ...
     async def list_product_task_executions(
@@ -633,8 +637,10 @@ class GatewayCoreBridge:
         principal_id: str,
         task_id: str,
         *,
-        launch_reason: str = "manual",
+        launch_reason: TaskLaunchReason | str = TaskLaunchReason.MANUAL,
     ) -> ProductTaskExecutionSnapshot:
+        if isinstance(launch_reason, str):
+            launch_reason = TaskLaunchReason(launch_reason)
         return await (
             await self._client_for(principal_id)
         ).execute_product_task(task_id, launch_reason=launch_reason)

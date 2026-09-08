@@ -1219,8 +1219,10 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
     async def set_product_task_state(
         self,
         task_id: str,
-        state: TaskDefinitionState,
+        state: TaskDefinitionState | str,
     ) -> ProductTaskSnapshot:
+        if isinstance(state, str):
+            state = TaskDefinitionState(state)
         response = await self._request(
             SetProductTaskStateRequest(
                 request_id=self._request_id(),
@@ -1246,8 +1248,10 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         self,
         task_id: str,
         *,
-        launch_reason: TaskLaunchReason = TaskLaunchReason.MANUAL,
+        launch_reason: TaskLaunchReason | str = TaskLaunchReason.MANUAL,
     ) -> ProductTaskExecutionSnapshot:
+        if isinstance(launch_reason, str):
+            launch_reason = TaskLaunchReason(launch_reason)
         response = await self._request(
             ExecuteProductTaskRequest(
                 request_id=self._request_id(),
