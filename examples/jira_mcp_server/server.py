@@ -648,12 +648,16 @@ class JiraMCPApplication:
                     name="jira.analyze_local_logs",
                     description=(
                         "Inspect the issue's evidence directory, automatically unpack archive logs (.tar.gz, .zip), "
-                        "and extract crash backtraces, FATAL errors, and diagnostic lines."
+                        "extract crash backtraces, FATAL errors, diagnostic lines, and optionally link source lines with local Git code snippets and git blame."
                     ),
                     input_schema=_object_schema(
                         {
                             "issue_key": {"type": "string"},
                             "auto_unpack": {"type": "boolean"},
+                            "repo_root": {
+                                "type": "string",
+                                "description": "Optional local Git repository root to link crash source lines to code snippets and git blame.",
+                            },
                         },
                         ["issue_key"],
                     ),
@@ -781,6 +785,7 @@ class JiraMCPApplication:
                 payload = await self.jira.analyze_local_logs(
                     str(arguments.get("issue_key", "")),
                     auto_unpack=bool(arguments.get("auto_unpack", True)),
+                    repo_root=arguments.get("repo_root"),
                 )
             else:
                 raise LookupError("Unknown Jira tool")

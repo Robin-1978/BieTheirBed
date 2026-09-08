@@ -833,11 +833,20 @@ class JiraClient:
         }
 
     async def analyze_local_logs(
-        self, issue_key: str, *, auto_unpack: bool = True
+        self,
+        issue_key: str,
+        *,
+        auto_unpack: bool = True,
+        repo_root: str | None = None,
     ) -> dict[str, Any]:
         key = validate_issue_key(issue_key)
         evidence_dir = self.settings.attachment_root / key
-        return analyze_directory_logs(evidence_dir, auto_unpack=auto_unpack)
+        target_repo = repo_root or os.environ.get("JIRA_CODE_REPO")
+        return analyze_directory_logs(
+            evidence_dir,
+            auto_unpack=auto_unpack,
+            repo_root=target_repo,
+        )
 
     async def get_comments(
         self, issue_key: str, *, limit: int = 50

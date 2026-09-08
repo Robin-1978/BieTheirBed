@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import tarfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +31,7 @@ _ERROR_PATTERNS = [
 ]
 
 _SOURCE_LINE_RE = re.compile(
-    r"(?:\[|\b)([A-Za-z0-9_/-]+\.(?:cc|cpp|c|h|hpp|py)):([1-9][0-9]*)"
+    r"(?:\[|\b|at |File \")([A-Za-z0-9_/-]+\.(?:cc|cpp|c|h|hpp|py))(?:\", line |:)([1-9][0-9]*)"
 )
 
 _ARCHIVE_EXTENSIONS = (".tar.gz", ".tgz", ".tar.bz2", ".tar", ".zip")
@@ -153,7 +155,164 @@ def scan_file_for_errors(file_path: Path, max_matches: int = 20) -> dict[str, An
     }
 
 
-def analyze_directory_logs(evidence_dir: Path, auto_unpack: bool = True) -> dict[str, Any]:
+def resolve_source_in_repo(
+    repo_root: Path,
+    source_file: str,
+    cache: dict[str, Path | None] | None = None,
+) -> Path | None:
+    """Find the real file path in repo_root corresponding to a source_file reference from logs."""
+    if cache is not None and source_file in cache:
+        return cache[source_file]
+
+    clean_file = source_file.strip().lstrip("/")
+    # 1. Direct relative match
+    candidate = repo_root / clean_file
+    if candidate.is_file():
+        if cache is not None:
+            cache[source_file] = candidate
+        return candidate
+
+    # 2. Search by filename across repo
+    target_name = Path(clean_file).name
+    ignored_dirs = {
+        ".git",
+        "build",
+        "node_modules",
+        "dist",
+        "__pycache__",
+        ".venv",
+        ".pytest_cache",
+    }
+    matched: Path | None = None
+    for root, dirs, files in os.walk(repo_root):
+        dirs[:] = [d for d in dirs if d not in ignored_dirs and not d.startswith(".")]
+        if target_name in files:
+            p = Path(root) / target_name
+            if "/" in clean_file:
+                if str(p).endswith(clean_file):
+                    matched = p
+                    break
+            else:
+                matched = p
+                break
+
+    if cache is not None:
+        cache[source_file] = matched
+    return matched
+
+
+def get_code_snippet(
+    file_path: Path, line_number: int, context_lines: int = 3
+) -> str:
+    """Extract code lines around line_number with line prefixes."""
+    try:
+        with file_path.open("r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        total = len(lines)
+        if line_number < 1 or line_number > total:
+            return ""
+        start = max(1, line_number - context_lines)
+        end = min(total, line_number + context_lines)
+        snippet_lines = []
+        for lno in range(start, end + 1):
+            prefix = "> " if lno == line_number else "  "
+            snippet_lines.append(f"{prefix}{lno:4d} | {lines[lno - 1].rstrip()}")
+        return "\n".join(snippet_lines)
+    except Exception:
+        return ""
+
+
+def get_git_blame(
+    repo_root: Path, file_path: Path, line_number: int
+) -> dict[str, Any] | None:
+    """Run git blame on a specific line and extract commit hash, author, date and summary."""
+    try:
+        rel_path = file_path.relative_to(repo_root)
+    except ValueError:
+        return None
+
+    try:
+        cmd = [
+            "git",
+            "blame",
+            f"-L{line_number},{line_number}",
+            "--line-porcelain",
+            "--",
+            str(rel_path),
+        ]
+        res = subprocess.run(
+            cmd,
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            check=False,
+        )
+        if res.returncode != 0:
+            return None
+
+        lines = res.stdout.splitlines()
+        if not lines:
+            return None
+
+        blame_info: dict[str, Any] = {
+            "file": str(rel_path),
+            "line": line_number,
+        }
+        first_line = lines[0].split()
+        if first_line:
+            blame_info["commit"] = first_line[0]
+
+        for line in lines[1:]:
+            if line.startswith("author "):
+                blame_info["author"] = line[len("author ") :].strip()
+            elif line.startswith("author-mail "):
+                blame_info["author_mail"] = line[len("author-mail ") :].strip("<> ")
+            elif line.startswith("author-time "):
+                try:
+                    ts = int(line[len("author-time ") :].strip())
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    blame_info["author_time"] = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                except Exception:
+                    blame_info["author_time"] = line[len("author-time ") :].strip()
+            elif line.startswith("summary "):
+                blame_info["summary"] = line[len("summary ") :].strip()
+
+        return blame_info
+    except Exception:
+        return None
+
+
+def enrich_finding_with_code_blame(
+    finding: dict[str, Any],
+    repo_root: Path,
+    path_cache: dict[str, Path | None] | None = None,
+) -> None:
+    """Enrich an error/fatal/crash finding with code snippet and git blame if source line is available."""
+    source_file = finding.get("source_file")
+    source_line = finding.get("source_line")
+    if not source_file or not source_line or not isinstance(source_line, int):
+        return
+
+    resolved_path = resolve_source_in_repo(repo_root, source_file, path_cache)
+    if not resolved_path:
+        return
+
+    snippet = get_code_snippet(resolved_path, source_line, context_lines=3)
+    blame = get_git_blame(repo_root, resolved_path, source_line)
+    finding["code_context"] = {
+        "repo_file": str(resolved_path.relative_to(repo_root)),
+        "line": source_line,
+        "snippet": snippet,
+        "blame": blame,
+    }
+
+
+def analyze_directory_logs(
+    evidence_dir: Path,
+    auto_unpack: bool = True,
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
     """Inspect evidence directory, unpack archives, and compile structured error analysis."""
     if not evidence_dir.is_dir():
         return {
@@ -208,9 +367,20 @@ def analyze_directory_logs(evidence_dir: Path, auto_unpack: bool = True) -> dict
         for e in findings.get("errors", []):
             all_errors.append({"file": file_path.name, **e})
 
+    repo_path = Path(repo_root).resolve() if repo_root else None
+    if repo_path and repo_path.is_dir():
+        path_cache: dict[str, Path | None] = {}
+        for c in all_crashes:
+            enrich_finding_with_code_blame(c, repo_path, path_cache)
+        for f in all_fatals:
+            enrich_finding_with_code_blame(f, repo_path, path_cache)
+        for e in all_errors:
+            enrich_finding_with_code_blame(e, repo_path, path_cache)
+
     return {
         "status": "success",
         "evidence_directory": str(evidence_dir),
+        "repo_root": str(repo_path) if repo_path else None,
         "unpacked_archives_count": len(unpacked_records),
         "analyzed_files_count": len(analyzed_files),
         "analyzed_files": [Path(p).name for p in analyzed_files],
