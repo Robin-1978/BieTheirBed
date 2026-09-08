@@ -1,5 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import * as Clipboard from "expo-clipboard";
+import * as Crypto from "expo-crypto";
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
@@ -34,6 +35,7 @@ import type {
   DesktopGlanceRecord,
   HumanInteraction,
 } from "@/api/models";
+import type { ActionCardInvocation } from "@/components/action_card";
 import { AgentSelector } from "@/components/AgentSelector";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
@@ -632,6 +634,26 @@ export default function ChatScreen() {
     }
   }
 
+  async function invokeActionCard(invocation: ActionCardInvocation) {
+    if (!gateway.client || !gateway.sessionHandle) return;
+    try {
+      const actionText = invocation.tool_name
+        ? `执行动作【${invocation.action_id}】调用工具 ${invocation.tool_name}，参数: ${JSON.stringify(invocation.arguments || {})}`
+        : `执行动作【${invocation.action_id}】`;
+      const accepted = await gateway.runAuthenticated((client) => client.createChatTurn({
+        clientRequestId: Crypto.randomUUID(),
+        sessionHandle: gateway.sessionHandle!,
+        text: actionText,
+        attachments: [],
+        agentId: gateway.activeAgentId || gateway.selectedAgentId,
+      }));
+      setTurns((current) => mergeConversationTurns(current, [accepted]));
+      watchTurn(accepted.turn_id);
+    } catch {
+      showFeedback("执行卡片动作失败，请重试", "error");
+    }
+  }
+
   const loadArtifact = useCallback(async (
     item: AssistantArtifactItem,
   ): Promise<ResolvedArtifactFile> => resolveAssistantArtifactFile(item, {
@@ -841,6 +863,7 @@ export default function ChatScreen() {
                   resolvingInteraction={resolvingInteraction}
                   onResolve={resolve}
                   onResolveInteraction={resolveInteraction}
+                  onInvokeActionCard={invokeActionCard}
                   onLoadArtifact={loadArtifact}
                   onOpenArtifact={openArtifact}
                   onSaveArtifact={saveArtifact}

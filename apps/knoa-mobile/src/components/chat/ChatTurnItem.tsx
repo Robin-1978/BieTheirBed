@@ -11,6 +11,7 @@ import { assistantArtifactItems } from "@/api/chatArtifacts";
 import { TERMINAL_STATES } from "./types";
 import { AssistantArtifactItem } from "./AssistantArtifactItem";
 import { ChatApprovalCard } from "./ChatApprovalCard";
+import { ActionCardView, extractActionCards, stripActionCardMarkdownBlocks, type ActionCardInvocation } from "@/components/action_card";
 import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
 import { InteractionCard } from "@/components/InteractionCard";
@@ -36,6 +37,7 @@ export type ChatTurnItemProps = {
   onRetry(turn: ChatTurnSnapshot): void;
   onEdit(turn: ChatTurnSnapshot): void;
   onConvertToTask?(turn: ChatTurnSnapshot): void;
+  onInvokeActionCard?(invocation: ActionCardInvocation): Promise<void> | void;
 };
 
 export const ChatTurnItem = memo(function ChatTurnItem({
@@ -55,10 +57,16 @@ export const ChatTurnItem = memo(function ChatTurnItem({
   onRetry,
   onEdit,
   onConvertToTask,
+  onInvokeActionCard,
 }: ChatTurnItemProps) {
   const { t } = useI18n();
   const terminal = TERMINAL_STATES.has(turn.state);
-  const response = terminal ? turn.final_output || turn.content : "";
+  const rawResponse = terminal ? turn.final_output || turn.content : "";
+  const actionCards = useMemo(() => extractActionCards(turn), [turn]);
+  const response = useMemo(
+    () => stripActionCardMarkdownBlocks(rawResponse),
+    [rawResponse]
+  );
   const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
   const interaction = turn.interactions?.find((item) => item.state === "pending") ?? null;
   const artifactItems = useMemo(() => assistantArtifactItems(turn.artifacts), [turn.artifacts]);
@@ -122,6 +130,18 @@ export const ChatTurnItem = memo(function ChatTurnItem({
           />
         ) : null}
 
+        {actionCards.length ? (
+          <View style={styles.actionCards}>
+            {actionCards.map((card) => (
+              <ActionCardView
+                key={card.card_id}
+                card={card}
+                onInvokeAction={onInvokeActionCard}
+              />
+            ))}
+          </View>
+        ) : null}
+
         {turn.state === "completed" && response ? (
           <View style={styles.completedActions}>
             <Pressable
@@ -167,6 +187,10 @@ export const ChatTurnItem = memo(function ChatTurnItem({
 const styles = StyleSheet.create({
   turn: { gap: spacing.small },
   messageTimestamp: { alignSelf: "center", color: colors.muted, fontSize: 11, marginBottom: 2 },
+  actionCards: {
+    gap: spacing.small,
+    marginVertical: spacing.xsmall,
+  },
   completedActions: {
     flexDirection: "row",
     alignItems: "center",

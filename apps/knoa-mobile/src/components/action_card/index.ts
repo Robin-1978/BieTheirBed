@@ -4,3 +4,5 @@ export * from "./CardHeader";
 export * from "./CardBlockRenderer";
 export * from "./CardFormRenderer";
 export * from "./CardActionFooter";
+export * from "./actionCardExtractor";
+
