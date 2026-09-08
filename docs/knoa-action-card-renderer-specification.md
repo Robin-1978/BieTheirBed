@@ -42,6 +42,27 @@ sequenceDiagram
 
 ---
 
+### 1.3 核心辨析：Action Card 与底层权限审批 (Permission Approval) 的本质区别
+
+系统开发者最常产生的疑问是：*“系统已经有了 `ChatApprovalCard` 权限审批，为什么还要引入 `ActionCard`？”*  
+两者处于完全不同的架构抽象层级，协同工作而非互相替代：
+
+| 维度 | 底层权限审批 (`Permission Approval`) | 上层业务卡片 (`Action Card`) |
+| :--- | :--- | :--- |
+| **本质定位** | **执行前安全防火墙 (Pre-execution Firewall)** | **执行后业务交付与决策看板 (Post-analysis Deliverable)** |
+| **触发时机** | Agent 准备调用某个高危工具（如 `shell.run_command`、`git.push`）的前一秒，被安全策略**拦截并挂起** | Agent 跑完了复杂的诊断分析（解包、搜索、比对源码、抓取 Git blame），需要向人类**交付物料成果** |
+| **决策语义** | **严格二元对立**：`Allow` (放行) 或 `Deny` (拦截) | **多元业务决策**：可包含主行动（确认回写）、次级行动（转派）、否定行动（暂不处理） |
+| **交互能力** | 仅供审阅工具参数；**不支持用户输入反馈或附加说明** | **支持嵌入通用表单控件**（输入框、下拉框、开关），支持人类补充处置意见后随调用一同回写 |
+| **内容表现力** | 工具名、目标参数文本、脱敏参数、安全规则说明 | 富文本 Markdown 报告、结构化 Key-Value 网格、代码 Diff 高亮、产物附件链接、警告 Callout |
+| **关注核心** | **系统安全合规**（“这个底层系统调用是否危险，准不准跑？”） | **业务价值闭环**（“这个复杂问题的排查结论是什么，下一步怎么处理？”） |
+
+#### 协同工作链路：
+1. **阶段一（分析与交付）**：Jira MCP 联动 Coder Agent 完成日志排查与源码对比后，组装一张包含代码 Diff 和三段式结论的 **Action Card** 推送到用户手机；
+2. **阶段二（人类决策）**：用户在手机上检视代码 Diff，在输入框中填写“已确认现场硬件断电”，然后点击 Action Card 上的 **【确认回写工单并流转】** 按钮；
+3. **阶段三（底层安全守护）**：若该动作触发的写工具（如 `jira.add_comment` 或 `git.push`）被平台策略判定为敏感，底层的 **权限审批机制 (Permission Approval)** 将再次作为不可逾越的安全红线生效把关，确保系统绝对受控。
+
+---
+
 ## 2. Action Card 协议核心元语 (UI Primitives Specification)
 
 Action Card 由四大通用交互元语构成，客户端必须严格按照本节规范进行组件映射与布局渲染（代码契约见 `src/knoa_platform/action_card/models.py` 与 `src/knoa_platform/action_card/schema.py`）：
