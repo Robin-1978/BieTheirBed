@@ -272,6 +272,45 @@ flowchart TD
 
 ---
 
+### 6.5 通用基座铁律：APP 严禁业务定制，坚持声明式交互协议 (Universal Substrate & Server-Driven UI)
+
+> **铁律：Knoa APP 是通用的 AI OS 终端基座，绝对不能为了 Jira 或任何单一垂直业务做任何定制化开发！**
+
+- **反模式风险**：
+  - 如果为 Jira 做专门的工单视图、为 GitLab 做专有的 MR 审核器、为机器人做专有的监控面板，APP 就会彻底沦为业务定制化的“大杂烩”，技术栈严重耦合，代码迅速腐化。
+- **纯净通用基座设计**：
+  - Knoa APP 类似移动端的 Web 浏览器或通用 Shell，对 Jira、GitLab、云原生运维等具体业务**保持 100% 零知识、零硬编码、零依赖**；
+  - 垂直业务的特定能力完全封装在外部的 **MCP 插件** 中（如 `jira_mcp_server`）；
+  - MCP 工具在需要用户交互时，仅产出标准化的 **通用 Action Card JSON 协议（Server-Driven UI）**：
+
+```mermaid
+sequenceDiagram
+    participant MCP as 独立业务插件 (如 Jira MCP)
+    participant Core as Knoa 通用中枢 (Core Daemon)
+    participant App as 通用终端 (Knoa Mobile App)
+    participant Human as 用户 (人类主权)
+
+    MCP->>Core: 产出标准通用卡片 (ActionCard Payload)
+    Note over MCP,Core: 包含: 标题、Markdown、CodeDiff、回调动作等通用元语
+    Core->>App: 推送通用 Card 协议 (JSON)
+    Note over App: App 仅作为纯粹的通用渲染器<br/>零业务硬编码，无感解析渲染
+    App->>Human: 呈现标准卡片 (诊断结论、代码Diff、操作按钮)
+    Human->>App: 点击“一键审批回写”
+    App->>Core: 回传通用调用 action_invoke(tool_name, arguments)
+    Core->>MCP: 调度确定性工具完成终态执行
+```
+
+- **四大通用卡片元语（UI Primitives）**：
+  1. **`Header & Badge`**：通用标题、严重程度徽标（Info / Warning / Critical）、状态标识（Pending / Approved）；
+  2. **`Content Blocks`**：通用 Markdown 文本、Key-Value 属性表、代码高亮对比块（Code Diff）；
+  3. **`Form Controls`**：通用可选表单（简单输入框、单选、多选），供人类追加决策意见；
+  4. **`Action Buttons`**：由后端声明的标准化动作按钮（如“确认回写”、“暂不处理”、“派工转派”），按钮仅绑定目标 `tool_name` 与预设参数字典，App 点击后原样通过 Core 发起调用。
+
+**收益**：
+APP 底座永久保持极其轻量、通用、稳定；未来接入任何新系统（如 GitHub、Linear、Slack、家庭 IoT），APP **零改动、零发布**，天然支持无限扩展。
+
+---
+
 ## 7. 演进路线图：从 L1 走向 L3
 
 ```
