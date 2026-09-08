@@ -54,6 +54,15 @@ function Stop-Child {
         foreach ($child in $children) {
             & taskkill.exe /F /T /PID $child.ProcessId 2>$null
         }
+        $strays = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.ProcessId -ne $PID -and
+            $_.Name -match '^python(?:w|3)?\.exe$' -and
+            $_.CommandLine -match 'knoa_platform\.service' -and
+            $_.CommandLine -match [regex]::Escape($ConfigPath)
+        })
+        foreach ($stray in $strays) {
+            & taskkill.exe /F /T /PID $stray.ProcessId 2>$null
+        }
     } catch {
         # Cleanup is best effort; WinSW still owns the runner process.
     }
