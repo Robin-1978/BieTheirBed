@@ -1199,7 +1199,19 @@ class KnoaAgentRuntime(AgentRuntime):
         elif isinstance(output, dict):
             if "content" in output and isinstance(output["content"], str):
                 header_parts = []
-                for k in ("url", "status_code", "title", "query", "file_path"):
+                for k in (
+                    "url",
+                    "status_code",
+                    "title",
+                    "query",
+                    "file_path",
+                    "artifact_id",
+                    "name",
+                    "showing",
+                    "total_lines",
+                    "has_more",
+                    "next_offset",
+                ):
                     if k in output and output[k] is not None:
                         header_parts.append(f"# {k}: {output[k]}")
                 prefix = ("\n".join(header_parts) + "\n\n") if header_parts else ""
@@ -1208,6 +1220,13 @@ class KnoaAgentRuntime(AgentRuntime):
                 output_str = output["stdout"]
                 if output.get("stderr"):
                     output_str += f"\n\n[STDERR]\n{output['stderr']}"
+            elif "result" in output and isinstance(output["result"], str):
+                header_parts = []
+                for k in ("execution_id", "task_id", "state", "launch_reason", "failure_code"):
+                    if k in output and output[k]:
+                        header_parts.append(f"# {k}: {output[k]}")
+                prefix = ("\n".join(header_parts) + "\n\n") if header_parts else ""
+                output_str = prefix + output["result"]
             else:
                 output_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)
         else:

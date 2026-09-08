@@ -120,7 +120,10 @@ do shell script "{escaped_cmd}" with administrator privileges
 
 class ShellTool(ToolBase):
     name = "run_command"
-    description = "Execute a shell command, return stdout/stderr."
+    description = (
+        "Execute a shell command, return stdout/stderr. "
+        "Do not use shell commands (e.g. sleep) to pause execution; use the dedicated 'sleep' tool."
+    )
     effect = ToolEffect.LOCAL_WRITE
     capabilities = frozenset(
         {

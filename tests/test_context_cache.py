@@ -22,7 +22,7 @@ def test_system_prompt_appears_exactly_once() -> None:
     blob = "".join(str(message.get("content", "")) for message in messages)
 
     assert "<system_rules>" not in blob
-    assert blob.count(f"{ASSISTANT_IDENTITY}, an intelligent agent") == 1
+    assert blob.count(f"{ASSISTANT_IDENTITY}, an advanced intelligent computer assistant") == 1
 
 
 def test_memory_lives_in_tail_pin() -> None:

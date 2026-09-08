@@ -126,6 +126,20 @@ class _Executions:
     async def list_executions(self, _principal_id, _task_id, **_kwargs):
         return self.executions
 
+    async def get_execution(self, _principal_id, execution_id):
+        for item in self.executions:
+            if getattr(item, "execution_id", None) == execution_id:
+                return item
+        return SimpleNamespace(
+            task_id="task-a",
+            execution_id=execution_id,
+            task_revision=1,
+            launch_reason=SimpleNamespace(value="manual"),
+            state=TaskState.COMPLETED,
+            final_result="Morning report full output here",
+            failure_code="",
+        )
+
     async def list_definitions(self, _principal_id, **_kwargs):
         return (self.current or self._record(),)
 
@@ -642,6 +656,34 @@ async def test_task_delete_keeps_provider_when_an_execution_is_active() -> None:
     assert tasks.deleted == []
     assert schedules.deleted == []
     assert tasks.bound == ("schedule", "task-scheduled")
+
+
+@pytest.mark.asyncio
+async def test_task_get_execution_returns_direct_snapshot() -> None:
+    control = TaskControlTool(_Sessions(), _Executions(), _Schedules(), _Triggers())
+    scope = RuntimeScope(
+        principal_id="personal:owner",
+        session_handle="chat-a",
+    )
+
+    # 1. action="get_execution"
+    result = await control.execute_scoped(
+        scope,
+        action="get_execution",
+        execution_id="exec-123",
+    )
+    assert result["execution_id"] == "exec-123"
+    assert result["result"] == "Morning report full output here"
+    assert result["state"] == "completed"
+
+    # 2. action="get" with execution_id shorthand
+    shorthand = await control.execute_scoped(
+        scope,
+        action="get",
+        execution_id="exec-456",
+    )
+    assert shorthand["execution_id"] == "exec-456"
+    assert shorthand["result"] == "Morning report full output here"
 
 
 def test_task_tool_delete_actions_require_confirmation_and_schema_is_english() -> None:

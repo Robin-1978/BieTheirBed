@@ -16,11 +16,10 @@ class TestExternalPrompt:
         prompt = build_system_prompt()
         assert "<role>" in prompt
         assert ASSISTANT_IDENTITY in prompt
-        assert "<instructions>" in prompt
+        assert "<core_principles>" in prompt
+        assert "<orchestration_and_delegation>" in prompt
+        assert "<tool_execution_rules>" in prompt
         assert "Independent tools may be called together" in prompt
-        assert "receive no intermediate feedback" in prompt
-        assert "do not emit user-facing prose" in prompt
-        assert "simple standard Markdown" in prompt
 
     def test_file_matches_default_fallback(self):
         text = _SYSTEM_TEMPLATE_PATH.read_text(encoding="utf-8")

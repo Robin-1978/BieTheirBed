@@ -29,7 +29,7 @@ def test_system_prompt_contains_canonical_instruction_envelope() -> None:
     )
 
     assert ASSISTANT_IDENTITY in prompt
-    assert "<instructions>" in prompt
+    assert "<core_principles>" in prompt
     assert "filesystem, shell" in prompt
     assert "Always be polite." in prompt
 

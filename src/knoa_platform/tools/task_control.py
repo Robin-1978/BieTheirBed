@@ -27,16 +27,18 @@ class TaskControlTool(ToolBase):
     name = "task"
     description = (
         "List, inspect, update, delete, pause, resume, archive, restore, or execute "
-        "stable Tasks; or control, rerun, and delete TaskExecutions."
+        "stable Tasks; get TaskExecution results; or control, rerun, and delete TaskExecutions."
     )
     details = (
         "Use task_id for Task actions and execution_id for TaskExecution actions. "
+        "Use action='get_execution' with execution_id to directly inspect the output result of a single execution. "
         "Updating launch replaces only future launches. Deleting a Task also deletes "
         "its launch provider and execution history, and therefore requires confirmation."
     )
     examples: ClassVar[list[dict[str, Any]]] = [
         {"action": "list"},
         {"action": "get", "task_id": "task-id"},
+        {"action": "get_execution", "execution_id": "execution-id"},
         {
             "action": "update",
             "task_id": "task-id",
@@ -59,7 +61,7 @@ class TaskControlTool(ToolBase):
 
     def policy_for(self, arguments: dict[str, Any]) -> ToolPolicy:
         action = arguments.get("action")
-        if action in {"list", "get"}:
+        if action in {"list", "get", "get_execution"}:
             return ToolPolicy(
                 effect=ToolEffect.READ_ONLY,
                 capabilities=self.capabilities,
@@ -116,11 +118,18 @@ class TaskControlTool(ToolBase):
             executions = await self._tasks.list_executions(
                 principal_id,
                 task.task_id,
-                limit=20,
+                limit=5,
             )
-            snapshot["executions"] = [
-                self._execution_snapshot(item) for item in executions
-            ]
+            snapshots = []
+            for idx, item in enumerate(executions):
+                snap = self._execution_snapshot(item)
+                # Keep latest execution result intact; for older historical items, provide safe preview if long
+                if idx > 0 and len(snap.get("result") or "") > 300:
+                    raw_res = snap["result"]
+                    snap["result"] = f"{raw_res[:150]}... [{len(raw_res) - 250} chars omitted] ...{raw_res[-100:]}"
+                    snap["note"] = f"Full result available via action='get_execution', execution_id='{item.execution_id}'"
+                snapshots.append(snap)
+            snapshot["executions"] = snapshots
         return snapshot
 
     async def execute_scoped(self, scope: RuntimeScope, **kwargs: Any) -> Any:
@@ -149,6 +158,25 @@ class TaskControlTool(ToolBase):
                     )
                 )
             }
+        if action == "get_execution" or (action == "get" and execution_id and not task_id):
+            invalid = self._unexpected_arguments(
+                kwargs,
+                allowed=frozenset({"action", "execution_id", "task_id"}),
+            )
+            if invalid is not None:
+                return invalid
+            if not execution_id:
+                return {"error": "execution_id is required for get_execution"}
+            try:
+                execution = await self._tasks.get_execution(
+                    scope.principal_id,
+                    execution_id,
+                )
+                return self._execution_snapshot(execution)
+            except LookupError:
+                return {"error": "TaskExecution not found"}
+            except (TaskTransitionError, ValueError) as exc:
+                return {"error": str(exc)}
         if action == "get":
             invalid = self._unexpected_arguments(
                 kwargs,
@@ -353,6 +381,7 @@ class TaskControlTool(ToolBase):
                         "enum": [
                             "list",
                             "get",
+                            "get_execution",
                             "update",
                             "pause",
                             "resume",
