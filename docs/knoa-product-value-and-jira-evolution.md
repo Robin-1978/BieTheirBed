@@ -182,168 +182,93 @@ flowchart TD
 
 ---
 
-## 6. L3 远期愿景工程设计：确定性验证器驱动的闭环演进引擎 (Verifier-Driven Evolution Engine)
+## 6. Knoa 核心设计哲学与 L3 务实演进原则 (First Principles & Pragmatic Evolution)
 
-### 6.1 行业祛魅：为什么单纯的 "Memory / Reflection" 不是真自进化？
-截至 2026 年下半年，学术界与工业界（如 2026-08 《On the Fragility of Self-Improving Agents》、Microsoft Research 2026-06/08 综述与 EvoTest、SelfMem 等前沿成果）已经对所谓“自进化 Agent”进行了严肃反思与深度祛魅：
+### 6.1 反思学术泡沫：为什么学术界“自进化”在工业落地中往往失败？
+近年来学术界提出了诸多“自进化 Agent”框架（如微软 EvoTest、AutoGen 多层进化架构等），在特定合成评测基准（如 Jericho 文本游戏、闭卷题库）上跑出了亮眼指标，但在工业界实际落地的反响却非常冷淡，核心原因在于其犯了**“为了实现而实现、为了论文而增加复杂性”**的典型错误：
 
-1. **自嗨式反思与无约束记忆的脆弱性**：
-   - 很多早期的“自省（Reflection）”或“纯记忆（Memory-only）”自进化实验，在更换任务顺序或多次复测后分数严重缩水。多步 Agent 本身噪声很大，叠加无约束的自我反思后，往往只是**记住了最近的局部经历、过拟合了任务次序，甚至形成模型间的互吹自嗨（Self-referential Feedback Loop）**。
-   - 在真实生产环境中，无约束的记忆膨胀只会导致上下文杂乱、规则自相矛盾，5 轮迭代后不仅没有变聪明，反而在简单任务上出现不可逆的漂移。
-2. **唯一真相来源：独立确定性验证器 (Independent Verifier)**：
-   - Microsoft Research 的最新结论非常明确：**自我进化最有效的场景，必然存在独立于 Agent 自身的物理/逻辑 Verifier**。
-   - 如果缺乏可靠、独立、确定性的评价信号（如编译器退出码、单元测试断言、Schema 校验、物理运行返回值），所谓的“自我演进”必然退化为指标投机、幻觉自证，甚至随着迭代越来越差。
-
-因此，Knoa 坚决抛弃“让 Agent 盲目自省改 Prompt”的伪概念，构建**基于“经验运行手册（Runbook）+ 独立验证器门禁”的四级工程落地方案**。
-
----
-
-### 6.2 物理存储架构：经验与验证器数据模型 (SQLite Schema)
-在 Knoa 的核心持久化层（`~/.knoa/data/assistant.db`）设计专用演进数据表，替代传统模糊的向量记忆：
-
-```sql
--- 1. 任务执行轨迹与失败模式聚类表
-CREATE TABLE IF NOT EXISTS evolution_episodes (
-    episode_id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL,
-    agent_id TEXT NOT NULL,                  -- 如 'coder' 或 'worker'
-    input_intent TEXT NOT NULL,              -- 任务原始指令
-    step_count INTEGER NOT NULL,             -- 经历的探索步数
-    failure_signature TEXT NOT NULL,         -- 错误指纹 (如 'ImportError:UTC:datetime:py310')
-    stdout_stderr_digest TEXT NOT NULL,      -- 错误输出摘要
-    final_exit_code INTEGER NOT NULL,        -- 验证器退出码 (0 为修复成功)
-    verifier_cmd TEXT NOT NULL,              -- 验证器执行命令 (如 'pytest tests/test_xxx.py')
-    created_at REAL NOT NULL
-);
-
--- 2. 确定性经验运行手册表 (Deterministic Experience Runbooks)
-CREATE TABLE IF NOT EXISTS experience_runbooks (
-    runbook_id TEXT PRIMARY KEY,
-    signature_hash TEXT NOT NULL UNIQUE,     -- 规范化错误指纹哈希
-    error_pattern TEXT NOT NULL,             -- 触发正则 (如 'ImportError: cannot import name .UTC. from .datetime.')
-    context_preconditions_json TEXT NOT NULL,-- 前置上下文断言 (如 {"python_version": "<3.11"})
-    action_recipe_json TEXT NOT NULL,        -- 确定性修复/调用配方 (代码级修复策略或工具调用序列)
-    verification_command TEXT NOT NULL,      -- 回归验证命令 (如 'pytest tests/test_automation_recurrence.py')
-    test_fixture_payload TEXT NOT NULL,      -- 用于重现与回归的最小测试用例
-    success_count INTEGER DEFAULT 1,         -- 线上成功命中计数
-    failure_count INTEGER DEFAULT 0,         -- 线上失败计数 (触发熔断)
-    status TEXT NOT NULL,                    -- 'draft' (草稿), 'verified' (已验), 'promoted' (晋级), 'deprecated' (熔断废弃)
-    frozen_at REAL,                          -- 胜态锁定时间 (防止 LLM 随意篡改)
-    created_at REAL NOT NULL,
-    updated_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_runbook_signature ON experience_runbooks(signature_hash, status);
-
--- 3. 演进回归基准评测集 (Agent Eval Benchmarks)
-CREATE TABLE IF NOT EXISTS agent_eval_benchmarks (
-    case_id TEXT PRIMARY KEY,
-    suite_name TEXT NOT NULL,                -- 评测套件 (如 'coder_python310_compat')
-    fixture_path TEXT NOT NULL,              -- 测试环境夹具
-    target_command TEXT NOT NULL,            -- 执行命令
-    expected_exit_code INTEGER NOT NULL,     -- 预期退出码
-    timeout_seconds REAL NOT NULL DEFAULT 30.0,
-    created_at REAL NOT NULL
-);
-```
+1. **不可控的黑盒突变严重破坏工程信任**：
+   - 工业界软件工程的第一铁律是**可预测性（Predictability）**与**确定性（Determinism）**。
+   - 如果一个 Agent 在后台不断擅自修改自身的 Prompt、参数和行为逻辑，今天能稳定跑通的流水线，明天可能因为一次糟糕的“自反思”而彻底瘫痪。一旦出错，研发团队甚至无法复现和定位根因。
+2. **多层嵌套导致复杂度雪崩与成本失控**：
+   - 为了实现“Actor 执行 -> Evolver 复盘 -> Optimizer 调参”的理论闭环，引入了极其臃肿的多 Agent 嵌套与漫长的循环。不仅导致单次任务响应延迟暴增数倍、Token 账单成倍飙升，而且每一层 Agent 的幻觉和噪声都在级联放大。
+3. **脱离实际生产场景的“玩具游戏”**：
+   - 学术论文常假设有一个定义极度清晰的模拟器（Game Simulator）可以无限制重跑。而在现实复杂的工业环境（ROS 现场日志、CMake/C++ 依赖链、Jira 工单流转、现场网络抖动）中，根本不存在廉价无限回放的沙盒，盲目套用学术模型只会带来灾难。
 
 ---
 
-### 6.3 运行时双 Agent 闭环状态机 (Actor & Evolver Loop)
+### 6.2 Knoa 的第一性设计原则 (First Principles of Knoa)
+Knoa 不追求学术概念包装，其一切架构必须牢牢钉在以下四大第一性原则之上：
 
-根据 ICLR 2026 EvoTest 架构，将执行与演进在物理线程与生命周期上彻底解耦：
+#### 原则一：实用主义至上，拒绝为了 Agent 而 Agent (Pragmatism over Complexity)
+- **极简工程路径**：能用一行 Shell、一个精准正则表达式、或一个确定性单元测试解决的问题，**绝不引入多轮大模型反思**。
+- **纯净核心边界**：Knoa 核心平台保持通用与极简，所有具体业务逻辑（如 Jira 缺陷排查、机器人云端下载、工业日志解包）**严格外置为独立的标准 MCP 插件**，绝不污染平台内核。
+
+#### 原则二：透明可审计的工程资产，拒绝黑盒状态自变异 (Auditable Assets over Black-Box Mutation)
+- 资深工程师团队是如何“进化”的？不是靠工程师大脑发生不可逆的变异，而是靠**沉淀可被人类阅读、评审、合入 Git 仓库的工程资产**：
+  - 遇到未知 Bug 调试成功后，沉淀为一份结构化的 **Markdown 故障排查手册（Runbook）**；
+  - 编写一个能够复现并阻断该 Bug 再次发生的 **自动化单元测试用例（Regression Test）**；
+  - 将通用的分析流程固化为一个带类型签名的 **标准 MCP 工具函数**。
+- Knoa 的“演进”必须完全对齐这一工程常识：任何经验积累必须具象化为**人类可看懂、可审阅、带版本控制的文件资产**，绝不搞神神秘秘的底层权重自修改。
+
+#### 原则三：人类主权与不可逾越的安全红线 (Human Sovereignty & Staged Actions)
+- Knoa 定位为工业研发的**“高可靠副手（Reliable Co-worker）”**，而不是脱缰的黑盒决策者。
+- 凡是涉及修改代码、写入数据库、流转 Jira 工单状态、或向生产环境推流等任何有外部副作用的行为，**必须采用“物料化草稿（Staged Action Cards）”**：
+  - 助手负责穷尽脏活累活（下载几百 MB 日志、解包定位段错误行、生成 Patch Diff 和三段式根因草稿）；
+  - 决策权永远在人类手中：在移动端或聊天界面，用户仅需扫一眼 Diff，点按“批准”，再由系统确定性执行。
+
+#### 原则四：零维护、长周期稳定运行的确定性 (Zero-Maintenance Determinism)
+- 既然是 7×24h 常驻的专属数字员工，系统就必须具备 UNIX 守护进程级别的可靠度：
+  - SQLite WAL 超过阈值自动截断、日志轮转自动 Gzip 压缩、历史多余 APK 自动物理淘汰；
+  - 外部服务偶发不可达时，采用指数退避与确定性重试，而不是无休止盲目瞎猜。
+
+---
+
+### 6.3 务实可落地的经验沉淀闭环架构 (Actionable Asset Pipeline)
+
+摒弃不可靠的“Prompt 自我突变”，Knoa 采用**“显式资产沉淀流水线”**：
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Idle
-    Idle --> ActorExecuting: 任务分派 (Actor: Coder/Worker)
-    
-    state ActorExecuting {
-        [*] --> RunTool
-        RunTool --> ToolFailed: returncode != 0
-        ToolFailed --> QueryRunbook: 用错误指纹检索 SQLite
-        QueryRunbook --> MatchVerified: 命中 status=verified
-        MatchVerified --> ApplyRecipe: O(1) 确定性注入配方 (免 LLM 瞎猜)
-        ApplyRecipe --> RunTool
-        
-        QueryRunbook --> NoMatch: 未命中已知 Runbook
-        NoMatch --> LLMExploration: LLM 深度推理与多步试错
-        LLMExploration --> RecoveredSuccess: 最终通过 Verifier (exit=0)
-        LLMExploration --> HardFailure: 耗尽重试仍然失败
-    }
-    
-    RecoveredSuccess --> OfflineEvolver: 异步唤醒 Evolver (后台低峰期)
-    
-    state OfflineEvolver {
-        [*] --> ExtractPattern: 提炼错误签名与生效修复片段
-        ExtractPattern --> CreateDraft: 写入 experience_runbooks (status=draft)
-        CreateDraft --> SandboxedVerification: 在隔离 Worktree 运行 verification_command
-        SandboxedVerification --> RegressionSuite: 运行 100 个历史用例 Benchmark
-        RegressionSuite --> EvalPassCheck: 零劣化且通过率提升?
-        EvalPassCheck --> PromoteAndFreeze: 晋级为 status=verified 且 Auto-Freeze
-        EvalPassCheck --> DiscardCandidate: 废弃草稿
-    }
-    
-    PromoteAndFreeze --> StagedActionCard: 生成物料化卡片推送用户
-    StagedActionCard --> Idle
-    HardFailure --> Idle
+flowchart TD
+    subgraph Execution["1. 确定性任务执行"]
+        UserTask[用户下发排查/编码任务] --> Coder[Coder Agent / Jira MCP]
+        Coder -->|调用标准工具| Tools[read_file / run_command / analyze_logs]
+    end
+
+    subgraph FailureRecovery["2. 真实探索与复原"]
+        Tools -->|遇到偶发或新型报错| Recovery[试错排查与源码定位]
+        Recovery -->|最终修复并通过单测| VerifiedFix[验证通过: exit_code == 0]
+    end
+
+    subgraph AssetExtraction["3. 显式工程资产化 (Human-Auditable Assets)"]
+        VerifiedFix --> AssetBuilder[提取关键报错特征 + 解决步骤]
+        AssetBuilder --> GenRunbook["生成 docs/runbooks/*.md 或 skills/*.md"]
+        AssetBuilder --> GenTest["生成 tests/test_*.py 回归用例"]
+    end
+
+    subgraph HumanApproval["4. 宿主审阅与 Git 入库"]
+        GenRunbook & GenTest --> ReviewCard[生成 Action Card: '发现可沉淀经验，是否入库?']
+        ReviewCard --> Human[人类工程师审查确认]
+        Human -->|批准| GitCommit[git commit 合入主干]
+        GitCommit --> KnowledgeBase[永久成为团队与助手的确定性能力库]
+    end
 ```
 
-#### 关键机制细则：
-1. **$O(1)$ 快速已知解命中（消除重复 Token 浪费）**：
-   - 当 Coder 执行终端命令或编译报错时，系统截取 `stderr` 计算正则指纹；
-   - 若 `experience_runbooks` 中存在 `status = 'verified'` 且前置条件满足的配方，直接在当前 Turn 注入提示：“检测到已知工程问题，标准修复手段为：...”。**跳过多轮瞎猜，单次解决率提升 80% 以上**。
-2. **离线胜态锁定（Auto-Freeze）与防退化**：
-   - 经验条目一旦通过回归集验证，立即置为 `status = 'verified'` 并写入 `frozen_at` 时间戳；
-   - 后续任何任务只允许**读取与执行**该条目，严禁任意 LLM 在无独立验证的前提下“重写”它。
-3. **线上熔断机制（Circuit Breaker）**：
-   - 若线上某次采用了 `verified` 的条目后，验证命令依然报错，系统将该条目的 `failure_count + 1`；
-   - 当 `failure_count >= 2` 时，触发熔断，状态自动降级为 `deprecated`，不再对外注入，并向管理员告警，**彻底阻断错误经验自我强化的滚雪球效应**。
+#### 典型落地场景示例：
+- **场景**：在 Python 3.10 环境下执行测试，偶发 `ImportError: cannot import name 'UTC' from 'datetime'`。
+- **学术界做法**：让模型生成自然语言反思存入向量数据库，下次由于上下文过长再次遗忘，或者改乱了自身的 Prompt。
+- **Knoa 务实做法**：
+  1. 排查修复后，生成一个标准的回归测试用例合入 `tests/test_automation_recurrence.py`；
+  2. 生成一条简明的技术规约（如存入 `.cursor/rules/` 或项目规范文档）：`"在 Python 3.10 环境中统一采用 from datetime import timezone; UTC = timezone.utc"`；
+  3. 人类通过 Git Commit 进行代码审阅并合入；
+  4. 下次任何 Agent 或人类开发者在写代码时，直接遵循仓库内的明确规则与单测保护，**零幻觉、零漂移、100% 确定性**。
 
 ---
 
-### 6.4 真实生产场景对照：以实际工程问题为例
-
-| 维度 | 传统口号式“自进化” | Knoa 验证器驱动的落地实战 |
-|---|---|---|
-| **偶发异常** | `ImportError: cannot import name 'UTC' from 'datetime'` | 同左 |
-| **传统做法** | Agent 聊天打字反思：“我下次应该注意 Python 版本差异”，将一段话存入向量库 | 系统记录本次失败堆栈、环境版本（3.10.12）与最终修复代码 |
-| **经验提取** | 模糊自然语言文本：“写 Python 时注意 UTC 导入” | 结构化 Runbook：`{"regex": "ImportError.*UTC.*datetime", "python": "<3.11", "fix": "from datetime import datetime, timezone; UTC = timezone.utc", "verify": "pytest tests/..."}` |
-| **验证方式** | 无验证，直接当作“记忆” | 在隔离沙箱中执行 `pytest tests/test_automation_recurrence.py`，必须 `exit_code == 0` |
-| **回归保障** | 无回归，下次可能因为上下文过长产生新 Bug | 运行自动化回归测试集，确保既有 30+ 用例 100% 通过 |
-| **下次遇到** | 重新检索向量库，概率性遗忘或仍旧写错 | 正则直接 $O(1)$ 拦截，在生成代码前直接应用标准兼容头，**一次成功** |
-
----
-
-### 6.5 任务类型分级矩阵 (Verifier Strength Matrix)
-
-Knoa 严格按照“验证器强度”划定自进化的权限天花板，绝不跨越红线：
-
-| 任务类型 | 验证器可信度 | 验证器实现来源 | 允许的演进等级 | Knoa 落地策略 |
-|---|---|---|---|---|
-| **C++ / Rust / Python 代码实现** | ★★★★★ (极高) | `compile` / `pytest` / ASan / CI 退出码 | **全自动闭环：Runbook 生成、沙箱验证、晋级生效** | 优先由 Coder Agent 闭环 |
-| **SQL 查询与数据清洗转换** | ★★★★★ (极高) | Schema 约束 / 结果集哈希比对 / 语法检查 | **全自动闭环：确定性函数沉淀** | 确定性函数沉淀 |
-| **现场日志分析与错误栈提取** | ★★★★☆ (高) | 日志行号真实性 / 错误码匹配 / 源码行定位 | **规则提取：生成特征诊断 Runbook** | 沉淀为故障排查手册 |
-| **GUI 自动化与系统状态运维** | ★★★★☆ (高) | 进程状态 / 端口监听 / 文件系统断言 | **受控演进：仅限沙箱中验证通过后方可沉淀** | 确定性运维步骤 |
-| **行业调研与知识检索 (Researcher)** | ★★☆☆☆ (低) | 引用源 URL 可达性 / 交叉比对 / 用户点赞 | **只积累源资料与点赞反馈，严禁改动核心逻辑** | 外部索引更新 |
-| **邮件撰写 / 人际沟通 / 开放文案** | ★☆☆☆☆ (极弱) | 主观审美偏好（缺乏客观真理） | **严格禁止自主修改行为逻辑** | 仅保留原始历史由用户判断 |
-
----
-
-### 6.6 四阶段实施路线图 (Actionable Milestones)
-
-1. **Phase 1: 确定性 Runbook 注册与 $O(1)$ 注入引擎（零风险提效）**
-   - 在 `assistant.db` 中建立 `experience_runbooks` 表；
-   - 在 `knoa_platform` 工具调用前后挂载钩子：工具失败时查询错误签名，命中即注入确定性配方；
-   - 先人工录入 10 个高频工业故障（如 Python 3.10 UTC 兼容、WAL 检查点锁、ROS Bag 分卷错误）。
-2. **Phase 2: 失败探索捕获器与候选生成器（只生草稿，不自生效）**
-   - 主任务成功后，若步数 $\ge 5$ 且经历过中途失败，提取 `(Failure Trace -> Effective Fix)` 生成 `draft` 条目；
-   - 产出清晰的 Markdown 变动卡片供人类通过移动端 App / 飞书卡片点按批准。
-3. **Phase 3: 自动化沙箱回归评测器（Promotion Gate）**
-   - 引入轻量级沙箱环境（Worktree / 隔离容器），自动执行 `verification_command`；
-   - 建立 50 个经典场景的回归 Benchmark 集合，每次晋级前全自动跑分，通过率提升且零衰减方可置为 `verified`。
-4. **Phase 4: 线上熔断与自淘汰机制（Circuit Breaker）**
-   - 监控条目在线上应用的真实后续；
-   - 连续失败 2 次立即下线归档，彻底消除经验污染。
+### 6.4 协同辅助支柱：主动感知早报与物料化决策
+在坚持实用主义与人类主权的前提下，落地两项最能切中日常研发痛点的核心功能：
+- **主动晨间早报 (Proactive Morning Standup)**：7×24h 守护进程在清晨低峰期通过轻量探针巡检 Git PR、Jira 工单增量与磁盘状态，合成结构化简报推送给移动端；
+- **物料化草稿沙盒 (Staged Action Cards)**：所有复杂诊断与修复全部打包为带 Diff、测试日志、回写工单文本的 Action Cards，交付用户一键批准，**把人类留在最终决策环路上（Human-in-the-loop）**。
 
 ---
 
@@ -351,13 +276,12 @@ Knoa 严格按照“验证器强度”划定自进化的权限天花板，绝不
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 远期愿景 (L3): 确定性验证器驱动的闭环演进                     │
-│ • 独立验证器门禁 (Independent Verifier: Compiler / Tests / Assert)│
-│ • 任务可验证性分级 (Coder/SQL 强闭环 vs Researcher 溯源弱进化)   │
-│ • 严防自嗨式反思：先做经验与用例积累，再做受控优化与晋级门禁   │
-│ • 主动环境感知与晨间早会 (Proactive Morning Standup)         │
-│ • 物料化决策卡片 (Staged Action Cards & One-click Approve)  │
-│ • 端云双轨认知路由 (Local Tier-0 7B + Cloud Tier-1 SOTA)    │
+│ 远期愿景 (L3): 务实工程资产沉淀与数字副手                     │
+│ • 显式工程资产化: 生成 Markdown Runbook、规约与 Git 回归用例   │
+│ • 极简与确定性: 能用一行 Shell/正则解决的，绝不搞多层 Agent 嵌套│
+│ • 人类主权与决策闭环: 一切高风险外写必须由人类一键确认批复      │
+│ • 主动环境感知与晨间早会: 7×24h 低峰期静默巡检与晨报卡片送达    │
+│ • 端云双轨认知路由: 本地 7B/8B 零成本粗筛 + 云端 SOTA 高难度推理│
 ├─────────────────────────────────────────────────────────────┤
 │ 中期突破 (L2 - 立即落地实施): 工业级工程闭环                 │
 │ • Jira 工业级日志拓展: 集成 OSS 匿名下载与 Tempo 云日志直连   │
