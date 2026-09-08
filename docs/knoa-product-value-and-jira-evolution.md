@@ -182,15 +182,128 @@ flowchart TD
 
 ---
 
-## 6. 演进路线与实施计划
+## 6. L3 远期愿景架构：自进化的专属数字副手 (Autonomous Self-Evolving Coworker)
 
-1. **第一阶段：文档与定位定稿（当前）**
-   - 明确 Knoa 长期常驻虚拟员工的核心定位；
-   - 产出产品价值审视与 Jira 演进设计方案。
-2. **第二阶段：Jira MCP 核心能力补齐（基础层）**
-   - 将 `oss_client` 与 `tempo_client` 的核心下载机制移植到 `examples/jira_mcp_server`；
-   - 在 MCP 中集成 Jira 自定义字段元数据缓存与中文映射器；
-   - 补充单元测试（模拟 OSS 与 Jira REST 响应）。
-3. **第三阶段：Agent 专业流水线打通（应用层）**
-   - 在主 Agent 编排指令中注册“Jira 缺陷诊断”标准工作流；
-   - 支持从移动端或 IM 一键派发工单分析任务，实现“输入工单号 -> 自动下日志 -> 自动排查代码 -> 输出三段式根因结论”的全自动闭环。
+在夯实 L1（7×24h 健壮常驻底座、多终端与 CEO-Specialist 组织架构）与推进 L2（Jira 工业级日志分析与工程闭环）的基础上，Knoa 的终极产品形态是演进为具备**自繁衍、主动感知与物料化决策**能力的专属数字副手。
+
+```mermaid
+flowchart TD
+    subgraph EnvSensing["1. 主动环境感知层 (Proactive Environmental Sensing)"]
+        CronTrigger["7x24h 守护调度 (Cron / Events)"]
+        HostSensors["宿主探针 (Git / 磁盘 / 异常进程)"]
+        DomainSensors["业务探针 (Jira 新指派 / GitLab CI / 外部资讯)"]
+        Tier0Model["本地端侧小模型 (7B/8B 零成本粗筛 & 模式匹配)"]
+        
+        CronTrigger --> HostSensors & DomainSensors
+        HostSensors & DomainSensors --> Tier0Model
+    end
+
+    subgraph CognitiveCore["2. 认知与决策中枢 (Dual-Tier Cognitive Core)"]
+        StandupSynthesizer["晨间早报与行动简报生成 (Morning Standup)"]
+        Tier1Model["云端旗舰推理模型 (Claude / DeepSeek SOTA)"]
+        
+        Tier0Model -->|发现异常或重点事项| Tier1Model
+        Tier1Model --> StandupSynthesizer
+    end
+
+    subgraph ActionStaging["3. 物料化草稿沙盒 (Staged Action Sandbox)"]
+        ActionCard["决策行动卡片 (Action Card)"]
+        StagedDiff["工程补丁 (Git Patch / Code Diff)"]
+        StagedEvidence["复现与测试证据 (Logs / Test Output)"]
+        StagedJira["标准三段式工单回写建议"]
+        
+        Tier1Model --> StagedDiff & StagedEvidence & StagedJira
+        StagedDiff & StagedEvidence & StagedJira --> ActionCard
+    end
+
+    subgraph SelfEvolution["4. 技能自繁衍闭环 (Skill Self-Synthesis & Evolution)"]
+        TaskPostMortem["任务终态复盘 (Execution Post-Mortem)"]
+        PatternExtractor["特征签名提取 (Error Signature & Runbook)"]
+        SkillSynthesizer["标准 Skill.md 自动生成 (Sandboxed Validation)"]
+        SkillRegistry["~/.knoa/skills/ 用户技能库热重载"]
+        
+        ActionCard -->|用户批准执行并成功闭环| TaskPostMortem
+        TaskPostMortem --> PatternExtractor
+        PatternExtractor --> SkillSynthesizer
+        SkillSynthesizer -->|安全检验通过| SkillRegistry
+    end
+
+    StandupSynthesizer & ActionCard --> MobileClient["Knoa Mobile / Desktop / IM (一键审阅与批复)"]
+```
+
+### 6.1 核心支柱一：经验沉淀与技能自繁衍 (Skill Self-Evolution)
+- **痛点**：当前绝大多数 Agent 在遇到长链路复合问题（如特定硬件环境的依赖冲突、特殊网关鉴权、某款机器的特定异常排查）时，每次都需要反复探索、多轮试错，消耗大量 Token 且容易遗忘。
+- **机制设计**：
+  1. **事后复盘（Post-Mortem）**：当一个探索步数超过 10 步的复杂运维或排查任务成功交付后，系统触发后台轻量复盘，分析中间探索的无效路径与最终生效的关键步骤；
+  2. **提炼经验模板**：抽象出 `Error Signature`（触发特征）、`Preflight Checks`（前置检查）、`Deterministic Steps`（确定性工具链命令）与 `Verification Rule`（验收断言）；
+  3. **沙箱单测验证**：系统在隔离环境中尝试回放该经验步骤，确保不依赖临时上下文；
+  4. **资产沉淀**：自动生成符合规范的 `SKILL.md` 并归档入 `~/.knoa/skills/custom/`，主控 Agent 下次遇到相同或相似场景直接以 `O(1)` 的代价调用成熟技能，**实现越用越聪明的正向资产积累**。
+
+### 6.2 核心支柱二：主动环境感知与晨间早会 (Proactive Morning Standup)
+- **痛点**：传统助手处于“完全被动”状态——用户不主动敲字提问，助手就毫无作为；而用户往往是在出了事故或被催促时才手忙脚乱地让助手查问题。
+- **机制设计**：
+  1. **静默巡检**：利用 7×24h 守护特性，在低峰期（如清晨 6:00~8:30）自主巡检关键数据源：
+     - Jira 综测与现场缺陷（是否新增指派给自己的 P0/P1 工单？是否有等待复核的回归？）；
+     - GitLab / GitHub（昨天提交的代码合并与 CI 流水线状态）；
+     - 本地硬件宿主（端口冲突、磁盘可用量、关键后台服务心跳）；
+     - 行业技术动态（arXiv 推荐、前沿财报/研报抓取）。
+  2. **晨会卡片（Standup Digest）**：在用户开启一天工作时（通过手机 App 实时推送或桌面通知），投递结构化早报卡片：
+     - *“主人，已为您准备好今日晨报：1) 现场有 1 个高危崩溃工单（已预下载日志排查出段错误行，草稿已就绪）；2) 昨天提交的 PR 已全部通过 CI；3) 磁盘空间健康。”*
+
+### 6.3 核心支柱三：物料化草稿沙盒与一键决策 (Staged Action Cards)
+- **痛点**：Agent 完成复杂修改后直接修改真实环境容易带来不可逆风险；而仅仅在聊天界面打印几千行 Markdown 又需要用户自行复制粘贴、极为繁琐。
+- **机制设计**：
+  1. **物料隔离打包（Staging）**：Agent 执行结果统一打包为“交付物料（Artifacts Bundle）”：
+     - 代码层：生成严格的 Patch/Diff 文件，附带本地测试执行日志截图；
+     - 业务层：生成结构化三段式评论文本，附带建议流转的状态（如 `提交现场验证`）及必填字段建议值；
+  2. **决策卡片（Action Card）**：移动端以卡片形式展示核心要点与影响面，底部仅提供两个动作：
+     - `[查看 Diff / 证据详情]`
+     - `[一键批准：自动合并补丁并同步回写 Jira]`。
+  3. 用户从繁重的“执行者”彻底升维为掌控全局的“审批决策者”。
+
+### 6.4 核心支柱四：端云双轨分级路由 (Dual-Tier Cognitive Engine)
+- **痛点**：7×24h 全天候主动巡检如果完全依赖商业闭源大模型，Token 账单将呈指数级上涨；若只用端侧小模型，复杂推理又无法胜任。
+- **机制设计**：
+  1. **Tier 0（端侧轻量小模型，0 成本 / 100% 隐私）**：
+     - 部署本地 Qwen2.5-7B / DeepSeek-8B；
+     - 专职负责：周期性日志关键词过滤、JQL 轮询差异比对、外部通知提取、初步意图粗分类；
+  2. **Tier 1（云端旗舰模型，高智商 / 强推理）**：
+     - 调用 Claude 3.5 Sonnet / DeepSeek-V3 / GPT-4o；
+     - 仅在 Tier 0 捕获到确凿的异常信号、或用户发起深度委托时唤醒，执行高难度的代码定位、架构设计和综合逻辑推理。
+
+---
+
+## 7. 演进路线图：从 L1 走向 L3
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 远期愿景 (L3): 自进化的专属数字副手                           │
+│ • 技能自繁衍 (Skill Auto-Synthesis & Local Runbook Library)  │
+│ • 主动环境感知与晨间早会 (Proactive Morning Standup)         │
+│ • 物料化决策卡片 (Staged Action Cards & One-click Approve)  │
+│ • 端云双轨认知路由 (Local Tier-0 7B + Cloud Tier-1 SOTA)    │
+├─────────────────────────────────────────────────────────────┤
+│ 中期突破 (L2 - 立即落地实施): 工业级工程闭环                 │
+│ • Jira 工业级日志拓展: 集成 OSS 匿名下载与 Tempo 云日志直连   │
+│ • Jira 中文业务字段动态缓存与双向映射                        │
+│ • 机器 SN 同频缺陷聚类关联分析                              │
+│ • 工业级三段式质量评论自动回写与安全确认                      │
+│ • 联动 Coder / Worker 完成本地现场 Log/Bag 解包与代码定位    │
+├─────────────────────────────────────────────────────────────┤
+│ 近期地基 (L1 - 生产级已就绪):                               │
+│ • 7×24h 无头常驻守护、自愈与自动轮转（WAL 截断、版本淘汰）     │
+│ • CEO-Specialist 组织架构 (knoa + coder + researcher)       │
+│ • 移动端 App / 跨平台部署 / 动态记忆防膨胀                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **第一阶段：L3 远期蓝图确立与文档定稿（已完成）**
+   - 确立 Knoa 主权常驻虚拟员工的核心定位；
+   - 梳理自繁衍技能、主动感知早会与端云双轨路由的完整架构。
+2. **第二阶段：L2 工业级 Jira MCP 全面扩充（当前立即推进）**
+   - 将 `oss_client` 与 `tempo_client` 整合进 `examples/jira_mcp_server`；
+   - 补齐中文字段动态翻译与 `--sn-relate` 聚类工具；
+   - 编写自动化测试保证工业下载链路高可用。
+3. **第三阶段：L2+ 缺陷闭环流水线打通**
+   - 联动 Coder 实现本地日志提取、Fatal 错误栈搜索与源码比对；
+   - 在移动端与桌面端实现一键审批卡片。
