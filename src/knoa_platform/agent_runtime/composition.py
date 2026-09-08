@@ -1641,7 +1641,7 @@ def build_core_runtime(
         conversations=conversation_service,
         transcription=transcription_service,
         interactions=interactions,
-        mcp_packages=None,
+        mcp_packages=mcp_packages,
         sessions=sessions,
         owner_principal_id=config.owner_principal_id,
         configuration=configuration,
