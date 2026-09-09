@@ -59,7 +59,7 @@ import {
   type ResolvedArtifactFile,
 } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
-import { GatewayError } from "@/api/gatewayClient";
+import { GatewayError, type GatewayClient } from "@/api/gatewayClient";
 import { agentImageSupport } from "@/media/agentImageSupport";
 import { shouldResetConversation } from "@/state/conversationTransition";
 import { useChatTurns } from "@/hooks/useChatTurns";
@@ -86,6 +86,16 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const gatewayRef = useRef(gateway);
   gatewayRef.current = gateway;
+
+  // Keep hook callbacks stable. Passing an inline wrapper here causes
+  // useChatTurns.refresh to be recreated on every render, which in turn
+  // re-runs useFocusEffect and can issue an unbounded refresh storm.
+  const runAuthenticated = useCallback(
+    <T,>(operation: (client: GatewayClient) => Promise<T>) => (
+      gatewayRef.current.runAuthenticated(operation)
+    ),
+    [],
+  );
 
   const { locale, t } = useI18n();
   const params = useLocalSearchParams<{
@@ -218,7 +228,7 @@ export default function ChatScreen() {
     turnWatcher,
   } = useChatTurns({
     getConnection: () => gatewayRef.current.connection(),
-    runAuthenticated: (op) => gatewayRef.current.runAuthenticated(op),
+    runAuthenticated,
     sessionHandle: gateway.sessionHandle,
     hasClient: Boolean(gateway.client),
     onSessionReplaced: gateway.newConversation,
@@ -231,7 +241,7 @@ export default function ChatScreen() {
     transcribing,
     toggleRecording,
   } = useVoiceRecorder({
-    runAuthenticated: (op) => gateway.runAuthenticated(op),
+    runAuthenticated,
     ensureConversation: gateway.ensureConversation,
     hasClient: Boolean(gateway.client),
     onTranscription: (transcript) => setText((current) => current ? `${current}\n${transcript}` : transcript),

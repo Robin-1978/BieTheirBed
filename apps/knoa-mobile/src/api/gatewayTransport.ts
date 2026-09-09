@@ -67,11 +67,10 @@ const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
 const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
 const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
-// Give a just-started upgrade a tiny head start, then use Relay immediately.
-// Waiting several seconds here made Node selection feel stalled because the
-// first authenticated request sat idle while ICE gathered. P2P continues in
-// the background and becomes preferred for subsequent requests.
-const TRANSPORT_READY_WAIT_TIMEOUT_MS = 300;
+// Let a just-started P2P/Relay upgrade settle before falling back. A very
+// short wait makes concurrent callers race the same upgrade and create a
+// reconnect storm on mobile networks.
+const TRANSPORT_READY_WAIT_TIMEOUT_MS = 3_000;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },
@@ -330,7 +329,11 @@ export class ConnectionResolverTransport implements GatewayTransport {
 
   private async relayRequest(baseUrl: string, path: string, init: RequestInit): Promise<Response> {
     if (!this.relay) {
-      this.relay = new RelayTransport(this.binding, "session");
+      this.relay = new RelayTransport(
+        this.binding,
+        "session",
+        (error) => this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000),
+      );
       this.setRelayDiagnostic("connecting");
     }
     try {
@@ -374,7 +377,11 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (this.binding.directGatewayUrl || this.relay?.ready() || this.relayUpgradePromise
       || !new Headers(init.headers).get("authorization")) return;
     if (!this.relay) {
-      this.relay = new RelayTransport(this.binding, "session");
+      this.relay = new RelayTransport(
+        this.binding,
+        "session",
+        (error) => this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000),
+      );
       this.setRelayDiagnostic("connecting");
     }
     const relay = this.relay;
@@ -805,6 +812,7 @@ class RelayTransport implements GatewayTransport {
   constructor(
     private readonly binding: RelayBinding,
     private readonly scope: "session" | "pairing",
+    private readonly onFailure?: (error: Error) => void,
   ) {}
 
   mode(): "relay" {
@@ -974,7 +982,10 @@ class RelayTransport implements GatewayTransport {
   };
 
   private readonly onSocketFailure = () => {
-    this.fail(new Error("Relay 连接中断"));
+    if (!this.socket) return;
+    const error = new Error("Relay 连接中断");
+    this.fail(error);
+    this.onFailure?.(error);
   };
 
   private receiveMessage(streamId: number, message: Record<string, unknown>): void {
