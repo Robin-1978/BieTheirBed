@@ -67,7 +67,7 @@ class ToolInventory:
             raise ValueError("Tool schema budget must be at least 1000 characters")
         self._schema_char_budget = schema_char_budget
         self._cache: dict[tuple[str, str], ToolInventorySnapshot] = {}
-        self._active_deferred: dict[str, set[str]] = {}
+        self._active_deferred: dict[str, list[str]] = {}
         self._semantic_selector = semantic_selector or default_tool_selector()
 
     async def load(
@@ -104,7 +104,7 @@ class ToolInventory:
         available = {str(tool["name"]) for tool in normalized}
         active = self._active_deferred.get(runtime_session_ref)
         if active is not None:
-            active.intersection_update(available)
+            active[:] = [name for name in active if name in available]
         return snapshot
 
     def project(
@@ -114,13 +114,19 @@ class ToolInventory:
     ) -> tuple[dict[str, Any], ...]:
         """Return stable built-ins plus session-activated deferred tools."""
 
-        active = self._active_deferred.get(runtime_session_ref, set())
-        projected = tuple(
+        active = self._active_deferred.get(runtime_session_ref, [])
+        by_name = {str(tool["name"]): tool for tool in snapshot.tools}
+        stable = tuple(
             self._model_signature(tool)
             for tool in snapshot.tools
             if not self._is_deferred(str(tool["name"]))
-            or str(tool["name"]) in active
         )
+        deferred = tuple(
+            self._model_signature(by_name[name])
+            for name in active
+            if name in by_name
+        )
+        projected = (*stable, *deferred)
         projected_chars = sum(self._serialized_size(tool) for tool in projected)
         if projected_chars > self._schema_char_budget:
             raise ValueError(
@@ -160,7 +166,7 @@ class ToolInventory:
             semantic = self._semantic_selector.select(query, candidates)
         recalled = frozenset({*source_names, *lexical_names, *semantic.names})
         self.activate(runtime_session_ref, snapshot, recalled)
-        active = self._active_deferred.get(runtime_session_ref, set())
+        active = self._active_deferred.get(runtime_session_ref, [])
         tools = self.project(runtime_session_ref, snapshot)
         modes = []
         if source_names:
@@ -197,8 +203,11 @@ class ToolInventory:
         }
         if not selected:
             return ()
-        active = self._active_deferred.setdefault(runtime_session_ref, set())
-        active.update(selected)
+        active = self._active_deferred.setdefault(runtime_session_ref, [])
+        for tool in snapshot.tools:
+            name = str(tool["name"])
+            if name in selected and name not in active:
+                active.append(name)
         return tuple(sorted(selected))
 
     def invalidate_session(self, runtime_session_ref: str) -> None:
