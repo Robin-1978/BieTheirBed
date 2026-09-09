@@ -57,7 +57,10 @@ class ToolInventory:
     def __init__(
         self,
         *,
-        schema_char_budget: int = 24_000,
+        # Keep model-visible tool signatures around ~4k tokens (provider and
+        # tokenizer dependent). Larger MCP inventories are recalled on demand
+        # through tool_help instead of exhausting the turn context.
+        schema_char_budget: int = 16_000,
         semantic_selector: Any | None = None,
     ) -> None:
         if schema_char_budget < 1000:
