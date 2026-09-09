@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -78,7 +77,7 @@ export function AssistantArtifactItem({
 
   if (item.isImage) {
     return (
-      <Pressable
+      <AppPressable
         accessibilityLabel={failed ? t("chat.reloadArtifact", { name: item.displayName }) : t("chat.openArtifact", { name: item.displayName })}
         accessibilityRole="button"
         disabled={opening}
@@ -107,7 +106,7 @@ export function AssistantArtifactItem({
           <Text style={styles.generatedArtifactName} numberOfLines={1}>{item.displayName}</Text>
           {opening ? <ActivityIndicator color={colors.accent} size="small" /> : null}
         </View>
-      </Pressable>
+      </AppPressable>
     );
   }
 

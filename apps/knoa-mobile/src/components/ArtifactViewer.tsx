@@ -2,12 +2,13 @@ import * as Linking from "expo-linking";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Modal, StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
+import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { colors } from "@/theme";
 
@@ -110,17 +111,17 @@ export function ArtifactViewer({
       {file ? (
         <GestureHandlerRootView style={styles.root}>
           <View style={[styles.toolbar, { paddingTop: insets.top + 6 }]}>
-            <Pressable accessibilityLabel={t("artifact.closePreview")} onPress={onClose} style={styles.button}>
+            <AppPressable accessibilityLabel={t("artifact.closePreview")} onPress={onClose} style={styles.button}>
               <Text style={styles.buttonText}>{t("artifact.close")}</Text>
-            </Pressable>
+            </AppPressable>
             <Text numberOfLines={1} style={styles.name}>{file.name}</Text>
             <View style={styles.actions}>
-              <Pressable accessibilityLabel={t("artifact.saveToPhotos")} disabled={Boolean(working)} onPress={() => void save()} style={styles.button}>
+              <AppPressable accessibilityLabel={t("artifact.saveToPhotos")} disabled={Boolean(working)} onPress={() => void save()} style={styles.button}>
                 {working === "save" ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.buttonText}>{t("artifact.save")}</Text>}
-              </Pressable>
-              <Pressable accessibilityLabel={t("artifact.shareImage")} disabled={Boolean(working)} onPress={() => void share()} style={styles.button}>
+              </AppPressable>
+              <AppPressable accessibilityLabel={t("artifact.shareImage")} disabled={Boolean(working)} onPress={() => void share()} style={styles.button}>
                 {working === "share" ? <ActivityIndicator color="white" size="small" /> : <Text style={styles.buttonText}>{t("artifact.share")}</Text>}
-              </Pressable>
+              </AppPressable>
             </View>
           </View>
           <GestureDetector gesture={gesture}>

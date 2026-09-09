@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   AppState,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +11,7 @@ import {
 } from "react-native";
 
 import type { AndroidRelease } from "@/api/models";
+import { AppPressable } from "@/components/AppPressable";
 import { resolveAndroidRelease } from "@/hub/hubClient";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
@@ -219,9 +219,9 @@ export default function UpdateScreen() {
             {state === "ready" ? <Button label={t("update.install")} onPress={() => void install()} /> : null}
           </View>
           <Text style={styles.tip}>{t("update.resumeHint")}</Text>
-          <Pressable onPress={() => void allowUnknownSources()}>
+          <AppPressable onPress={() => void allowUnknownSources()}>
             <Text style={styles.link}>{t("update.allowUnknown")}</Text>
-          </Pressable>
+          </AppPressable>
         </View>
       ) : null}
     </ScrollView>
@@ -230,9 +230,9 @@ export default function UpdateScreen() {
 
 function Button({ label, secondary = false, onPress }: { label: string; secondary?: boolean; onPress(): void }) {
   return (
-    <Pressable style={[styles.button, secondary && styles.buttonSecondary]} onPress={onPress}>
+    <AppPressable style={[styles.button, secondary && styles.buttonSecondary]} onPress={onPress}>
       <Text style={[styles.buttonText, secondary && styles.buttonSecondaryText]}>{label}</Text>
-    </Pressable>
+    </AppPressable>
   );
 }
 

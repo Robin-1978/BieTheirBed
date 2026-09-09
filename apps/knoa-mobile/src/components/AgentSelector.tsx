@@ -1,6 +1,7 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import type { AgentSummary } from "@/api/models";
+import { AppPressable } from "@/components/AppPressable";
 import { colors } from "@/theme";
 
 export function AgentSelector({
@@ -26,7 +27,7 @@ export function AgentSelector({
         {agents.map((agent) => {
           const selected = agent.agent_id === selectedAgentId;
           return (
-            <Pressable
+            <AppPressable
               accessibilityRole="radio"
               accessibilityState={{ checked: selected, disabled }}
               disabled={disabled}
@@ -40,7 +41,7 @@ export function AgentSelector({
               ]}
             >
               <Text style={[styles.optionText, selected && styles.selectedText]}>{agent.display_name}</Text>
-            </Pressable>
+            </AppPressable>
           );
         })}
       </View>

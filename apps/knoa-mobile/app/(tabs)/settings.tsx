@@ -33,7 +33,7 @@ export default function NodeAndSettingsScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      {/* 节点概览与通道状态卡片 */}
+      {/* Node overview and channel status hero card */}
       <View style={styles.heroCard}>
         <View style={styles.heroHeader}>
           <View style={styles.nodeIconWrap}>
@@ -78,7 +78,7 @@ export default function NodeAndSettingsScreen() {
         </View>
       </View>
 
-      {/* 工作区看板与多设备中枢卡片 */}
+      {/* Workspace board and multi-device hub card */}
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>{t("nodeSwitch.workspaceHub")}</Text>
         <SettingRow
@@ -98,7 +98,7 @@ export default function NodeAndSettingsScreen() {
         />
       </View>
 
-      {/* 核心治理与扩展卡片 */}
+      {/* Core governance and extensions card */}
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>{t("settings.deviceAndApp")}</Text>
         <SettingRow
@@ -133,7 +133,7 @@ export default function NodeAndSettingsScreen() {
         />
       </View>
 
-      {/* 应用设置与系统服务卡片 */}
+      {/* App settings and system services card */}
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>{t("nav.appSettings")}</Text>
         <SettingRow

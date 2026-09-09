@@ -1,3 +1,4 @@
+import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, View } from "react-native";
@@ -11,6 +12,7 @@ import {
   listHubNodes,
   loadWorkspaceResourceState,
   type HubNode,
+  type NodeEnrollmentCode,
   type WorkspaceDeployment,
 } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
@@ -32,7 +34,10 @@ export default function WorkspaceNodesScreen() {
   const [cacheSnapshot, setCacheSnapshot] = useState<WorkspaceCacheSnapshot | null>(null);
   const [working, setWorking] = useState("");
   const [enrollmentCode, setEnrollmentCode] = useState("");
+  const [enrollmentPayload, setEnrollmentPayload] = useState<NodeEnrollmentCode | null>(null);
   const [enrollmentExpiresAt, setEnrollmentExpiresAt] = useState(0);
+  const [showRawPayload, setShowRawPayload] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
   const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
@@ -101,8 +106,10 @@ export default function WorkspaceNodesScreen() {
   async function generateEnrollmentCode() {
     setWorking("enrollment");
     setError("");
+    setCopied(false);
     try {
       const payload = await createNodeEnrollmentCode();
+      setEnrollmentPayload(payload);
       setEnrollmentCode(JSON.stringify(payload));
       setEnrollmentExpiresAt(payload.expires_at);
     } catch (caught) {
@@ -110,6 +117,13 @@ export default function WorkspaceNodesScreen() {
     } finally {
       setWorking("");
     }
+  }
+
+  async function copyEnrollmentCode() {
+    if (!enrollmentCode) return;
+    await Clipboard.setStringAsync(enrollmentCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   }
 
   async function shareEnrollmentCode() {
@@ -182,19 +196,49 @@ export default function WorkspaceNodesScreen() {
           );
         })}
 
-        {enrollmentCode ? (
+        {enrollmentPayload ? (
           <View style={styles.card}>
-            <Text style={styles.nodeName}>{t("nodes.addNode")}</Text>
+            <View style={styles.enrollmentHeader}>
+              <View style={styles.enrollmentTitleRow}>
+                <AppIcon name="node" color={colors.accent} size={18} />
+                <Text style={styles.nodeName}>{t("nodes.addNode")}</Text>
+              </View>
+              <View style={styles.grantBadge}>
+                <Text style={styles.grantBadgeText}>{t("nodes.grantId")}: {enrollmentPayload.grant_id.slice(0, 8)}</Text>
+              </View>
+            </View>
             <Text style={styles.meta}>{t("nodes.enrollmentHint")}</Text>
-            <Text selectable style={styles.code}>{enrollmentCode}</Text>
+
+            <View style={styles.tokenBox}>
+              <Text style={styles.tokenLabel}>Hub</Text>
+              <Text numberOfLines={1} style={styles.tokenValue}>{enrollmentPayload.hub_url}</Text>
+            </View>
+
             <Text style={styles.meta}>
               {t("nodes.codeExpires", {
                 time: new Date(enrollmentExpiresAt * 1000).toLocaleTimeString(locale === "en-US" ? "en-US" : "zh-CN"),
               })}
             </Text>
-            <AppPressable style={styles.secondary} onPress={() => void shareEnrollmentCode()}>
-              <Text style={styles.secondaryText}>{t("nodes.shareCode")}</Text>
+
+            <View style={styles.enrollmentActions}>
+              <AppPressable style={styles.copyButton} onPress={() => void copyEnrollmentCode()}>
+                <AppIcon name={copied ? "check" : "file"} color={colors.onAccent} size={16} />
+                <Text style={styles.copyButtonText}>{copied ? t("nodes.copied") : t("nodes.copyCode")}</Text>
+              </AppPressable>
+              <AppPressable style={styles.secondary} onPress={() => void shareEnrollmentCode()}>
+                <Text style={styles.secondaryText}>{t("nodes.shareCode")}</Text>
+              </AppPressable>
+            </View>
+
+            <AppPressable onPress={() => setShowRawPayload((v) => !v)} style={styles.rawToggle}>
+              <Text style={styles.rawToggleText}>{showRawPayload ? t("nodes.hideRaw") : t("nodes.viewRaw")}</Text>
+              <AppIcon name={showRawPayload ? "chevron-up" : "chevron-down"} color={colors.muted} size={14} />
             </AppPressable>
+
+            {showRawPayload ? (
+              <Text selectable style={styles.code}>{JSON.stringify(enrollmentPayload, null, 2)}</Text>
+            ) : null}
+
             <Text style={styles.meta}>{t("nodes.afterEnrollmentHint")}</Text>
           </View>
         ) : null}
@@ -213,11 +257,11 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", gap: spacing.medium, padding: spacing.large, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
   icon: { width: 48, height: 48, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   flex: { flex: 1, minWidth: 0 },
-  title: { color: colors.ink, fontSize: 20, fontWeight: "800" },
+  title: { color: colors.ink, ...typography.heading },
   meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center", borderRadius: radii.medium },
   callout: { padding: spacing.large, gap: spacing.small, borderRadius: radii.large, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accent },
-  calloutTitle: { color: colors.ink, fontWeight: "800" },
+  calloutTitle: { color: colors.ink, ...typography.title },
   card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, ...shadows.card },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   nodeName: { color: colors.ink, fontSize: 16, fontWeight: "700" },
@@ -225,8 +269,20 @@ const styles = StyleSheet.create({
   offline: { color: colors.muted, fontWeight: "700", fontSize: 12 },
   enter: { minHeight: 42, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent },
   enterText: { color: colors.onAccent, fontWeight: "700" },
-  secondary: { minHeight: 42, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accent },
+  secondary: { flex: 1, minHeight: 42, flexDirection: "row", gap: spacing.small, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.accent },
   secondaryText: { color: colors.accent, fontWeight: "700" },
+  enrollmentHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  enrollmentTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.small },
+  grantBadge: { paddingHorizontal: spacing.small, paddingVertical: 2, borderRadius: radii.small, backgroundColor: colors.accentFaint },
+  grantBadgeText: { color: colors.accent, ...typography.tiny, fontWeight: "700" },
+  tokenBox: { padding: spacing.medium, borderRadius: radii.small, backgroundColor: colors.surfaceMuted, gap: 2 },
+  tokenLabel: { color: colors.muted, ...typography.tiny },
+  tokenValue: { color: colors.ink, ...typography.small, fontFamily: "monospace" },
+  enrollmentActions: { flexDirection: "row", gap: spacing.medium },
+  copyButton: { flex: 1, minHeight: 42, flexDirection: "row", gap: spacing.small, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent },
+  copyButtonText: { color: colors.onAccent, fontWeight: "700" },
+  rawToggle: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: spacing.xsmall },
+  rawToggleText: { color: colors.muted, ...typography.tiny },
   code: { color: colors.ink, fontFamily: "monospace", fontSize: 11, lineHeight: 16, padding: spacing.medium, borderRadius: radii.small, backgroundColor: colors.background },
   error: { color: colors.danger, lineHeight: 20 },
 });

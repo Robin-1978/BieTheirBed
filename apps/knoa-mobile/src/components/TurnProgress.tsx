@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import type { ChatTurnSnapshot } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { colors, radii } from "@/theme";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
+import { AppPressable } from "@/components/AppPressable";
 import { timelineDisplayEntries, type TimelineDisplayEntry } from "./turnTimeline";
 import { turnFailureMessage } from "./turnFailurePresentation";
 
@@ -28,7 +29,7 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
 
   return (
     <View style={styles.root}>
-      <Pressable
+      <AppPressable
         accessibilityRole="button"
         accessibilityLabel={expanded ? t("turn.collapse") : t("turn.expand")}
         disabled={active && !entries.length}
@@ -57,7 +58,7 @@ export function TurnProgress({ turn }: { turn: ChatTurnSnapshot }) {
             />
           </View>
         ) : null}
-      </Pressable>
+      </AppPressable>
 
       {failed ? (
         <View>
