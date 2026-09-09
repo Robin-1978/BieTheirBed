@@ -29,9 +29,17 @@ export function NodeHeaderTitle() {
   // "connecting" capsule.
   const isOnline = gateway.status === "ready"
     || Boolean(gateway.client && (gateway.relayState === "ready" || gateway.relayState === "active"));
+  const isConnecting = !isOnline && (gateway.status === "booting" || gateway.status === "selecting");
   const statusLabel = isOnline
     ? `${t("nodeHeader.online")} · ${t(transportCompactLabelKey(gateway.transportMode))}`
-    : t("nodeHeader.connecting");
+    : isConnecting
+      ? t("nodeHeader.connecting")
+      : t("nodes.offline");
+  const statusDotStyle = isOnline
+    ? styles.dotOnline
+    : isConnecting
+      ? styles.dotConnecting
+      : styles.dotOffline;
 
   const [capability, setCapability] = useState<CapabilityCache | null>(null);
 
@@ -140,7 +148,7 @@ export function NodeHeaderTitle() {
         onPress={() => setSwitcherOpen(true)}
         style={styles.pillContainer}
       >
-        <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
+        <View style={[styles.statusDot, statusDotStyle]} />
         <View style={styles.titleWrap}>
           <View style={styles.nameRow}>
             <Text style={styles.node} numberOfLines={1}>
@@ -184,7 +192,7 @@ export function NodeHeaderTitle() {
                       {presentNodeName(currentNode, t("common.unnamedComputer"))}
                     </Text>
                     <View style={styles.statusRow}>
-                      <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
+                      <View style={[styles.statusDot, statusDotStyle]} />
                       <Text style={styles.statusText}>{statusLabel}</Text>
                     </View>
                   </View>
@@ -361,8 +369,11 @@ const styles = StyleSheet.create({
   dotOnline: {
     backgroundColor: colors.accent,
   },
-  dotOffline: {
+  dotConnecting: {
     backgroundColor: colors.warning,
+  },
+  dotOffline: {
+    backgroundColor: colors.muted,
   },
   nameRow: {
     flexDirection: "row",
@@ -374,7 +385,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   node: { color: colors.ink, fontSize: 13, fontWeight: "700" },
-  workspace: { color: colors.muted, fontSize: 11, marginTop: 1 },
+  workspace: { color: colors.muted, fontSize: 12, marginTop: 1 },
   back: { width: 42, height: 42, alignItems: "center", justifyContent: "center", marginLeft: -8 },
 
   modalRoot: {

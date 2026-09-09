@@ -1,9 +1,10 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { AppPressable } from "@/components/AppPressable";
+import { FormScreen } from "@/components/FormScreen";
 import {
   loadHubConnection,
   loginHostedAccount,
@@ -112,7 +113,7 @@ export default function AccountLoginScreen() {
       : t("login.submitRecover");
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+    <FormScreen contentContainerStyle={styles.container}>
       <View style={styles.hero}>
         <Text style={styles.eyebrow}>{t("login.eyebrow")}</Text>
         <Text style={styles.title}>{selfHosted ? t("login.titleSelfHosted") : t("login.titleHosted")}</Text>
@@ -195,7 +196,7 @@ export default function AccountLoginScreen() {
         </AppPressable>
         {message ? <Text style={styles.error}>{message}</Text> : null}
       </View>
-    </ScrollView>
+    </FormScreen>
   );
 }
 

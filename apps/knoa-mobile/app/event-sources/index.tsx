@@ -1,12 +1,13 @@
 import * as Crypto from "expo-crypto";
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { EventSource, EventSourceEvent, MCPResourceCatalogItem } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
+import { FormScreen } from "@/components/FormScreen";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors, radii, shadows, spacing, typography } from "@/theme";
@@ -116,7 +117,7 @@ export default function EventSourcesScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <FormScreen contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <AppPressable onPress={() => router.back()} style={styles.iconButton}><AppIcon name="chevron-left" color={colors.ink} /></AppPressable>
         <View style={styles.headerCopy}><Text style={styles.heading}>{t("eventSources.title")}</Text><Text style={styles.hint}>{t("eventSources.description")}</Text></View>
@@ -169,7 +170,7 @@ export default function EventSourcesScreen() {
           {events[source.source_id]?.map((event) => <Text key={event.trigger_event_id} style={styles.event}>{event.external_event_id} · {event.state}</Text>)}
         </View>
       ))}
-    </ScrollView>
+    </FormScreen>
   );
 }
 

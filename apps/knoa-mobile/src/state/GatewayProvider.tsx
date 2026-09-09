@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 
 import { GatewayClient, GatewayError } from "@/api/gatewayClient";
 import { ConnectionResolverTransport, type LanDiagnostic, type P2PDiagnostic, type RelayDiagnostic } from "@/api/gatewayTransport";
-import type { AgentSummary, AndroidRelease, PrincipalTaskEvent, UnavailableAgent } from "@/api/models";
+import type { PrincipalTaskEvent } from "@/api/models";
 import { isPresentationTaskEvent, subscribeTaskEvents, type TaskEventSubscription } from "@/api/taskEvents";
 import { authenticateDevice, pairDevice } from "@/security/pairing";
 import {
@@ -16,7 +16,6 @@ import {
   listNodeBindings,
   selectNode,
   storeCoreSession,
-  type NodeDeviceBinding,
 } from "@/security/deviceIdentity";
 import { withAuthenticationRetry } from "./authenticationRecovery";
 import { listHubNodes, loadHubConnection, resolveAndroidRelease } from "@/hub/hubClient";
@@ -26,8 +25,16 @@ import { clearTaskReminders } from "@/reminders/taskReminders";
 import { installedAndroidVersionCode, isAndroidUpdateAvailable } from "@/update/androidUpdater";
 import { requiresAndroidUpdate } from "@/update/releasePolicy";
 import { createProvisionalConversation, resolveNewConversationAgent } from "./conversationTransition";
+import { ConnectionContext, useConnection } from "./connectionContext";
+import { FleetContext, useFleet } from "./fleetContext";
+import { SessionContext, useSession } from "./sessionContext";
+import type { ConnectionState, FleetState, GatewayConnection, GatewayState, SessionState } from "./types";
 
-type GatewayConnection = { gatewayUrl: string; token: string };
+export * from "./types";
+export { useConnection } from "./connectionContext";
+export { useFleet } from "./fleetContext";
+export { useSession } from "./sessionContext";
+
 const CONNECTION_TIMEOUT_MS = 20_000;
 
 function withConnectionTimeout<T>(promise: Promise<T>, timeoutMs = CONNECTION_TIMEOUT_MS): Promise<T> {
@@ -39,57 +46,6 @@ function withConnectionTimeout<T>(promise: Promise<T>, timeoutMs = CONNECTION_TI
     );
   });
 }
-
-type GatewayState = {
-  status: "booting" | "selecting" | "unpaired" | "ready" | "error";
-  client: GatewayClient | null;
-  sessionHandle: string;
-  gatewayUrl: string;
-  sessionToken: string;
-  latestEvent: PrincipalTaskEvent | null;
-  error: string;
-  deviceId: string;
-  nodeId: string;
-  nodes: NodeDeviceBinding[];
-  lastConnectedAt: number;
-  transportMode: "direct" | "p2p" | "relay";
-  p2pState: P2PDiagnostic["state"];
-  p2pLastError: string;
-  p2pRetryAt: number;
-  p2pElapsedMs: number;
-  lanState: LanDiagnostic["state"];
-  lanLastError: string;
-  lanRetryAt: number;
-  lanEndpoint: string;
-  lanElapsedMs: number;
-  relayState: RelayDiagnostic["state"];
-  relayLastError: string;
-  relayRetryAt: number;
-  relayElapsedMs: number;
-  requiredUpdate: AndroidRelease | null;
-  availableUpdate: AndroidRelease | null;
-  agents: AgentSummary[];
-  unavailableAgents: UnavailableAgent[];
-  defaultAgentId: string;
-  selectedAgentId: string;
-  activeAgentId: string;
-  selectAgent(agentId: string): void;
-  pair(encoded: string, displayName: string): Promise<void>;
-  renameNode(displayName: string): Promise<void>;
-  reconnect(): Promise<void>;
-  reauthenticate(): Promise<void>;
-  removeConnection(): Promise<void>;
-  disconnectNode(): Promise<void>;
-  switchNode(nodeId: string): Promise<void>;
-  newConversation(agentId?: string): Promise<void>;
-  ensureConversation(): Promise<string>;
-  commitConversation(sessionHandle: string): Promise<void>;
-  openConversation(sessionHandle: string, metadata?: { agentId?: string; state?: string }): Promise<void>;
-  connection(): GatewayConnection | null;
-  runAuthenticated<T>(operation: (client: GatewayClient) => Promise<T>): Promise<T>;
-  refreshAgents(): Promise<void>;
-  subscribeEvents(listener: (event: PrincipalTaskEvent) => void): () => void;
-};
 
 const Context = createContext<GatewayState | null>(null);
 
@@ -668,29 +624,90 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     commit({ selectedAgentId: agentId });
   }, [commit]);
 
-  const value = useMemo<GatewayState>(
+  const connectionValue = useMemo<ConnectionState>(
     () => ({
-      ...state,
-      pair,
-      renameNode,
+      status: state.status,
+      transportMode: state.transportMode,
+      p2pState: state.p2pState,
+      p2pLastError: state.p2pLastError,
+      p2pRetryAt: state.p2pRetryAt,
+      p2pElapsedMs: state.p2pElapsedMs,
+      lanState: state.lanState,
+      lanLastError: state.lanLastError,
+      lanRetryAt: state.lanRetryAt,
+      lanEndpoint: state.lanEndpoint,
+      lanElapsedMs: state.lanElapsedMs,
+      relayState: state.relayState,
+      relayLastError: state.relayLastError,
+      relayRetryAt: state.relayRetryAt,
+      relayElapsedMs: state.relayElapsedMs,
+      lastConnectedAt: state.lastConnectedAt,
       reconnect: connect,
       reauthenticate,
+    }),
+    [connect, reauthenticate, state.lanElapsedMs, state.lanEndpoint, state.lanLastError, state.lanRetryAt, state.lanState, state.lastConnectedAt, state.p2pElapsedMs, state.p2pLastError, state.p2pRetryAt, state.p2pState, state.relayElapsedMs, state.relayLastError, state.relayRetryAt, state.relayState, state.status, state.transportMode],
+  );
+
+  const fleetValue = useMemo<FleetState>(
+    () => ({
+      deviceId: state.deviceId,
+      nodeId: state.nodeId,
+      nodes: state.nodes,
+      requiredUpdate: state.requiredUpdate,
+      availableUpdate: state.availableUpdate,
+      agents: state.agents,
+      unavailableAgents: state.unavailableAgents,
+      defaultAgentId: state.defaultAgentId,
+      selectedAgentId: state.selectedAgentId,
+      activeAgentId: state.activeAgentId,
+      selectAgent,
+      pair,
+      renameNode,
       removeConnection,
       disconnectNode,
       switchNode,
+      refreshAgents,
+    }),
+    [disconnectNode, pair, refreshAgents, removeConnection, renameNode, selectAgent, state.activeAgentId, state.agents, state.availableUpdate, state.defaultAgentId, state.deviceId, state.nodeId, state.nodes, state.requiredUpdate, state.selectedAgentId, state.unavailableAgents, switchNode],
+  );
+
+  const sessionValue = useMemo<SessionState>(
+    () => ({
+      client: state.client,
+      sessionHandle: state.sessionHandle,
+      gatewayUrl: state.gatewayUrl,
+      sessionToken: state.sessionToken,
+      latestEvent: state.latestEvent,
+      error: state.error,
       newConversation,
       ensureConversation,
       commitConversation,
       openConversation,
       connection,
       runAuthenticated,
-      refreshAgents,
       subscribeEvents,
-      selectAgent,
     }),
-    [commitConversation, connect, connection, disconnectNode, ensureConversation, newConversation, openConversation, pair, reauthenticate, refreshAgents, removeConnection, renameNode, runAuthenticated, selectAgent, state, subscribeEvents, switchNode],
+    [commitConversation, connection, ensureConversation, newConversation, openConversation, runAuthenticated, state.client, state.error, state.gatewayUrl, state.latestEvent, state.sessionHandle, state.sessionToken, subscribeEvents],
   );
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+
+  const gatewayValue = useMemo<GatewayState>(
+    () => ({
+      ...connectionValue,
+      ...fleetValue,
+      ...sessionValue,
+    }),
+    [connectionValue, fleetValue, sessionValue],
+  );
+
+  return (
+    <ConnectionContext.Provider value={connectionValue}>
+      <FleetContext.Provider value={fleetValue}>
+        <SessionContext.Provider value={sessionValue}>
+          <Context.Provider value={gatewayValue}>{children}</Context.Provider>
+        </SessionContext.Provider>
+      </FleetContext.Provider>
+    </ConnectionContext.Provider>
+  );
 }
 
 export function useGateway(): GatewayState {

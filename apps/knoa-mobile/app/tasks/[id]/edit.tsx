@@ -2,9 +2,6 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   Switch,
   StyleSheet,
   Text,
@@ -15,6 +12,7 @@ import {
 import type { MCPResourceCatalogItem, Task, TaskLaunchPolicy } from "@/api/models";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import { AsyncStateView } from "@/components/AsyncStateView";
+import { FormScreen } from "@/components/FormScreen";
 import { useGateway } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
@@ -108,38 +106,46 @@ export default function EditTaskScreen() {
     );
   }
 
+  const isDirty = Boolean(
+    task && (
+      title !== task.title ||
+      goal !== task.goal ||
+      notifyCompleted !== (task.notification_policy.completed ?? true) ||
+      notifyFailed !== (task.notification_policy.failed ?? true) ||
+      notifyApproval !== (task.notification_policy.waiting_approval ?? true)
+    ),
+  );
+
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.note}>{t("taskEdit.note")}</Text>
-        <Text style={styles.label}>{t("taskNew.name")}</Text>
-        <TextInput value={title} onChangeText={setTitle} style={styles.titleInput} accessibilityLabel={t("taskNew.name")} />
-        <Text style={styles.label}>{t("taskNew.goal")}</Text>
-        <TextInput
-          value={goal}
-          onChangeText={setGoal}
-          multiline
-          textAlignVertical="top"
-          style={styles.goalInput}
-          accessibilityLabel={t("taskNew.goal")}
-        />
-        <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} mcpResources={mcpResources} />
-        <View style={styles.notificationCard}>
-          <Text style={styles.label}>{t("taskNew.notifyMe")}</Text>
-          <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />
-          <Toggle label={t("taskNew.failed")} value={notifyFailed} onChange={setNotifyFailed} />
-          <Toggle label={t("taskNew.approval")} value={notifyApproval} onChange={setNotifyApproval} />
-        </View>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-        <AppPressable
-          disabled={!task || !goal.trim() || saving || !isLaunchPolicyValid(launchPolicy)}
-          onPress={() => void save()}
-          style={[styles.save, (!task || !goal.trim() || saving || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
-        >
-          {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>{t("taskEdit.save")}</Text>}
-        </AppPressable>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    <FormScreen isDirty={isDirty} contentContainerStyle={styles.container}>
+      <Text style={styles.note}>{t("taskEdit.note")}</Text>
+      <Text style={styles.label}>{t("taskNew.name")}</Text>
+      <TextInput value={title} onChangeText={setTitle} style={styles.titleInput} accessibilityLabel={t("taskNew.name")} />
+      <Text style={styles.label}>{t("taskNew.goal")}</Text>
+      <TextInput
+        value={goal}
+        onChangeText={setGoal}
+        multiline
+        textAlignVertical="top"
+        style={styles.goalInput}
+        accessibilityLabel={t("taskNew.goal")}
+      />
+      <TaskLaunchEditor policy={launchPolicy} onChange={setLaunchPolicy} mcpResources={mcpResources} />
+      <View style={styles.notificationCard}>
+        <Text style={styles.label}>{t("taskNew.notifyMe")}</Text>
+        <Toggle label={t("taskNew.completed")} value={notifyCompleted} onChange={setNotifyCompleted} />
+        <Toggle label={t("taskNew.failed")} value={notifyFailed} onChange={setNotifyFailed} />
+        <Toggle label={t("taskNew.approval")} value={notifyApproval} onChange={setNotifyApproval} />
+      </View>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <AppPressable
+        disabled={!task || !goal.trim() || saving || !isLaunchPolicyValid(launchPolicy)}
+        onPress={() => void save()}
+        style={[styles.save, (!task || !goal.trim() || saving || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
+      >
+        {saving ? <ActivityIndicator color="white" /> : <Text style={styles.saveText}>{t("taskEdit.save")}</Text>}
+      </AppPressable>
+    </FormScreen>
   );
 }
 
