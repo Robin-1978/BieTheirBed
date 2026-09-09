@@ -206,6 +206,34 @@ async def test_projection_keeps_builtin_tools_static_and_mcp_tools_deferred() ->
 
 
 @pytest.mark.asyncio
+async def test_auto_mode_static_injects_compact_mcp_when_budget_allows() -> None:
+    inventory = ToolInventory(schema_char_budget=4000, mcp_mode="auto")
+    snapshot = await inventory.load("session-a", "digest-a", Client())
+
+    projection = await inventory.project_for_turn("session-a", snapshot, "查一下 Jira issue")
+
+    assert projection.mode == "static"
+    assert projection.schema_hits == 1
+    assert [tool["name"] for tool in projection.tools] == [
+        "web_search",
+        "write_file",
+        "tool_help",
+        "mcp__jira__issue_get",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_auto_mode_falls_back_to_deferred_for_large_future_mcp_set() -> None:
+    inventory = ToolInventory(schema_char_budget=1000, mcp_mode="auto")
+    snapshot = await inventory.load("session-a", "digest-a", Client())
+
+    projection = await inventory.project_for_turn("session-a", snapshot, "查一下 Jira issue")
+
+    assert projection.mode in {"lexical", "static"}
+    assert [tool["name"] for tool in projection.tools][-1] == "mcp__jira__issue_get"
+
+
+@pytest.mark.asyncio
 async def test_resource_task_automatically_injects_tools_from_its_mcp_source() -> None:
     inventory = ToolInventory(schema_char_budget=4000, semantic_selector=SemanticSelector())
     snapshot = await inventory.load("session-a", "digest-a", Client())
