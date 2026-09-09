@@ -155,6 +155,23 @@ async def test_inventory_deduplicates_repeated_provider_definitions() -> None:
 
 
 @pytest.mark.asyncio
+async def test_activation_manifest_restores_order_without_history_lookup() -> None:
+    inventory = ToolInventory(schema_char_budget=4000)
+    snapshot = await inventory.load("session-a", "digest-a", Client())
+
+    restored = inventory.restore_manifest(
+        "session-a",
+        snapshot,
+        ("mcp__jira__issue_get", "mcp__missing__search", "web_search"),
+    )
+
+    assert restored == ("mcp__jira__issue_get",)
+    assert inventory.active_manifest("session-a") == ("mcp__jira__issue_get",)
+    projected = inventory.project("session-a", snapshot)
+    assert [tool["name"] for tool in projected][-1] == "mcp__jira__issue_get"
+
+
+@pytest.mark.asyncio
 async def test_projection_keeps_builtin_tools_static_and_mcp_tools_deferred() -> None:
     inventory = ToolInventory(schema_char_budget=2000)
     snapshot = await inventory.load("session-a", "digest-a", Client())

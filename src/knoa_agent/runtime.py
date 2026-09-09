@@ -247,6 +247,18 @@ class KnoaAgentRuntime(AgentRuntime):
                     request.mcp.scope_digest,
                     client,
                 )
+                manifest = self._checkpoint_tool_manifest(checkpoint)
+                if manifest is not None:
+                    manifest_scope, manifest_tools = manifest
+                    # A scope digest binds the persisted registry to the
+                    # grants used to discover it.  Never restore stale MCP
+                    # activations into a changed grant.
+                    if manifest_scope == request.mcp.scope_digest:
+                        self._tool_inventory.restore_manifest(
+                            request.session.runtime_session_ref,
+                            inventory,
+                            manifest_tools,
+                        )
                 projection = await self._tool_inventory.project_for_turn(
                     request.session.runtime_session_ref,
                     inventory,
@@ -1048,6 +1060,17 @@ class KnoaAgentRuntime(AgentRuntime):
                 "messages": clean_messages,
                 "summary": summary,
                 "covered_messages": covered_messages,
+                # Tool activation is registry metadata, not conversation
+                # history.  Keeping it here makes deferred MCP state survive
+                # Runtime restarts without changing the model prompt history.
+                "active_tool_manifest": {
+                    "scope_digest": request.mcp.scope_digest,
+                    "tools": list(
+                        self._tool_inventory.active_manifest(
+                            request.session.runtime_session_ref
+                        )
+                    ),
+                },
             },
             revision=previous.revision if previous is not None else 1,
             created_at=previous.created_at if previous is not None else 0.0,
@@ -1200,6 +1223,27 @@ class KnoaAgentRuntime(AgentRuntime):
         if not isinstance(summary, str) or not isinstance(covered, int) or covered < 0:
             raise RuntimeError("Knoa Agent checkpoint summary is invalid")
         return summary, covered
+
+    @staticmethod
+    def _checkpoint_tool_manifest(
+        checkpoint: ContextCheckpoint | None,
+    ) -> tuple[str, tuple[str, ...]] | None:
+        """Read persisted MCP registry metadata without consulting messages."""
+
+        if checkpoint is None:
+            return None
+        raw = checkpoint.payload.get("active_tool_manifest")
+        if not isinstance(raw, dict):
+            return None
+        scope_digest = raw.get("scope_digest")
+        names = raw.get("tools")
+        if not isinstance(scope_digest, str) or not scope_digest.strip():
+            return None
+        if not isinstance(names, list) or not all(
+            isinstance(name, str) and name.strip() for name in names
+        ):
+            return None
+        return scope_digest, tuple(names)
 
     @staticmethod
     def _has_usage(usage: dict[str, Any], *names: str) -> bool:
