@@ -210,6 +210,38 @@ class ToolInventory:
                 active.append(name)
         return tuple(sorted(selected))
 
+    def active_manifest(self, runtime_session_ref: str) -> tuple[str, ...]:
+        """Return the ordered deferred-tool activation manifest for a session.
+
+        This is registry state, deliberately separate from model/durable
+        messages.  Callers may persist it alongside a checkpoint and restore
+        it after a Runtime process restart.
+        """
+
+        return tuple(self._active_deferred.get(runtime_session_ref, ()))
+
+    def restore_manifest(
+        self,
+        runtime_session_ref: str,
+        snapshot: ToolInventorySnapshot,
+        names: list[str] | tuple[str, ...],
+    ) -> tuple[str, ...]:
+        """Restore an ordered activation manifest, dropping stale/invalid names."""
+
+        available = {str(tool["name"]) for tool in snapshot.tools}
+        active = self._active_deferred.setdefault(runtime_session_ref, [])
+        restored: list[str] = []
+        for raw_name in names:
+            name = str(raw_name)
+            if (
+                name in available
+                and self._is_deferred(name)
+                and name not in active
+            ):
+                active.append(name)
+                restored.append(name)
+        return tuple(restored)
+
     def invalidate_session(self, runtime_session_ref: str) -> None:
         for key in tuple(self._cache):
             if key[0] == runtime_session_ref:

@@ -512,7 +512,7 @@ async def test_tool_help_activates_deferred_mcp_tool_on_next_model_step(
         RuntimeTurnRequest(
             session=session,
             operation_id="operation-jira",
-            input=(TextPart(text="分析 Jira 问题"),),
+            input=(TextPart(text="help me"),),
             mcp=grant(),
         )
     )
@@ -521,21 +521,84 @@ async def test_tool_help_activates_deferred_mcp_tool_on_next_model_step(
 
     assert events[-1].status == "completed"
     assert [tool["name"] for tool in provider.requests[0].tools] == [
-        "mcp__jira__issue_get",
         "tool_help",
         "weather",
     ]
     assert [tool["name"] for tool in provider.requests[1].tools] == [
-        "mcp__jira__issue_get",
         "tool_help",
         "weather",
+        "mcp__jira__issue_get",
     ]
-    jira = provider.requests[1].tools[0]
+    jira = provider.requests[1].tools[-1]
     assert jira["inputSchema"] == {
         "type": "object",
         "properties": {"issue_key": {"type": "string"}},
         "required": ["issue_key"],
     }
+
+
+@pytest.mark.asyncio
+async def test_deferred_mcp_manifest_survives_runtime_restart_without_message_injection(
+    tmp_path: Path,
+) -> None:
+    store = ContextCheckpointRepository(tmp_path / "context.db")
+    first_provider = DeferredMcpProvider()
+    first_runtime = KnoaAgentRuntime(
+        first_provider,
+        store,
+        DeferredMcpConnector(),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    session = await first_runtime.create_session(
+        CreateRuntimeSession(operation_id="create-manifest", binding_epoch=1)
+    )
+    first_turn = await first_runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-manifest-a",
+            input=(TextPart(text="help me"),),
+            mcp=grant(),
+        )
+    )
+    first_events = [event async for event in first_turn.events]
+    assert first_events[-1].status == "completed"
+
+    checkpoint = store.load_checkpoint(session.runtime_session_ref)
+    assert checkpoint is not None
+    assert checkpoint.payload["active_tool_manifest"] == {
+        "scope_digest": "a" * 64,
+        "tools": ["mcp__jira__issue_get"],
+    }
+    assert all(
+        "active_tool_manifest" not in message
+        for message in checkpoint.payload["messages"]
+    )
+
+    second_provider = Provider()
+    restarted_runtime = KnoaAgentRuntime(
+        second_provider,
+        store,
+        DeferredMcpConnector(),
+        system_prompt="system",
+        health_probe=healthy,
+    )
+    second_turn = await restarted_runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-manifest-b",
+            input=(TextPart(text="continue"),),
+            mcp=grant(),
+        )
+    )
+    second_events = [event async for event in second_turn.events]
+
+    assert second_events[-1].status == "completed"
+    assert [tool["name"] for tool in second_provider.requests[0].tools] == [
+        "tool_help",
+        "weather",
+        "mcp__jira__issue_get",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1280,7 +1343,6 @@ async def test_knoa_runtime_tool_budget_exhaustion_triggers_final_synthesis_pass
     # The turn must be COMPLETED with final_output synthesized, NOT failed!
     assert finished.status == "completed"
     assert "最终综合对比报告" in finished.final_output
-
 
 
 
