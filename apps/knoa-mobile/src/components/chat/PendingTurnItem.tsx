@@ -1,4 +1,4 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import type { PendingChatTurn } from "./types";
 import { attachmentStatusLabel } from "./types";
@@ -34,7 +34,7 @@ export function PendingTurnItem({
   return (
     <View style={styles.turn}>
       {showTimestamp ? <Text style={styles.messageTimestamp}>{timestampLabel}</Text> : null}
-      <Pressable
+      <AppPressable
         accessibilityRole="button"
         delayLongPress={320}
         onLongPress={() => onCopy(pending.userInput)}
@@ -61,7 +61,7 @@ export function PendingTurnItem({
             ))}
           </View>
         ) : null}
-      </Pressable>
+      </AppPressable>
 
       <View style={styles.assistantBubble}>
         <View style={styles.activityRow}>

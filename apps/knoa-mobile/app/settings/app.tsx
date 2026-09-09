@@ -1,7 +1,7 @@
 import * as Application from "expo-application";
 import { router } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Alert, Linking, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
@@ -231,7 +231,7 @@ function Choice<T extends ThemeMode | LanguageMode>({
   onPress(mode: T): Promise<void>;
 }) {
   return (
-    <Pressable
+    <AppPressable
       accessibilityRole="radio"
       accessibilityState={{ checked: selected }}
       onPress={() => void onPress(mode)}
@@ -239,7 +239,7 @@ function Choice<T extends ThemeMode | LanguageMode>({
     >
       <View style={[styles.radio, selected && styles.radioSelected]}>{selected ? <View style={styles.radioDot} /> : null}</View>
       <Text style={[styles.choiceLabel, selected && styles.choiceLabelSelected]}>{label}</Text>
-    </Pressable>
+    </AppPressable>
   );
 }
 

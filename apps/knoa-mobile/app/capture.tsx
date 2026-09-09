@@ -5,12 +5,12 @@ import { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
-  Pressable,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 
+import { AppPressable } from "@/components/AppPressable";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
 import { prepareImageAttachment } from "@/media/prepareImageAttachment";
@@ -58,13 +58,13 @@ export default function CaptureScreen() {
       <View style={styles.permission}>
         <Text style={styles.permissionText}>{t("capture.permission")}</Text>
         {permission && !permission.canAskAgain ? (
-          <Pressable style={styles.button} onPress={() => void Linking.openSettings()}>
+          <AppPressable style={styles.button} onPress={() => void Linking.openSettings()}>
             <Text style={styles.buttonText}>{t("pair.openSettings")}</Text>
-          </Pressable>
+          </AppPressable>
         ) : (
-          <Pressable style={styles.button} onPress={() => void requestPermission()}>
+          <AppPressable style={styles.button} onPress={() => void requestPermission()}>
             <Text style={styles.buttonText}>{t("capture.allow")}</Text>
-          </Pressable>
+          </AppPressable>
         )}
       </View>
     );
@@ -80,17 +80,17 @@ export default function CaptureScreen() {
       <View style={styles.panel}>
         {captured ? (
           <View style={styles.previewActions}>
-            <Pressable style={styles.secondaryButton} onPress={() => setCaptured(null)}>
+            <AppPressable style={styles.secondaryButton} onPress={() => setCaptured(null)}>
               <Text style={styles.secondaryText}>{t("capture.retake")}</Text>
-            </Pressable>
-            <Pressable style={[styles.button, styles.flexAction]} onPress={usePhoto}>
+            </AppPressable>
+            <AppPressable style={[styles.button, styles.flexAction]} onPress={usePhoto}>
               <Text style={styles.buttonText}>{t("capture.use")}</Text>
-            </Pressable>
+            </AppPressable>
           </View>
         ) : (
-          <Pressable style={styles.button} onPress={() => void capture()} disabled={working}>
+          <AppPressable style={styles.button} onPress={() => void capture()} disabled={working}>
             {working ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>{t("capture.take")}</Text>}
-          </Pressable>
+          </AppPressable>
         )}
       </View>
     </View>

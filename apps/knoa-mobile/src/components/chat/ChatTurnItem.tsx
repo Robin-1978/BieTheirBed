@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
 import type {
   ChatApproval,
@@ -14,6 +14,7 @@ import { ChatApprovalCard } from "./ChatApprovalCard";
 import { ActionCardView, extractActionCards, stripActionCardMarkdownBlocks, type ActionCardInvocation } from "@/components/action_card";
 import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
+import { AppPressable } from "@/components/AppPressable";
 import { InteractionCard } from "@/components/InteractionCard";
 import { TurnProgress } from "@/components/TurnProgress";
 import { formatMessageTimestamp } from "@/ui/formatRelativeTime";
@@ -76,7 +77,7 @@ export const ChatTurnItem = memo(function ChatTurnItem({
     <View style={styles.turn}>
       {showTimestamp ? <Text style={styles.messageTimestamp}>{timestampLabel}</Text> : null}
 
-      <Pressable
+      <AppPressable
         accessibilityRole="button"
         delayLongPress={320}
         onLongPress={() => onCopy(turn.user_input)}
@@ -88,15 +89,15 @@ export const ChatTurnItem = memo(function ChatTurnItem({
             {t("chat.attachments", { count: turn.attachments.length })}
           </Text>
         ) : null}
-      </Pressable>
+      </AppPressable>
 
       <View style={styles.assistantBubble}>
         <TurnProgress turn={turn} />
 
         {response ? (
-          <Pressable accessibilityRole="button" delayLongPress={320} onLongPress={() => onCopy(response)}>
+          <AppPressable accessibilityRole="button" delayLongPress={320} onLongPress={() => onCopy(response)}>
             <AppMarkdown value={response} style={styles.markdownList} />
-          </Pressable>
+          </AppPressable>
         ) : null}
 
         {artifactItems.length ? (
@@ -144,7 +145,7 @@ export const ChatTurnItem = memo(function ChatTurnItem({
 
         {turn.state === "completed" && response ? (
           <View style={styles.completedActions}>
-            <Pressable
+            <AppPressable
               accessibilityRole="button"
               accessibilityLabel={t("chat.copyResponse")}
               onPress={() => onCopy(response)}
@@ -152,9 +153,9 @@ export const ChatTurnItem = memo(function ChatTurnItem({
             >
               <AppIcon name="file" color={colors.muted} size={12} />
               <Text style={styles.completedActionText}>{t("chat.copyShort")}</Text>
-            </Pressable>
+            </AppPressable>
             {onConvertToTask ? (
-              <Pressable
+              <AppPressable
                 accessibilityRole="button"
                 accessibilityLabel={t("chat.convertToTask")}
                 onPress={() => onConvertToTask(turn)}
@@ -164,19 +165,19 @@ export const ChatTurnItem = memo(function ChatTurnItem({
                 <Text style={[styles.completedActionText, styles.convertActionText]}>
                   {t("chat.convertToTask")}
                 </Text>
-              </Pressable>
+              </AppPressable>
             ) : null}
           </View>
         ) : null}
 
         {turn.state === "failed" || turn.state === "cancelled" ? (
           <View style={styles.turnActions}>
-            <Pressable accessibilityRole="button" onPress={() => onRetry(turn)} style={styles.turnAction}>
+            <AppPressable accessibilityRole="button" onPress={() => onRetry(turn)} style={styles.turnAction}>
               <Text style={styles.turnActionText}>{t("chat.retry")}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => onEdit(turn)} style={styles.turnAction}>
+            </AppPressable>
+            <AppPressable accessibilityRole="button" onPress={() => onEdit(turn)} style={styles.turnAction}>
               <Text style={styles.turnActionText}>{t("chat.editResend")}</Text>
-            </Pressable>
+            </AppPressable>
           </View>
         ) : null}
       </View>

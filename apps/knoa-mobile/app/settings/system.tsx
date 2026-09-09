@@ -3,7 +3,6 @@ import { useLocalSearchParams } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -11,6 +10,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+
+import { AppPressable } from "@/components/AppPressable";
 
 import type {
   ConfigChange,
@@ -223,7 +224,7 @@ export default function SystemConfigurationScreen() {
                       })}
                     />
                   </View>
-                  <Pressable
+                  <AppPressable
                     disabled={!draft || isDefault || !agent.enabled}
                     onPress={() => updateDocument((next) => { next.agents.default_agent = agentId; })}
                     style={[styles.inlineButton, isDefault && styles.inlineButtonSelected]}
@@ -231,7 +232,7 @@ export default function SystemConfigurationScreen() {
                     <Text style={[styles.inlineButtonText, isDefault && styles.inlineButtonTextSelected]}>
                       {isDefault ? t("config.currentDefault") : t("config.makeDefault")}
                     </Text>
-                  </Pressable>
+                  </AppPressable>
                   <TextInput
                     editable={Boolean(draft)}
                     multiline
@@ -329,7 +330,7 @@ export default function SystemConfigurationScreen() {
             <Action label={t("config.publish")} busy={working === "publish"} primary onPress={() => void publish()} />
           </View>
           {validation?.issues.map((issue) => <Text key={`${issue.code}:${issue.path}`} style={styles.error}>{issue.path || "/"}: {issue.message}</Text>)}
-          <Pressable onPress={confirmCancelDraft}><Text style={styles.cancel}>{t("common.cancel")}</Text></Pressable>
+          <AppPressable onPress={confirmCancelDraft}><Text style={styles.cancel}>{t("common.cancel")}</Text></AppPressable>
         </Section>
       ) : null}
 
@@ -384,7 +385,7 @@ function ToggleRow({ title, detail, value, disabled, onChange }: { title: string
 }
 
 function Action({ label, onPress, busy = false, primary = false }: { label: string; onPress(): void; busy?: boolean; primary?: boolean }) {
-  return <Pressable disabled={busy} onPress={onPress} style={[styles.action, primary && styles.actionPrimary]}>{busy ? <ActivityIndicator color={primary ? colors.onAccent : colors.accent} /> : <><Text style={[styles.actionText, primary && styles.actionTextPrimary]}>{label}</Text><AppIcon name="chevron-right" size={17} color={primary ? colors.onAccent : colors.accent} /></>}</Pressable>;
+  return <AppPressable disabled={busy} onPress={onPress} style={[styles.action, primary && styles.actionPrimary]}>{busy ? <ActivityIndicator color={primary ? colors.onAccent : colors.accent} /> : <><Text style={[styles.actionText, primary && styles.actionTextPrimary]}>{label}</Text><AppIcon name="chevron-right" size={17} color={primary ? colors.onAccent : colors.accent} /></>}</AppPressable>;
 }
 
 function NumericField({ label, value, disabled, onCommit }: { label: string; value: number; disabled: boolean; onCommit(value: number): void }) {
@@ -392,7 +393,7 @@ function NumericField({ label, value, disabled, onCommit }: { label: string; val
 }
 
 function ChoiceRow({ label, value, choices, disabled, onChange }: { label: string; value: string; choices: [string, string][]; disabled: boolean; onChange(value: string): void }) {
-  return <View style={styles.choiceBlock}><Text style={styles.meta}>{label}</Text><View style={styles.choiceRow}>{choices.map(([id, title]) => <Pressable key={id} disabled={disabled} onPress={() => onChange(id)} style={[styles.choice, value === id && styles.choiceSelected]}><Text style={[styles.choiceText, value === id && styles.choiceTextSelected]}>{title}</Text></Pressable>)}</View></View>;
+  return <View style={styles.choiceBlock}><Text style={styles.meta}>{label}</Text><View style={styles.choiceRow}>{choices.map(([id, title]) => <AppPressable key={id} disabled={disabled} onPress={() => onChange(id)} style={[styles.choice, value === id && styles.choiceSelected]}><Text style={[styles.choiceText, value === id && styles.choiceTextSelected]}>{title}</Text></AppPressable>)}</View></View>;
 }
 
 const styles = StyleSheet.create({

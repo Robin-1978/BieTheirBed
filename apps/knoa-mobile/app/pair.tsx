@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -160,9 +159,9 @@ export default function PairScreen() {
           : <Text style={styles.primaryText}>{t("pair.scan")}</Text>}
       </AppPressable>
       {permission && !permission.granted && !permission.canAskAgain ? (
-        <Pressable accessibilityRole="button" onPress={() => void Linking.openSettings()}>
+        <AppPressable accessibilityRole="button" onPress={() => void Linking.openSettings()}>
           <Text style={styles.settingsLink}>{t("pair.openSettings")}</Text>
-        </Pressable>
+        </AppPressable>
       ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <AppPressable onPress={() => setAdvanced((value) => !value)} style={styles.advancedToggle}>

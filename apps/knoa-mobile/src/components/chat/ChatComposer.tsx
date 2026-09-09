@@ -195,7 +195,7 @@ export function ChatComposer({
         </View>
       ) : null}
 
-      {/* 附件缩略条 */}
+      {/* Attachment preview strip */}
       {attachments.length ? (
         <View style={styles.attachmentStrip}>
           {attachments.map((item, index) => (
@@ -203,7 +203,7 @@ export function ChatComposer({
               {item.mediaType.startsWith("image/") ? (
                 <Image source={{ uri: item.uri }} style={styles.thumbnail} />
               ) : null}
-              <Pressable
+              <AppPressable
                 disabled={item.status !== "failed"}
                 onPress={() => onRetryAttachment(index)}
                 style={styles.attachmentCopy}
@@ -214,7 +214,7 @@ export function ChatComposer({
                     {attachmentStatusLabel(item.status, t)}
                   </Text>
                 ) : null}
-              </Pressable>
+              </AppPressable>
               <AppPressable
                 accessibilityLabel={t("chat.removeAttachment", { name: item.name })}
                 onPress={() => onAttachmentsChange(attachments.filter((_, i) => i !== index))}
