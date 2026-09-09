@@ -57,10 +57,10 @@ class ToolInventory:
     def __init__(
         self,
         *,
-        # KV-cache reuse depends on the built-in prefix remaining present and
-        # byte-stable. The 16k budget bounds only the complete visible list;
-        # deferred MCP tools are trimmed from the variable suffix first.
-        schema_char_budget: int = 16_000,
+        # Keep the established model-visible schema budget. MCP tools remain
+        # deferred and are selected by recall; this budget does not alter the
+        # stable Core tool prefix.
+        schema_char_budget: int = 24_000,
         semantic_selector: Any | None = None,
     ) -> None:
         if schema_char_budget < 1000:
@@ -122,23 +122,6 @@ class ToolInventory:
             or str(tool["name"]) in active
         )
         projected_chars = sum(self._serialized_size(tool) for tool in projected)
-        if projected_chars > self._schema_char_budget:
-            # Keep the stable built-ins and only as many deferred MCP tools as
-            # fit. Full definitions remain discoverable through tool_help and
-            # can be activated again on a later turn; a single large provider
-            # must not make the whole model call fail with context exhaustion.
-            stable = tuple(tool for tool in projected if not self._is_deferred(str(tool["name"])))
-            deferred = [tool for tool in projected if self._is_deferred(str(tool["name"]))]
-            kept = list(stable)
-            used = sum(self._serialized_size(tool) for tool in kept)
-            for tool in deferred:
-                size = self._serialized_size(tool)
-                if used + size > self._schema_char_budget:
-                    continue
-                kept.append(tool)
-                used += size
-            projected = tuple(kept)
-            projected_chars = used
         if projected_chars > self._schema_char_budget:
             raise ValueError(
                 "Selected model tool signatures exceed the configured budget"
