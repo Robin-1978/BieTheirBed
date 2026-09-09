@@ -61,6 +61,12 @@ class Client:
         )
 
 
+class DuplicateClient(Client):
+    async def list_tools(self):
+        tools = await super().list_tools()
+        return (*tools, tools[2])
+
+
 class ComplexBuiltinClient:
     async def list_tools(self):
         return (
@@ -140,6 +146,12 @@ async def test_inventory_cache_is_keyed_by_session_and_scope_digest() -> None:
         "web_search",
         "write_file",
     ]
+
+
+@pytest.mark.asyncio
+async def test_inventory_deduplicates_repeated_provider_definitions() -> None:
+    snapshot = await ToolInventory().load("session-a", "digest-a", DuplicateClient())
+    assert [tool["name"] for tool in snapshot.tools].count("mcp__jira__issue_get") == 1
 
 
 @pytest.mark.asyncio

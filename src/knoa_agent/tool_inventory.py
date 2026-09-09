@@ -78,12 +78,14 @@ class ToolInventory:
         if cached is not None:
             return cached
         listed = await client.list_tools()
-        normalized = tuple(
-            sorted(
-                (self._normalize(tool) for tool in listed),
-                key=lambda tool: str(tool["name"]),
-            )
-        )
+        # Providers can rediscover the same upstream tool through aliases or
+        # repeated pagination pages. Keep one canonical definition per name so
+        # duplicate schemas never consume model context.
+        by_name = {
+            str(normalized_tool["name"]): normalized_tool
+            for normalized_tool in (self._normalize(tool) for tool in listed)
+        }
+        normalized = tuple(sorted(by_name.values(), key=lambda tool: str(tool["name"])))
         snapshot = ToolInventorySnapshot(
             tools=normalized,
             schema_chars=sum(self._serialized_size(tool) for tool in normalized),
@@ -110,6 +112,23 @@ class ToolInventory:
             or str(tool["name"]) in active
         )
         projected_chars = sum(self._serialized_size(tool) for tool in projected)
+        if projected_chars > self._schema_char_budget:
+            # Keep the stable built-ins and only as many deferred MCP tools as
+            # fit. Full definitions remain discoverable through tool_help and
+            # can be activated again on a later turn; a single large provider
+            # must not make the whole model call fail with context exhaustion.
+            stable = tuple(tool for tool in projected if not self._is_deferred(str(tool["name"])))
+            deferred = [tool for tool in projected if self._is_deferred(str(tool["name"]))]
+            kept = list(stable)
+            used = sum(self._serialized_size(tool) for tool in kept)
+            for tool in deferred:
+                size = self._serialized_size(tool)
+                if used + size > self._schema_char_budget:
+                    continue
+                kept.append(tool)
+                used += size
+            projected = tuple(kept)
+            projected_chars = used
         if projected_chars > self._schema_char_budget:
             raise ValueError(
                 "Selected model tool signatures exceed the configured budget"
@@ -163,7 +182,10 @@ class ToolInventory:
             tools=tools,
             mode="+".join(modes),
             matched_names=tuple(sorted(recalled)),
-            schema_hits=len(active),
+            schema_hits=sum(
+                1 for tool in tools
+                if self._is_deferred(str(tool.get("name") or ""))
+            ),
         )
 
     def activate(

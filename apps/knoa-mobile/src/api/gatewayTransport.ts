@@ -380,6 +380,10 @@ export class ConnectionResolverTransport implements GatewayTransport {
     const relay = this.relay;
     const pending = (async () => {
       await relay.connect();
+      // Handshake completion is distinct from the first request.  Expose it
+      // explicitly so diagnostics (and consumers that use the diagnostic as
+      // a readiness signal) do not remain in "connecting" indefinitely.
+      this.setRelayDiagnostic("ready");
       this.updatePreferredActive(true);
     })().catch((error) => {
       this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000);

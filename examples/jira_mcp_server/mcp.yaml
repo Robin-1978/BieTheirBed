@@ -24,6 +24,10 @@ optional_env:
   - JIRA_WRITE_ENABLED
 timeout_seconds: 300
 tools:
+  jira.query:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
   jira.get_issue:
     effect: read_only
     capabilities: [mcp, network]

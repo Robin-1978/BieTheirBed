@@ -558,6 +558,45 @@ class JiraClient:
         issues = payload.get("issues", []) if isinstance(payload, dict) else []
         return tuple(issue for issue in issues if isinstance(issue, dict))
 
+    async def query_issues(
+        self,
+        jql: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        fields: str = "summary,status,priority,issuetype,assignee,reporter,created,updated",
+    ) -> dict[str, Any]:
+        """Run one bounded read-only JQL query for flexible Jira discovery."""
+        normalized = jql.strip()
+        if not normalized or len(normalized) > 4000:
+            raise ValueError("JQL must contain 1-4000 characters")
+        bounded_limit = max(1, min(int(limit), 100))
+        bounded_offset = max(0, min(int(offset), 10_000))
+        normalized_fields = ",".join(
+            field.strip() for field in fields.split(",") if field.strip()
+        )
+        if len(normalized_fields) > 2000:
+            raise ValueError("Jira fields selection is too large")
+        payload = await self._request(
+            "GET",
+            f"{self.api_root}/search",
+            params={
+                "jql": normalized,
+                "startAt": bounded_offset,
+                "maxResults": bounded_limit,
+                "fields": normalized_fields or "summary,status",
+            },
+        )
+        if not isinstance(payload, dict):
+            raise TypeError("Jira returned an invalid search response")
+        issues = payload.get("issues", [])
+        return {
+            "start_at": int(payload.get("startAt", bounded_offset) or bounded_offset),
+            "max_results": int(payload.get("maxResults", bounded_limit) or bounded_limit),
+            "total": int(payload.get("total", len(issues)) or 0),
+            "issues": tuple(issue for issue in issues if isinstance(issue, dict)),
+        }
+
     async def poll_assignment_events(self) -> tuple[dict[str, str], ...]:
         current_user_ids = await self.current_user_ids()
         source_identity = json.dumps(
