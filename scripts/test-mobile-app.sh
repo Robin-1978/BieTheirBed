@@ -7,6 +7,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 MOBILE="$REPO/apps/knoa-mobile"
 APK="${1:-}"
+APK_ONLY=false
+if [[ "${1:-}" == "--apk-only" ]]; then
+  APK_ONLY=true
+  APK="${2:-}"
+fi
 DISK_ENV="${DISK_DEV:-/disk/dev}/env.sh"
 
 if [[ -f "$DISK_ENV" ]]; then
@@ -14,14 +19,20 @@ if [[ -f "$DISK_ENV" ]]; then
   source "$DISK_ENV"
 fi
 
-echo "==> TypeScript"
-(cd "$MOBILE" && npm run typecheck)
+if [[ "$APK_ONLY" != true ]]; then
+  echo "==> TypeScript"
+  (cd "$MOBILE" && npm run typecheck)
 
-echo "==> Unit and contract tests"
-(cd "$MOBILE" && npm test)
+  echo "==> Unit and contract tests"
+  (cd "$MOBILE" && npm test)
 
-echo "==> Android production bundle"
-(cd "$MOBILE" && npm run bundle:android)
+  if [[ "${KNOA_MOBILE_SKIP_BUNDLE:-false}" == "true" ]]; then
+    echo "==> Android production bundle (deferred to Gradle release build)"
+  else
+    echo "==> Android production bundle"
+    (cd "$MOBILE" && npm run bundle:android)
+  fi
+fi
 
 if [[ -z "$APK" ]]; then
   echo "OK: static mobile release gate passed"
