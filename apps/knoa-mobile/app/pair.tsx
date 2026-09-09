@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, padding: spacing.xlarge, gap: spacing.large, justifyContent: "center" },
   intro: { alignItems: "center", gap: spacing.small, marginBottom: spacing.small },
   introIcon: { width: 58, height: 58, borderRadius: radii.large, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
-  title: { color: colors.ink, fontSize: 23, fontWeight: "700" },
+  title: { color: colors.ink, fontSize: 22, fontWeight: "700" },
   lead: { color: colors.ink, fontSize: 16, lineHeight: 24, textAlign: "center" },
   expiryHint: { color: colors.muted, fontSize: 13, lineHeight: 20, textAlign: "center" },
   input: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, color: colors.ink, borderRadius: radii.medium, padding: spacing.large },

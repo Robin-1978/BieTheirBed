@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
   markAllReadText: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   filters: {
     flexDirection: "row",
@@ -544,8 +544,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: colors.ink,
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 15,
+    fontWeight: "700",
   },
   countBadge: {
     backgroundColor: colors.line,
@@ -600,7 +600,7 @@ const styles = StyleSheet.create({
   title: {
     color: colors.ink,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
     flex: 1,
   },
   stateBadge: {

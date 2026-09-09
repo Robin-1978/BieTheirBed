@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.ink,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   nlInput: {
     minHeight: 72,
@@ -572,7 +572,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     padding: spacing.medium,
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
   },
   nlActionRow: {
@@ -583,7 +583,7 @@ const styles = StyleSheet.create({
   },
   nlSuccessText: {
     flex: 1,
-    color: "#10B981",
+    color: colors.success,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -618,7 +618,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingHorizontal: spacing.medium,
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "600",
   },
   goalInput: {
@@ -629,7 +629,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     padding: spacing.medium,
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
   },
   templateRow: {
@@ -653,7 +653,7 @@ const styles = StyleSheet.create({
   templateTitle: {
     color: colors.ink,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   templateSelectedText: {
     color: colors.accent,
@@ -674,7 +674,7 @@ const styles = StyleSheet.create({
   templateDetailsTitle: {
     color: colors.ink,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   chipsRow: {
     flexDirection: "row",
@@ -723,14 +723,14 @@ const styles = StyleSheet.create({
   nodeChoiceText: {
     color: colors.ink,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   nodeChoiceTextSelected: {
     color: colors.accent,
   },
   nodeChoiceStatus: {
     color: colors.muted,
-    fontSize: 10,
+    fontSize: 11,
   },
   attachmentGroup: {
     gap: spacing.small,
@@ -803,7 +803,7 @@ const styles = StyleSheet.create({
   launchTitle: {
     color: colors.ink,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   launchText: {
     color: colors.muted,
@@ -831,7 +831,7 @@ const styles = StyleSheet.create({
   primaryText: {
     color: colors.onAccent,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   disabled: {
     opacity: 0.45,

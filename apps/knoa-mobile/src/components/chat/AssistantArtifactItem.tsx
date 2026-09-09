@@ -192,8 +192,8 @@ const styles = StyleSheet.create({
   },
   generatedFileBadgeText: {
     color: colors.accent,
-    fontSize: 10,
-    fontWeight: "800",
+    fontSize: 11,
+    fontWeight: "700",
   },
   fileAction: {
     paddingHorizontal: spacing.small,

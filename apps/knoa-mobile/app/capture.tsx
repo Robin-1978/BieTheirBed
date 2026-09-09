@@ -112,5 +112,5 @@ const styles = StyleSheet.create({
   button: { backgroundColor: colors.accent, padding: spacing.large, borderRadius: radii.medium, alignItems: "center" },
   flexAction: { flex: 1 },
   permission: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xlarge, gap: spacing.large },
-  permissionText: { color: colors.ink, fontSize: 18 },
+  permissionText: { color: colors.ink, fontSize: 20 },
 });

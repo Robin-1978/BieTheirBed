@@ -373,8 +373,8 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flexShrink: 1,
   },
-  node: { color: colors.ink, fontSize: 13, fontWeight: "800" },
-  workspace: { color: colors.muted, fontSize: 10, marginTop: 1 },
+  node: { color: colors.ink, fontSize: 13, fontWeight: "700" },
+  workspace: { color: colors.muted, fontSize: 11, marginTop: 1 },
   back: { width: 42, height: 42, alignItems: "center", justifyContent: "center", marginLeft: -8 },
 
   modalRoot: {
@@ -413,7 +413,7 @@ const styles = StyleSheet.create({
   drawerTitle: {
     color: colors.ink,
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   closeButton: {
     padding: 6,
@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
   currentNodeName: {
     color: colors.ink,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   statusRow: {
     flexDirection: "row",
@@ -579,7 +579,7 @@ const styles = StyleSheet.create({
   },
   navRowTitle: {
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
   },
   navRowSub: {

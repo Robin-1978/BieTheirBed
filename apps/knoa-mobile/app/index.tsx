@@ -13,7 +13,10 @@ import { loadNavigationPreference } from "@/navigation/navigationPreference";
 import { listNodeBindings } from "@/security/deviceIdentity";
 import { useGateway } from "@/state/GatewayProvider";
 import { useI18n } from "@/i18n";
-import { colors, radii, spacing, shadows, typography } from "@/theme";
+import { colors, radii, spacing, typography } from "@/theme";
+
+type RestoreStage = "connect" | "session" | "nodes";
+const STAGE_ORDER: RestoreStage[] = ["connect", "session", "nodes"];
 
 export default function Index() {
   const gateway = useGateway();
@@ -22,6 +25,8 @@ export default function Index() {
   const rotation = useRef(new Animated.Value(0)).current;
   const breath = useRef(new Animated.Value(0)).current;
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [stage, setStage] = useState<RestoreStage>("connect");
+  const [failReason, setFailReason] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -44,28 +49,52 @@ export default function Index() {
   useEffect(() => {
     if (gateway.status === "booting" || started.current) return;
     started.current = true;
-    void restoreLanding(gateway).catch(() => router.replace("/account"));
+    void restoreLanding(gateway, setStage)
+      .then((reason) => { if (reason) setFailReason(reason); })
+      .catch(() => router.replace("/account"));
   }, [gateway]);
 
   const failed = gateway.status === "error";
   const retry = () => {
     started.current = false;
+    setFailReason("");
+    setStage("connect");
     void gateway.reconnect();
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.coreWrap}>
-        <Animated.View style={[styles.orbitOuter, { opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.52] }), transform: [{ scale: breath.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.05] }) }] }]} />
+        <Animated.View style={[styles.orbitOuter, { opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.14, 0.4] }), transform: [{ scale: breath.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.05] }) }] }]} />
         <Animated.View style={[styles.orbitInner, { transform: [{ rotate: rotation.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }] }]}>
           <View style={styles.orbitNode} /><View style={styles.orbitNodeSecondary} />
         </Animated.View>
-        <Animated.View style={[styles.coreGlow, { opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.48] }), transform: [{ scale: breath.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.12] }) }] }]} />
+        <Animated.View style={[styles.coreGlow, { opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.5] }), transform: [{ scale: breath.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.14] }) }] }]} />
         <View style={styles.core}><Text style={styles.coreText}>诺</Text></View>
       </View>
-      <Text style={styles.eyebrow}>KNOA</Text>
-      <Text style={styles.title}>{failed ? t("splash.unavailable") : t("boot.restoring")}</Text>
-      <Text style={styles.detail}>{failed ? (gateway.error || t("splash.connectionProblem")) : t("splash.restoring")}</Text>
+      <Text style={styles.brand}>小诺</Text>
+      <Text style={styles.eyebrow}>KNOA · KNOW-YOU AGENT</Text>
+      <Text style={styles.title}>{failed ? t("splash.unavailable") : t("splash.waking")}</Text>
+      {failed ? (
+        <Text style={styles.detail}>
+          {failReason || gateway.error || t("splash.connectionProblem")}
+        </Text>
+      ) : (
+        <View style={styles.stageRow} accessibilityLiveRegion="polite">
+          {STAGE_ORDER.map((item) => {
+            const active = item === stage;
+            const done = STAGE_ORDER.indexOf(item) < STAGE_ORDER.indexOf(stage);
+            return (
+              <View key={item} style={styles.stageItem}>
+                <View style={[styles.stageDot, done && styles.stageDotDone, active && styles.stageDotActive]} />
+                <Text style={[styles.stageText, (active || done) && styles.stageTextActive]}>
+                  {t(`splash.stage.${item}`)}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
       {failed ? (
         <AppPressable onPress={retry} style={styles.retry}>
           <Text style={styles.retryText}>{t("common.reconnect")}</Text>
@@ -75,16 +104,21 @@ export default function Index() {
   );
 }
 
-async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<void> {
+async function restoreLanding(
+  gateway: ReturnType<typeof useGateway>,
+  reportStage: (stage: RestoreStage) => void,
+): Promise<string> {
+  reportStage("connect");
   const connection = await loadHubConnection();
   if (!connection) {
     router.replace("/account/login");
-    return;
+    return "";
   }
+  reportStage("session");
   const preference = await loadNavigationPreference();
   if (preference.landing === "account") {
     router.replace("/account");
-    return;
+    return "";
   }
   const hosted = connection.accountId ? await listHostedWorkspaces() : [];
   const fallback: HostedWorkspace = {
@@ -100,6 +134,7 @@ async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<v
   if (connection.accountId && workspace.workspaceId !== connection.workspaceId) {
     await selectHostedWorkspace(workspace);
   }
+  reportStage("nodes");
   const bindings = await listNodeBindings();
   const targetNodeId = preference.nodeId && bindings.some((b) => b.nodeId === preference.nodeId)
     ? preference.nodeId
@@ -119,7 +154,7 @@ async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<v
         nodeId: targetNodeId,
       },
     });
-    return;
+    return "";
   }
 
   // If no node is bound, guide user directly to pair their computer
@@ -130,21 +165,30 @@ async function restoreLanding(gateway: ReturnType<typeof useGateway>): Promise<v
       workspaceName: workspace.displayName,
     },
   });
+  return "";
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.large, padding: spacing.xlarge, backgroundColor: colors.background },
-  coreWrap: { width: 154, height: 154, alignItems: "center", justifyContent: "center", marginBottom: spacing.small },
-  orbitOuter: { position: "absolute", width: 146, height: 146, borderRadius: 73, borderWidth: 1, borderColor: colors.accent },
-  orbitInner: { position: "absolute", width: 112, height: 112, borderRadius: 56, borderWidth: 1, borderColor: colors.line },
-  orbitNode: { position: "absolute", top: -5, left: 50, width: 10, height: 10, borderRadius: 5, backgroundColor: colors.accent },
-  orbitNodeSecondary: { position: "absolute", bottom: -3, left: 53, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent, opacity: 0.45 },
-  coreGlow: { position: "absolute", width: 88, height: 88, borderRadius: 30, backgroundColor: colors.accentSoft },
-  core: { width: 76, height: 76, borderRadius: 24, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, shadowColor: colors.accent, shadowOpacity: 0.32, shadowRadius: 18, elevation: 8 },
-  coreText: { color: colors.onAccent, fontWeight: "800", fontSize: 31 },
-  eyebrow: { color: colors.accent, fontSize: 11, letterSpacing: 2.2, fontWeight: "700" },
-  title: { color: colors.ink, fontSize: 18, fontWeight: "700" },
-  detail: { color: colors.muted, fontSize: 13, textAlign: "center", lineHeight: 20 },
-  retry: { paddingHorizontal: spacing.xlarge, paddingVertical: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accent },
-  retryText: { color: colors.onAccent, fontWeight: "800" },
+  container: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.medium, padding: spacing.xlarge, backgroundColor: colors.background },
+  coreWrap: { width: 178, height: 178, alignItems: "center", justifyContent: "center", marginBottom: spacing.small },
+  orbitOuter: { position: "absolute", width: 168, height: 168, borderRadius: 84, borderWidth: 1, borderColor: colors.accent },
+  orbitInner: { position: "absolute", width: 128, height: 128, borderRadius: 64, borderWidth: 1, borderColor: colors.line },
+  orbitNode: { position: "absolute", top: -5, left: 58, width: 11, height: 11, borderRadius: 6, backgroundColor: colors.accent },
+  orbitNodeSecondary: { position: "absolute", bottom: -3, left: 61, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent, opacity: 0.45 },
+  coreGlow: { position: "absolute", width: 104, height: 104, borderRadius: 34, backgroundColor: colors.accentSoft },
+  core: { width: 92, height: 92, borderRadius: 28, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent, shadowColor: colors.accent, shadowOpacity: 0.38, shadowRadius: 22, elevation: 10 },
+  coreText: { color: colors.onAccent, fontWeight: "800", fontSize: 40 },
+  brand: { color: colors.ink, fontSize: 26 /* typography.brand */, fontWeight: "800", letterSpacing: 4, marginTop: spacing.small },
+  eyebrow: { color: colors.accent, fontSize: 11, letterSpacing: 2.6, fontWeight: "700", marginBottom: spacing.small },
+  title: { ...typography.subheading, color: colors.ink },
+  detail: { ...typography.caption, color: colors.muted, textAlign: "center", lineHeight: 20 },
+  stageRow: { flexDirection: "row", alignItems: "center", gap: spacing.large, marginTop: spacing.xsmall },
+  stageItem: { flexDirection: "row", alignItems: "center", gap: spacing.xsmall },
+  stageDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.lineStrong },
+  stageDotDone: { backgroundColor: colors.success },
+  stageDotActive: { backgroundColor: colors.accent },
+  stageText: { ...typography.tiny, color: colors.muted },
+  stageTextActive: { color: colors.ink },
+  retry: { paddingHorizontal: spacing.xlarge, paddingVertical: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accent, marginTop: spacing.small },
+  retryText: { color: colors.onAccent, fontWeight: "700" },
 });

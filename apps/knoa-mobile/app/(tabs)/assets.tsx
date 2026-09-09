@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     paddingVertical: 8,
   },
   clearSearch: {
@@ -497,7 +497,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     color: colors.ink,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   meta: {
     color: colors.muted,
@@ -517,7 +517,7 @@ const styles = StyleSheet.create({
   },
   statusBadgeText: {
     fontSize: 11,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   textSuccess: {
     color: colors.accent,
@@ -546,7 +546,7 @@ const styles = StyleSheet.create({
   primaryActionText: {
     color: colors.onAccent,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   secondaryAction: {
     borderWidth: 1,
@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
   },
   trophyHeroTitle: {
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "700",
     color: colors.ink,
   },
   trophyHeroSubtitle: {
@@ -652,7 +652,7 @@ const styles = StyleSheet.create({
     fontFamily: "monospace",
   },
   copyPathHint: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.accent,
   },
@@ -669,8 +669,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.small,
   },
   typeBadgeText: {
-    fontSize: 10,
-    fontWeight: "800",
+    fontSize: 11,
+    fontWeight: "700",
     color: colors.accent,
   },
 });
