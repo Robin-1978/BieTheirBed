@@ -658,7 +658,9 @@ class BoundGatewayToolClient:
             if tool.output_schema is not None:
                 definition["outputSchema"] = dict(tool.output_schema)
             definitions.append(definition)
-        return tuple(sorted(definitions, key=lambda item: str(item["name"])))
+        # Preserve registry/provider order. The Core prefix is intentionally
+        # stable for upstream KV caches; MCP recall must not reorder it.
+        return tuple(definitions)
 
     async def call_tool(self, call: ProposedToolCall) -> ToolStepResult:
         result = await self._session.call_tool(
