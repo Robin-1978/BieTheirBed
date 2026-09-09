@@ -12,6 +12,8 @@ export interface ProactiveDeckProps {
   toolCount?: number;
   modelName?: string;
   isOnline?: boolean;
+  savedHours?: number;
+  completedTasksCount?: number;
   onSelectPrompt: (prompt: string, autoSend?: boolean) => void;
   onLaunchTask: (title: string, goal: string) => void;
   onPressGlance?: () => void;
@@ -22,6 +24,8 @@ export const ProactiveDeck = memo(function ProactiveDeck({
   toolCount,
   modelName,
   isOnline = true,
+  savedHours,
+  completedTasksCount,
   onSelectPrompt,
   onLaunchTask,
   onPressGlance,
@@ -155,6 +159,38 @@ export const ProactiveDeck = memo(function ProactiveDeck({
           ) : null}
         </View>
       </View>
+
+      {/* 成果与价值外显卡片 */}
+      {typeof savedHours === "number" && savedHours > 0 ? (
+        <View
+          style={[
+            styles.valueCard,
+            {
+              backgroundColor: colors.accentFaint,
+              borderColor: colors.accentSoft,
+              borderRadius: radii.large,
+              padding: spacing.medium,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.valueIconWrap,
+              { backgroundColor: colors.accentSoft, borderRadius: radii.pill },
+            ]}
+          >
+            <AppIcon name="timer" color={colors.accent} size={18} />
+          </View>
+          <View style={styles.valueTextCol}>
+            <Text style={[styles.valueTitle, { color: colors.ink, ...typography.title }]}>
+              {t("chat.deckSavedHoursTitle", { hours: savedHours })}
+            </Text>
+            <Text style={[styles.valueSubtitle, { color: colors.muted, ...typography.caption }]}>
+              {t("chat.deckSavedHoursSubtitle", { count: completedTasksCount ?? 0 })}
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       {/* Bento 行动卡片流 */}
       <View style={styles.actionsGrid}>
@@ -409,5 +445,23 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderWidth: 1,
   },
+  valueCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+  },
+  valueIconWrap: {
+    width: 38,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  valueTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  valueTitle: {},
+  valueSubtitle: {},
   faqPillText: {},
 });

@@ -63,7 +63,7 @@ export function PendingTurnItem({
         ) : null}
       </AppPressable>
 
-      <View style={styles.assistantBubble}>
+      <View style={styles.assistantStream}>
         <View style={styles.activityRow}>
           {pending.state === "sending" ? <ActivityIndicator color={colors.accent} size="small" /> : null}
           <Text style={pending.state === "failed" ? styles.pendingError : styles.activity}>
@@ -106,18 +106,22 @@ const styles = StyleSheet.create({
   pendingAttachmentName: { color: colors.onAccent, flex: 1, fontSize: 12 },
   pendingAttachmentState: { color: colors.accentSoft, fontSize: 11 },
   pendingAttachmentFailed: { color: colors.dangerSoft },
-  assistantBubble: {
+  assistantStream: {
     alignSelf: "stretch",
     width: "100%",
-    backgroundColor: colors.surface,
-    borderRadius: radii.large,
-    borderBottomLeftRadius: 5,
-    padding: spacing.large,
-    borderWidth: 1,
-    borderColor: colors.line,
-    ...shadows.card,
+    paddingVertical: spacing.xsmall,
+    paddingHorizontal: 2,
   },
-  activityRow: { flexDirection: "row", alignItems: "center", gap: spacing.small },
+  activityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+    paddingHorizontal: spacing.medium,
+    paddingVertical: spacing.small,
+    borderRadius: radii.medium,
+    backgroundColor: colors.surfaceMuted,
+    alignSelf: "flex-start",
+  },
   activity: { color: colors.muted },
   pendingError: { color: colors.danger, flex: 1 },
   turnActions: { flexDirection: "row", gap: spacing.medium, marginTop: spacing.medium },

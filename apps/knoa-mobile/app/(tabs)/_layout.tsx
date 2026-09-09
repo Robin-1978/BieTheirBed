@@ -95,9 +95,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: t("tabs.settings"),
-          tabBarLabel: t("tabs.settings"),
-          tabBarIcon: ({ color, size }) => <AppIcon name="settings" color={color} size={size ?? 22} />,
+          title: t("tabs.agent"),
+          tabBarLabel: t("tabs.agent"),
+          tabBarIcon: ({ color, size }) => <AppIcon name="agent" color={color} size={size ?? 22} />,
         }}
       />
     </Tabs>

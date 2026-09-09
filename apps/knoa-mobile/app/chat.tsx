@@ -59,6 +59,7 @@ import {
   agentReasonLabel,
 } from "@/components/chat";
 import { presentNodeName } from "@/presentation/nodePresentation";
+import { calculateTotalSavedHours } from "@/components/trophyPresentation";
 import { loadCapabilityCache, type CapabilityCache } from "@/storage/capabilityCache";
 import {
   resolveAssistantArtifactFile,
@@ -152,6 +153,25 @@ export default function ChatScreen() {
 
   const [liveGlance, setLiveGlance] = useState<DesktopGlanceRecord | null>(null);
   const [glanceModalVisible, setGlanceModalVisible] = useState(false);
+  const [savedHours, setSavedHours] = useState(0);
+  const [completedTasksCount, setCompletedTasksCount] = useState(0);
+
+  useEffect(() => {
+    if (gateway.status !== "ready") return;
+    let active = true;
+    void gateway
+      .runAuthenticated((client) => client.listTasks({ includeArchived: true, limit: 100 }))
+      .then((res) => {
+        if (!active) return;
+        const taskList = res.tasks || [];
+        setSavedHours(calculateTotalSavedHours(taskList));
+        setCompletedTasksCount(
+          taskList.filter((item) => item.latest_execution_state === "completed" || item.state === "archived").length
+        );
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [gateway.status, gateway.nodeId]);
   const [glanceRefreshing, setGlanceRefreshing] = useState(false);
 
   const handleOpenLiveGlance = useCallback(async () => {
@@ -919,6 +939,8 @@ export default function ChatScreen() {
                 toolCount={nodeCapability?.toolCount}
                 modelName={nodeCapability?.document?.default_model}
                 isOnline={gateway.status === "ready"}
+                savedHours={savedHours}
+                completedTasksCount={completedTasksCount}
                 onSelectPrompt={handleSelectPrompt}
                 onLaunchTask={handleLaunchTask}
                 onPressGlance={handleOpenLiveGlance}

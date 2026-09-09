@@ -91,7 +91,7 @@ export const ChatTurnItem = memo(function ChatTurnItem({
         ) : null}
       </AppPressable>
 
-      <View style={styles.assistantBubble}>
+      <View style={styles.assistantStream}>
         <TurnProgress turn={turn} />
 
         {response ? (
@@ -196,10 +196,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.small,
-    marginTop: spacing.small,
-    paddingTop: spacing.xsmall,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
+    marginTop: spacing.xsmall,
   },
   completedAction: {
     flexDirection: "row",
@@ -232,16 +229,12 @@ const styles = StyleSheet.create({
   },
   userText: { color: colors.onAccent, fontSize: 16, lineHeight: 23 },
   userMeta: { color: colors.accentSoft, fontSize: 12, marginTop: spacing.xsmall },
-  assistantBubble: {
+  assistantStream: {
     alignSelf: "stretch",
     width: "100%",
-    backgroundColor: colors.surface,
-    borderRadius: radii.large,
-    borderBottomLeftRadius: 5,
-    padding: spacing.large,
-    borderWidth: 1,
-    borderColor: colors.line,
-    ...shadows.card,
+    gap: spacing.small,
+    paddingVertical: spacing.xsmall,
+    paddingHorizontal: 2,
   },
   markdownList: { width: "100%", alignSelf: "stretch" },
   generatedArtifacts: {
