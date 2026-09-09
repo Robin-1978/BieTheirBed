@@ -41,6 +41,25 @@ import { DirectFetchTransport, type GatewayTransport } from "./gatewayTransportB
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const LONG_REQUEST_TIMEOUT_MS = 120_000;
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isTransientTurnError(error: unknown): boolean {
+  if (error instanceof GatewayError) {
+    return error.status === 408 || error.status >= 500;
+  }
+  // React Native fetch rejects idle socket/DATA channel failures as generic
+  // Error/TypeError values (often with no stable platform-specific code).
+  // The request is safe to retry because the server deduplicates the business
+  // request using client_request_id.
+  if (error instanceof TypeError) return true;
+  if (error instanceof Error) {
+    return /network|fetch|timeout|timed out|socket|connection|closed|abort/i.test(error.message);
+  }
+  return false;
+}
+
 type Json = Record<string, unknown>;
 
 export type DingTalkChannelStatus = {
@@ -562,20 +581,32 @@ export class GatewayClient {
     toolsEnabled?: boolean;
     agentId?: string;
   }): Promise<ChatTurnSnapshot> {
-    const response = await this.json<{ turn: ChatTurnSnapshot }>(
-      `/v1/conversations/sessions/${encodeURIComponent(input.sessionHandle)}/turns`,
-      {
-        method: "POST",
-        body: {
-          client_request_id: input.clientRequestId,
-          input: input.text ?? "",
-          attachments: input.attachments ?? [],
-          tools_enabled: input.toolsEnabled ?? true,
-          agent_id: input.agentId,
-        },
+    const path = `/v1/conversations/sessions/${encodeURIComponent(input.sessionHandle)}/turns`;
+    const options = {
+      method: "POST",
+      body: {
+        client_request_id: input.clientRequestId,
+        input: input.text ?? "",
+        attachments: input.attachments ?? [],
+        tools_enabled: input.toolsEnabled ?? true,
+        agent_id: input.agentId,
       },
-    );
-    return response.turn;
+    } as const;
+    try {
+      const response = await this.json<{ turn: ChatTurnSnapshot }>(path, options);
+      return response.turn;
+    } catch (error) {
+      // The mobile transport can lose an idle Relay/P2P session between two
+      // messages.  create_turn is idempotent on client_request_id, so reset
+      // the transport and retry once instead of surfacing a retry button for
+      // a transient connection failure.  Other mutating endpoints retain
+      // their previous single-attempt semantics.
+      if (!isTransientTurnError(error)) throw error;
+      this.transport.close?.();
+      await delay(250);
+      const response = await this.json<{ turn: ChatTurnSnapshot }>(path, options);
+      return response.turn;
+    }
   }
 
   async cancelChatTurn(turnId: string): Promise<ChatTurnSnapshot> {
