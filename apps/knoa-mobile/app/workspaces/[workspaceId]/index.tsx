@@ -611,7 +611,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusDotOnline: {
-    backgroundColor: "#10B981",
+    backgroundColor: colors.success,
   },
   statusDotOffline: {
     backgroundColor: colors.onAccent,
@@ -619,13 +619,13 @@ const styles = StyleSheet.create({
   },
   activeStatusText: {
     color: colors.onAccent,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "700",
   },
   activeNodeTitle: {
     color: colors.onAccent,
     fontSize: 16,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   launchButton: {
     flexDirection: "row",
@@ -639,7 +639,7 @@ const styles = StyleSheet.create({
   launchButtonText: {
     color: colors.accent,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   sectionCard: {
     padding: spacing.large,
@@ -663,7 +663,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.ink,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   countBadge: {
     backgroundColor: colors.accentSoft,
@@ -713,19 +713,19 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   nodeStatusOnline: {
-    backgroundColor: "#10B981",
+    backgroundColor: colors.success,
   },
   nodeStatusOffline: {
     backgroundColor: colors.muted,
   },
   nodeRowName: {
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
   },
   nodeRowNameCurrent: {
     color: colors.accent,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   nodeRowMeta: {
     color: colors.muted,
@@ -836,7 +836,7 @@ const styles = StyleSheet.create({
   connectedTitle: {
     color: colors.onAccent,
     fontSize: 22,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   connectedDetail: {
     color: colors.onAccent,
@@ -857,7 +857,7 @@ const styles = StyleSheet.create({
   },
   connectedActionText: {
     color: colors.accent,
-    fontWeight: "800",
+    fontWeight: "700",
     fontSize: 15,
   },
   connectedActionDisabled: {
@@ -894,7 +894,7 @@ const styles = StyleSheet.create({
   },
   stepNumberText: {
     color: colors.accent,
-    fontWeight: "800",
+    fontWeight: "700",
     fontSize: 13,
   },
   stepAction: {
@@ -902,8 +902,8 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     color: colors.ink,
-    fontWeight: "800",
-    fontSize: 14,
+    fontWeight: "700",
+    fontSize: 15,
   },
   secondary: {
     minHeight: 38,

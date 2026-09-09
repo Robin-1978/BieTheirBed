@@ -17,8 +17,8 @@ const theme = {
 const markdownStyles: MarkedStyles = {
   text: { fontSize: 15, lineHeight: 23, color: colors.ink },
   strong: { fontSize: 15, lineHeight: 23, fontWeight: "700", color: colors.ink },
-  h1: { fontSize: 20, lineHeight: 28, marginVertical: 8, fontWeight: "800", color: colors.ink },
-  h2: { fontSize: 18, lineHeight: 26, marginVertical: 8, fontWeight: "700", color: colors.ink },
+  h1: { fontSize: 20, lineHeight: 28, marginVertical: 8, fontWeight: "700", color: colors.ink },
+  h2: { fontSize: 20, lineHeight: 26, marginVertical: 8, fontWeight: "700", color: colors.ink },
   h3: { fontSize: 16, lineHeight: 24, marginVertical: 6, fontWeight: "700", color: colors.ink },
   h4: { fontSize: 15, lineHeight: 23, marginVertical: 6, fontWeight: "600", color: colors.ink },
   blockquote: { borderLeftColor: colors.accent, borderLeftWidth: 3, paddingLeft: 10, marginVertical: 6 },

@@ -99,6 +99,6 @@ const styles = StyleSheet.create({
   approveText: {
     color: colors.onAccent,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
   },
 });

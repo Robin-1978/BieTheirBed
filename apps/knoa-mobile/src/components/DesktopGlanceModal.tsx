@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
   imageContainer: {
     width: "100%",
     height: 220,
-    backgroundColor: "#0F172A",
+    backgroundColor: colors.ink,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
     gap: spacing.small,
   },
   loadingText: {
-    color: "#94A3B8",
+    color: colors.line,
     fontSize: 12,
     fontWeight: "500",
   },

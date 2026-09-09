@@ -1108,7 +1108,7 @@ const styles = StyleSheet.create({
   agentButtonText: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   newTopicButton: {
     flexDirection: "row",
@@ -1145,7 +1145,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
     textAlign: "center",
     fontSize: 20,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   emptyBody: {
     color: colors.muted,

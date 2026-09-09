@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
   row: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   rowTitle: { color: colors.ink, fontWeight: "800" },
   agentRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
-  enabled: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  enabled: { color: colors.accent, ...typography.small, fontWeight: "700" },
   disabled: { color: colors.muted, ...typography.small, fontWeight: "700" },
   error: { color: colors.danger, lineHeight: 20 },
 });

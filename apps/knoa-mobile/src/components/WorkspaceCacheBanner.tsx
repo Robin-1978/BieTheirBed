@@ -103,5 +103,5 @@ const styles = StyleSheet.create({
   warning: { backgroundColor: colors.warningSoft, borderColor: colors.warning },
   error: { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
   message: { flex: 1, color: colors.ink, ...typography.small, lineHeight: 17 },
-  action: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  action: { color: colors.accent, ...typography.small, fontWeight: "700" },
 });

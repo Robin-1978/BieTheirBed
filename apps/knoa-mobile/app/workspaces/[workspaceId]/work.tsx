@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   itemTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
   summary: { color: colors.ink, lineHeight: 20 },
   approval: { color: colors.warning, ...typography.small, fontWeight: "700" },
-  online: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  online: { color: colors.accent, ...typography.small, fontWeight: "700" },
   offline: { color: colors.muted, ...typography.small, fontWeight: "700" },
   error: { color: colors.danger, lineHeight: 20 },
 });

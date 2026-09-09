@@ -14,19 +14,19 @@ export type CardHeaderProps = {
   source: ActionCardSource;
 };
 
-const LEVEL_CONFIG: Record<ActionCardLevel, { label: string; bg: string; text: string; icon: AppIconName }> = {
-  info: { label: "INFO", bg: "#E0F2FE", text: "#0369A1", icon: "pulse" },
-  success: { label: "DONE", bg: "#DCFCE7", text: "#15803D", icon: "check" },
-  warning: { label: "WARN", bg: "#FEF3C7", text: "#B45309", icon: "alert" },
-  critical: { label: "CRITICAL", bg: "#FEE2E2", text: "#B91C1C", icon: "alert" },
+const LEVEL_CONFIG: Record<ActionCardLevel, { label: string; bg: typeof colors.infoSoft; text: typeof colors.info; icon: AppIconName }> = {
+  info: { label: "INFO", bg: colors.infoSoft, text: colors.info, icon: "pulse" },
+  success: { label: "DONE", bg: colors.successSoft, text: colors.success, icon: "check" },
+  warning: { label: "WARN", bg: colors.warningSoft, text: colors.warning, icon: "alert" },
+  critical: { label: "CRITICAL", bg: colors.dangerSoft, text: colors.danger, icon: "alert" },
 };
 
-const STATUS_CONFIG: Record<ActionCardStatus, { label: string; bg: string; text: string } | null> = {
+const STATUS_CONFIG: Record<ActionCardStatus, { label: string; bg: typeof colors.successSoft; text: typeof colors.success } | { label: string; bg: typeof colors.surfaceMuted; text: typeof colors.muted } | null> = {
   pending: null,
-  approved: { label: "已放行", bg: "#DCFCE7", text: "#166534" },
-  executed: { label: "已执行", bg: "#DCFCE7", text: "#166534" },
-  rejected: { label: "已取消", bg: "#F3F4F6", text: "#4B5563" },
-  expired: { label: "已过期", bg: "#F3F4F6", text: "#9CA3AF" },
+  approved: { label: "已放行", bg: colors.successSoft, text: colors.success },
+  executed: { label: "已执行", bg: colors.successSoft, text: colors.success },
+  rejected: { label: "已取消", bg: colors.surfaceMuted, text: colors.muted },
+  expired: { label: "已过期", bg: colors.surfaceMuted, text: colors.muted },
 };
 
 export function CardHeader({ title, subtitle, level, status, source }: CardHeaderProps) {

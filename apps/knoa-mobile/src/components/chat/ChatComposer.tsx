@@ -384,7 +384,7 @@ const styles = StyleSheet.create({
   slashHeaderTitle: {
     color: colors.accent,
     fontSize: 11,
-    fontWeight: "800",
+    fontWeight: "700",
     textTransform: "uppercase",
   },
   slashList: {
@@ -405,7 +405,7 @@ const styles = StyleSheet.create({
   slashPillCommand: {
     color: colors.accent,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   slashPillDesc: {
     color: colors.muted,
@@ -501,7 +501,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     paddingVertical: 10,
     paddingRight: 6,
   },
@@ -531,7 +531,7 @@ const styles = StyleSheet.create({
   recordingTime: {
     color: "white",
     fontSize: 11,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   modalRoot: {
     flex: 1,
@@ -557,8 +557,8 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     color: colors.ink,
-    fontSize: 14,
-    fontWeight: "800",
+    fontSize: 15,
+    fontWeight: "700",
     textAlign: "center",
   },
   sheetActions: {

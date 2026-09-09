@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
   pendingAttachments: { marginTop: spacing.small, gap: spacing.xsmall },
   pendingAttachmentRow: { minHeight: 24, flexDirection: "row", alignItems: "center", gap: spacing.small },
   pendingAttachmentName: { color: colors.onAccent, flex: 1, fontSize: 12 },
-  pendingAttachmentState: { color: colors.accentSoft, fontSize: 10 },
+  pendingAttachmentState: { color: colors.accentSoft, fontSize: 11 },
   pendingAttachmentFailed: { color: colors.dangerSoft },
   assistantBubble: {
     alignSelf: "stretch",

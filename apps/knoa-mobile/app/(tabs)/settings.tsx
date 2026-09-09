@@ -219,8 +219,8 @@ const styles = StyleSheet.create({
   },
   nodeTitle: {
     color: colors.ink,
-    fontSize: 18,
-    fontWeight: "800",
+    fontSize: 20,
+    fontWeight: "700",
   },
   workspaceText: {
     color: colors.muted,
@@ -234,7 +234,7 @@ const styles = StyleSheet.create({
   },
   onlineText: {
     color: colors.accent,
-    fontWeight: "800",
+    fontWeight: "700",
     fontSize: 12,
   },
   offlineText: {
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
   transportValue: {
     color: colors.ink,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   quickActions: {
     flexDirection: "row",
@@ -275,7 +275,7 @@ const styles = StyleSheet.create({
   quickActionText: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "700",
   },
   sectionCard: {
     backgroundColor: colors.surface,
@@ -289,7 +289,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.ink,
     fontSize: 13,
-    fontWeight: "800",
+    fontWeight: "700",
     marginTop: spacing.medium,
     marginBottom: spacing.small,
   },
@@ -303,7 +303,7 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
   },
   rowDetail: {

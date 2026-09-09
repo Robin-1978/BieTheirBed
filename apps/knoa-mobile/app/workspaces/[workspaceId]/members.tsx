@@ -158,9 +158,9 @@ const styles = StyleSheet.create({
   sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
   input: { minHeight: 46, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: spacing.medium },
   primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accent },
-  primaryText: { color: colors.white, fontWeight: "800" },
+  primaryText: { color: colors.white, fontWeight: "700" },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   memberName: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
-  remove: { color: colors.danger, fontWeight: "800" },
-  owner: { color: colors.accent, ...typography.small, fontWeight: "800" },
+  remove: { color: colors.danger, fontWeight: "700" },
+  owner: { color: colors.accent, ...typography.small, fontWeight: "700" },
 });

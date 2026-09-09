@@ -747,7 +747,7 @@ const styles = StyleSheet.create({
   },
   valueText: {
     color: colors.ink,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
     fontWeight: "500",
   },
@@ -807,7 +807,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.medium,
     paddingHorizontal: spacing.medium,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.ink,
     borderWidth: 1,
     borderColor: colors.line,
@@ -893,7 +893,7 @@ const styles = StyleSheet.create({
   },
   sheetCancelBtnText: {
     color: colors.muted,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "600",
   },
   sheetSaveBtn: {
@@ -911,7 +911,7 @@ const styles = StyleSheet.create({
   },
   sheetSaveBtnText: {
     color: colors.onAccent,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: "700",
   },
 });

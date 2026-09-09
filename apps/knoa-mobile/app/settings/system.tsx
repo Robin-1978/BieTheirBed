@@ -399,7 +399,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.background },
   container: { padding: spacing.large, paddingBottom: 56, gap: spacing.medium },
   section: { borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, padding: spacing.large, gap: spacing.medium, ...shadows.card },
-  sectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "700" },
+  sectionTitle: { color: colors.ink, fontSize: 20, fontWeight: "700" },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium },
   flex: { flex: 1, gap: spacing.xsmall },
   metric: { color: colors.ink, fontWeight: "700", textAlign: "right" },

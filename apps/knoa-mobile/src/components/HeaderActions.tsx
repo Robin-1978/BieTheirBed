@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
   tabIcon: { width: 38, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 11 },
   selectedTabIcon: { backgroundColor: colors.accentSoft },
   badge: { position: "absolute", right: 1, top: 0, minWidth: 16, height: 16, paddingHorizontal: 3, borderRadius: 8, backgroundColor: colors.danger, alignItems: "center", justifyContent: "center" },
-  badgeText: { color: "white", fontSize: 9, fontWeight: "800" },
+  badgeText: { color: "white", fontSize: 11, fontWeight: "800" },
 });
 
 function stringParam(value: string | string[] | undefined): string {

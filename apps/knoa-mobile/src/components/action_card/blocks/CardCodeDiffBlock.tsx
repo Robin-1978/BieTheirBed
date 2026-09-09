@@ -41,11 +41,11 @@ export function CardCodeDiffBlock({ block }: { block: CardCodeDiffBlockType }) {
           let textColor: ColorValue = colors.ink;
 
           if (isAdd) {
-            lineBg = "#DCFCE7";
-            textColor = "#15803D" as ColorValue;
+            lineBg = colors.successSoft;
+            textColor = colors.success;
           } else if (isDel) {
-            lineBg = "#FEE2E2";
-            textColor = "#B91C1C" as ColorValue;
+            lineBg = colors.dangerSoft;
+            textColor = colors.danger;
           } else if (isHunk) {
             lineBg = colors.surfaceMuted;
             textColor = colors.muted;

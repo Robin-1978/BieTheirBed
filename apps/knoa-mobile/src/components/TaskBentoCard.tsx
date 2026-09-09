@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
   },
   savedPillText: {
     color: colors.accent,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "700",
   },
   metaRow: {
@@ -364,7 +364,7 @@ const styles = StyleSheet.create({
   },
   metaDivider: {
     color: colors.muted,
-    fontSize: 10,
+    fontSize: 11,
   },
   titleRow: {
     flexDirection: "row",
@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
   actionRequiredBox: {
     padding: spacing.medium,
     borderRadius: radii.medium,
-    backgroundColor: colors.warningSoft || "#fef3c7",
+    backgroundColor: colors.warningSoft,
     borderLeftWidth: 3,
     borderLeftColor: colors.warning,
   },

@@ -3,26 +3,26 @@ import { StyleSheet, Text, View } from "react-native";
 
 import type { AppIconName } from "@/components/AppIcon";
 import { AppIcon } from "@/components/AppIcon";
-import { radii, spacing, typography } from "@/theme";
+import { colors, radii, spacing, typography } from "@/theme";
 import type { CardCalloutBlock as CardCalloutBlockType } from "../types";
 
-const CALLOUT_THEMES: Record<string, { bg: string; border: string; text: string; icon: AppIconName }> = {
+const CALLOUT_THEMES: Record<string, { bg: typeof colors.infoSoft; border: typeof colors.info; text: typeof colors.ink; icon: AppIconName }> = {
   info: {
-    bg: "#F0F9FF",
-    border: "#0284C7",
-    text: "#0C4A6E",
+    bg: colors.infoSoft,
+    border: colors.info,
+    text: colors.ink,
     icon: "alert",
   },
   warning: {
-    bg: "#FFFBEB",
-    border: "#D97706",
-    text: "#78350F",
+    bg: colors.warningSoft,
+    border: colors.warning,
+    text: colors.ink,
     icon: "alert",
   },
   error: {
-    bg: "#FEF2F2",
-    border: "#DC2626",
-    text: "#7F1D1D",
+    bg: colors.dangerSoft,
+    border: colors.danger,
+    text: colors.ink,
     icon: "alert",
   },
 };

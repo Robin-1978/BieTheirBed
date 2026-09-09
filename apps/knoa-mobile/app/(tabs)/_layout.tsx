@@ -123,8 +123,8 @@ const styles = StyleSheet.create({
   },
   badge: {
     backgroundColor: colors.danger,
-    fontSize: 9,
-    fontWeight: "800",
+    fontSize: 11,
+    fontWeight: "700",
   },
   headerRightGroup: {
     flexDirection: "row",
