@@ -57,9 +57,9 @@ class ToolInventory:
     def __init__(
         self,
         *,
-        # Keep model-visible tool signatures around ~4k tokens (provider and
-        # tokenizer dependent). Larger MCP inventories are recalled on demand
-        # through tool_help instead of exhausting the turn context.
+        # KV-cache reuse depends on the built-in prefix remaining present and
+        # byte-stable. The 16k budget bounds only the complete visible list;
+        # deferred MCP tools are trimmed from the variable suffix first.
         schema_char_budget: int = 16_000,
         semantic_selector: Any | None = None,
     ) -> None:
@@ -84,11 +84,18 @@ class ToolInventory:
         # Providers can rediscover the same upstream tool through aliases or
         # repeated pagination pages. Keep one canonical definition per name so
         # duplicate schemas never consume model context.
-        by_name = {
-            str(normalized_tool["name"]): normalized_tool
-            for normalized_tool in (self._normalize(tool) for tool in listed)
-        }
-        normalized = tuple(sorted(by_name.values(), key=lambda tool: str(tool["name"])))
+        # Keep provider/registry discovery order intact. The built-in prefix is
+        # deliberately stable for KV-cache reuse; do not alphabetically sort it.
+        normalized_items: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        for raw_tool in listed:
+            normalized_tool = self._normalize(raw_tool)
+            name = str(normalized_tool["name"])
+            if name in seen_names:
+                continue
+            seen_names.add(name)
+            normalized_items.append(normalized_tool)
+        normalized = tuple(normalized_items)
         snapshot = ToolInventorySnapshot(
             tools=normalized,
             schema_chars=sum(self._serialized_size(tool) for tool in normalized),

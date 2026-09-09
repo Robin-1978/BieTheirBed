@@ -141,10 +141,10 @@ async def test_inventory_cache_is_keyed_by_session_and_scope_digest() -> None:
     assert changed is not first
     assert client.calls == 2
     assert [tool["name"] for tool in first.tools] == [
-        "mcp__jira__issue_get",
-        "tool_help",
         "web_search",
         "write_file",
+        "mcp__jira__issue_get",
+        "tool_help",
     ]
 
 
@@ -162,12 +162,13 @@ async def test_projection_keeps_builtin_tools_static_and_mcp_tools_deferred() ->
     selected = inventory.project("session-a", snapshot)
 
     assert [tool["name"] for tool in selected] == [
-        "tool_help",
         "web_search",
         "write_file",
+        "tool_help",
     ]
-    assert selected[1]["inputSchema"]["required"] == ["query"]
-    assert selected[1]["description"] == "Search the web for relevant sources"
+    assert selected[0]["inputSchema"]["required"] == ["query"]
+    assert selected[0]["description"] == "Search the web for relevant sources"
+    stable_prefix = tuple(tool["name"] for tool in selected)
 
     assert inventory.activate(
         "session-a",
@@ -176,7 +177,7 @@ async def test_projection_keeps_builtin_tools_static_and_mcp_tools_deferred() ->
     ) == ("mcp__jira__issue_get",)
     selected = inventory.project("session-a", snapshot)
 
-    jira = selected[0]
+    jira = next(tool for tool in selected if tool["name"] == "mcp__jira__issue_get")
     assert jira["name"] == "mcp__jira__issue_get"
     assert jira["description"] == "Get one Jira issue"
     assert jira["inputSchema"] == {
@@ -184,6 +185,7 @@ async def test_projection_keeps_builtin_tools_static_and_mcp_tools_deferred() ->
         "properties": {"issue_key": {"type": "string"}},
         "required": ["issue_key"],
     }
+    assert tuple(tool["name"] for tool in selected if tool["name"] != "mcp__jira__issue_get") == stable_prefix
 
 
 @pytest.mark.asyncio
