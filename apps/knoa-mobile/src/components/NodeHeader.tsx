@@ -23,7 +23,12 @@ export function NodeHeaderTitle() {
   const workspaceName = stringParam(params.workspaceName) || t("nav.workspace");
   const currentNodeId = gateway.nodeId || stringParam(params.nodeId);
   const currentNode = gateway.nodes.find((item) => item.nodeId === currentNodeId);
-  const isOnline = gateway.status === "ready";
+  // The client can remain usable during a background reconnect.  Relay/P2P
+  // diagnostics are updated from the authenticated request path, so treat a
+  // live client with an active Relay as online instead of showing a stale
+  // "connecting" capsule.
+  const isOnline = gateway.status === "ready"
+    || Boolean(gateway.client && (gateway.relayState === "ready" || gateway.relayState === "active"));
   const statusLabel = isOnline
     ? `${t("nodeHeader.online")} · ${t(transportCompactLabelKey(gateway.transportMode))}`
     : t("nodeHeader.connecting");

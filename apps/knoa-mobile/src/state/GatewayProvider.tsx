@@ -193,7 +193,8 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         });
       };
       const relayDiagnosticChanged = (diagnostic: RelayDiagnostic) => {
-        if (generation === connectionGenerationRef.current) commit({
+        if (generation !== connectionGenerationRef.current) return;
+        commit({
           relayState: diagnostic.state,
           relayLastError: diagnostic.lastError,
           relayRetryAt: diagnostic.retryAt,
@@ -336,7 +337,8 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
         });
       };
       const relayDiagnosticChanged = (diagnostic: RelayDiagnostic) => {
-        if (generation === connectionGenerationRef.current) commit({
+        if (generation !== connectionGenerationRef.current) return;
+        commit({
           relayState: diagnostic.state,
           relayLastError: diagnostic.lastError,
           relayRetryAt: diagnostic.retryAt,

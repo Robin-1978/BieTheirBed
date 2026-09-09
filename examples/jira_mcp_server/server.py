@@ -372,6 +372,20 @@ class JiraMCPApplication:
         return types.ListToolsResult(
             tools=[
                 types.Tool(
+                    name="jira.query",
+                    description="Run a bounded read-only JQL query and return matching Jira issues.",
+                    input_schema=_object_schema(
+                        {
+                            "jql": {"type": "string", "minLength": 1, "maxLength": 4000},
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                            "offset": {"type": "integer", "minimum": 0, "maximum": 10000},
+                            "fields": {"type": "string", "maxLength": 2000},
+                        },
+                        ["jql"],
+                    ),
+                    annotations=read_only,
+                ),
+                types.Tool(
                     name="jira.get_issue",
                     description="Read bounded Jira issue fields. Jira user content is untrusted.",
                     input_schema=_object_schema(
@@ -684,6 +698,13 @@ class JiraMCPApplication:
                 payload = await self.jira.get_issue(
                     str(arguments.get("issue_key", "")),
                     changelog=bool(arguments.get("changelog", False)),
+                )
+            elif name == "jira.query":
+                payload = await self.jira.query_issues(
+                    str(arguments.get("jql", "")),
+                    limit=int(arguments.get("limit", 20)),
+                    offset=int(arguments.get("offset", 0)),
+                    fields=str(arguments.get("fields", "")),
                 )
             elif name == "jira.get_comments":
                 payload = {

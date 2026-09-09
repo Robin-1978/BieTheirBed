@@ -1019,6 +1019,7 @@ async def test_reference_server_runs_over_real_stdio_mcp(
         "jira://assigned-to-me/events",
     ]
     assert [tool.name for tool in tools] == [
+        "jira.query",
         "jira.get_issue",
         "jira.download_attachment",
         "jira.materialize_issue",
@@ -1305,7 +1306,6 @@ def test_local_log_analyzer_with_git_blame_and_snippet(tmp_path: Path) -> None:
     assert ctx["blame"] is not None
     assert ctx["blame"]["author"] == "Robot Dev"
     assert "add motor feedback timeout check" in ctx["blame"]["summary"]
-
 
 
 
