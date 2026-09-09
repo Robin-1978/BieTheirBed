@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -15,6 +14,7 @@ import type { ManagedConfig, ManagedNodeAgent } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { AppPressable } from "@/components/AppPressable";
+import { FormScreen } from "@/components/FormScreen";
 import { useI18n } from "@/i18n";
 import {
   BUILT_IN_AGENT_IDS,
@@ -37,6 +37,7 @@ export default function AgentEditorScreen() {
   const [agentId, setAgentId] = useState(originalAgentId);
   const [agent, setAgent] = useState<ManagedNodeAgent | null>(null);
   const [builtInPromptRef, setBuiltInPromptRef] = useState("");
+  const [isDirty, setIsDirty] = useState(false);
   const [working, setWorking] = useState("");
   const [message, setMessage] = useState("");
 
@@ -72,6 +73,7 @@ export default function AgentEditorScreen() {
   }, [document]);
 
   function update(mutator: (value: ManagedNodeAgent) => void) {
+    setIsDirty(true);
     setAgent((value) => {
       if (!value) return value;
       const next = JSON.parse(JSON.stringify(value)) as ManagedNodeAgent;
@@ -105,6 +107,7 @@ export default function AgentEditorScreen() {
     try {
       const next = upsertNodeAgent(document, agentId, agent, originalAgentId);
       await publish(next, originalAgentId ? t("settings.agentEditor.updateSummary", { agentId: originalAgentId }) : t("settings.agentEditor.createSummary", { agentId }));
+      setIsDirty(false);
       router.back();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : t("settings.agentEditor.saveFailed"));
@@ -160,7 +163,7 @@ export default function AgentEditorScreen() {
   return (
     <>
       <Stack.Screen options={{ title: originalAgentId ? agent.display_name : t("settings.agentEditor.newTitle") }} />
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <FormScreen isDirty={isDirty} contentContainerStyle={styles.container}>
         <View style={styles.hero}>
           <View style={styles.heroIcon}><AppIcon name="agent" color={colors.accent} size={27} /></View>
           <View style={styles.flex}>
@@ -170,7 +173,16 @@ export default function AgentEditorScreen() {
         </View>
 
         <Section title={t("settings.agentEditor.sectionIdentity")}>
-          <Field label={t("settings.agentEditor.agentId")} value={agentId} editable={!originalAgentId} onChange={(value) => setAgentId(normalizeAgentId(value))} placeholder="research_agent" />
+          <Field
+            label={t("settings.agentEditor.agentId")}
+            value={agentId}
+            editable={!originalAgentId}
+            onChange={(value) => {
+              setIsDirty(true);
+              setAgentId(normalizeAgentId(value));
+            }}
+            placeholder="research_agent"
+          />
           <Field label={t("settings.agentEditor.displayName")} value={agent.display_name} onChange={(display_name) => update((next) => { next.display_name = display_name; })} />
           <Metric label="Runtime" value={agent.kind === "codex" ? t("settings.agentEditor.codexRuntimeAdapter") : t("settings.agents.knoaRuntime")} />
           <Toggle label={t("settings.agentEditor.enabled")} value={agent.enabled} disabled={originalAgentId === document.agents.default_agent} onChange={(enabled) => update((next) => { next.enabled = enabled; })} />
@@ -271,7 +283,7 @@ export default function AgentEditorScreen() {
         <Text style={styles.impact}>{t("settings.agentEditor.impactHint")}</Text>
         {originalAgentId && !isBuiltIn ? <AppPressable disabled={Boolean(working)} style={styles.dangerButton} onPress={confirmDelete}><Text style={styles.dangerText}>{t("settings.agentEditor.deleteAgent")}</Text></AppPressable> : null}
         {message ? <Text style={styles.message}>{message}</Text> : null}
-      </ScrollView>
+      </FormScreen>
     </>
   );
 }

@@ -1,13 +1,5 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import * as Clipboard from "expo-clipboard";
 import * as Crypto from "expo-crypto";
-import {
-  RecordingPresets,
-  requestRecordingPermissionsAsync,
-  setAudioModeAsync,
-  useAudioRecorder,
-  useAudioRecorderState,
-} from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import * as Linking from "expo-linking";
 import * as Sharing from "expo-sharing";
@@ -67,10 +59,12 @@ import {
   type ResolvedArtifactFile,
 } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
-import { ChatTurnWatcher } from "@/api/chatTurnWatcher";
 import { GatewayError } from "@/api/gatewayClient";
 import { agentImageSupport } from "@/media/agentImageSupport";
 import { shouldResetConversation } from "@/state/conversationTransition";
+import { useChatTurns } from "@/hooks/useChatTurns";
+import { useClipboardSuggestion } from "@/hooks/useClipboardSuggestion";
+import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { useI18n } from "@/i18n";
 import { useGateway } from "@/state/GatewayProvider";
 import {
@@ -102,9 +96,7 @@ export default function ChatScreen() {
     prefill?: string;
   }>();
 
-  const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
   const [pendingTurn, setPendingTurn] = useState<PendingChatTurn | null>(null);
-  const [nextTurnCursor, setNextTurnCursor] = useState("");
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   const [text, setText] = useState("");
@@ -117,7 +109,6 @@ export default function ChatScreen() {
   const [resolvingInteraction, setResolvingInteraction] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [validatingInput, setValidatingInput] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
 
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<ResolvedArtifactFile | null>(null);
@@ -144,12 +135,6 @@ export default function ChatScreen() {
   const initialScrollPending = useRef(false);
   const scrollFrame = useRef<number | null>(null);
   const displayedSession = useRef(gateway.sessionHandle);
-
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recordingState = useAudioRecorderState(recorder, 250);
-
-  const lastDismissedClipboardRef = useRef("");
-  const [clipboardSuggestion, setClipboardSuggestion] = useState<ClipboardSuggestion | null>(null);
 
   const [liveGlance, setLiveGlance] = useState<DesktopGlanceRecord | null>(null);
   const [glanceModalVisible, setGlanceModalVisible] = useState(false);
@@ -201,50 +186,6 @@ export default function ChatScreen() {
     setFeedback({ text: value, tone });
   }, []);
 
-  const copyMessage = useCallback(async (content: string) => {
-    if (!content.trim()) return;
-    lastDismissedClipboardRef.current = content.trim();
-    await Clipboard.setStringAsync(content);
-    showFeedback(t("chat.messageCopied"), "success");
-  }, [showFeedback, t]);
-
-  const checkClipboard = useCallback(async () => {
-    try {
-      const hasStr = await Clipboard.hasStringAsync();
-      if (!hasStr) return;
-      const content = (await Clipboard.getStringAsync())?.trim();
-      if (!content || content.length < 4 || content.length > 2000) return;
-      if (content === lastDismissedClipboardRef.current) return;
-      if (text.trim().includes(content)) return;
-
-      const isUrl = /^https?:\/\/[^\s]+$/i.test(content);
-      const isCode = content.includes("\n") && (
-        content.includes("Error") ||
-        content.includes("error") ||
-        content.includes("Exception") ||
-        content.includes("failed") ||
-        content.includes("function")
-      );
-      setClipboardSuggestion({
-        text: content,
-        kind: isUrl ? "url" : isCode ? "code" : "text",
-      });
-    } catch {
-      // ignore clipboard permission error
-    }
-  }, [text]);
-
-  const [turnWatcher] = useState(() => new ChatTurnWatcher({
-    connection: () => gatewayRef.current.connection(),
-    fetchSnapshot: (turnId) => gatewayRef.current.runAuthenticated(
-      (client) => client.getChatTurn(turnId),
-    ),
-    onSnapshot: (snapshot) => {
-      setTurns((current) => mergeConversationTurns(current, [snapshot]));
-    },
-    onUnavailable: () => showFeedback(t("chat.streamUnavailable"), "error"),
-  }));
-
   useEffect(() => {
     if (!feedback) return;
     const duration = feedback.tone === "error" || feedback.tone === "warning" ? 5000 : 3000;
@@ -252,37 +193,51 @@ export default function ChatScreen() {
     return () => clearTimeout(timeout);
   }, [feedback]);
 
-  const watchTurn = useCallback((turnId: string) => {
-    turnWatcher.watch(turnId);
-  }, [turnWatcher]);
-
   useEffect(() => () => {
-    turnWatcher.closeAll();
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
-  }, [turnWatcher]);
+  }, []);
 
-  const refresh = useCallback(async () => {
-    if (!gateway.client || !gateway.sessionHandle) return;
-    const sessionHandle = gateway.sessionHandle;
-    try {
-      const history = await gateway.runAuthenticated(
-        (client) => client.listChatTurns(sessionHandle, 100),
-      );
-      if (gatewayRef.current.sessionHandle !== sessionHandle) return;
-      setTurns((current) => mergeConversationTurns(current, history.turns));
-      setNextTurnCursor(history.nextCursor);
-      for (const turn of history.turns) {
-        if (!TERMINAL_STATES.has(turn.state)) watchTurn(turn.turn_id);
-      }
-    } catch (error) {
-      if (error instanceof GatewayError && error.status === 404) {
-        await gateway.newConversation();
-        showFeedback(t("chat.sessionReplaced"), "warning");
-        return;
-      }
-      showFeedback(t("chat.syncUnavailable"), "warning");
-    }
-  }, [gateway.client, gateway.newConversation, gateway.runAuthenticated, gateway.sessionHandle, showFeedback, t, watchTurn]);
+  const {
+    clipboardSuggestion,
+    copyMessage,
+    checkClipboard,
+    dismissSuggestion: dismissClipboardSuggestion,
+  } = useClipboardSuggestion({
+    text,
+    showFeedback,
+    copiedMessageText: t("chat.messageCopied"),
+  });
+
+  const {
+    turns,
+    setTurns,
+    nextTurnCursor,
+    setNextTurnCursor,
+    watchTurn,
+    refresh,
+    turnWatcher,
+  } = useChatTurns({
+    getConnection: () => gatewayRef.current.connection(),
+    runAuthenticated: (op) => gatewayRef.current.runAuthenticated(op),
+    sessionHandle: gateway.sessionHandle,
+    hasClient: Boolean(gateway.client),
+    onSessionReplaced: gateway.newConversation,
+    showFeedback,
+    t,
+  });
+
+  const {
+    recordingState,
+    transcribing,
+    toggleRecording,
+  } = useVoiceRecorder({
+    runAuthenticated: (op) => gateway.runAuthenticated(op),
+    ensureConversation: gateway.ensureConversation,
+    hasClient: Boolean(gateway.client),
+    onTranscription: (transcript) => setText((current) => current ? `${current}\n${transcript}` : transcript),
+    showFeedback,
+    t,
+  });
 
   useEffect(() => {
     let active = true;
@@ -746,57 +701,6 @@ export default function ChatScreen() {
     }
   }
 
-  async function toggleRecording() {
-    if (!gateway.client || transcribing) return;
-    if (recordingState.isRecording) {
-      await recorder.stop();
-      const uri = recorder.uri;
-      if (!uri) return;
-      setTranscribing(true);
-      try {
-        const sessionHandle = await gateway.ensureConversation();
-        const response = await fetch(uri);
-        const extension = uri.toLowerCase().endsWith(".webm") ? "webm" : "m4a";
-        const bytes = await response.arrayBuffer();
-        const artifact = await gateway.runAuthenticated((client) => client.uploadArtifact({
-          sessionHandle,
-          bytes,
-          mediaType: extension === "webm" ? "audio/webm" : "audio/mp4",
-          name: `voice-${Date.now()}.${extension}`,
-          caption: t("chat.voiceCaption"),
-        }));
-        const transcript = await gateway.runAuthenticated((client) => client.transcribeArtifact(
-          sessionHandle,
-          artifact.artifact_id,
-        ));
-        setText((current) => current ? `${current}\n${transcript}` : transcript);
-      } catch {
-        showFeedback(t("chat.transcriptionFailed"), "error");
-      } finally {
-        await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-        setTranscribing(false);
-      }
-      return;
-    }
-
-    const permission = await requestRecordingPermissionsAsync();
-    if (!permission.granted) {
-      showFeedback(permission.canAskAgain
-        ? t("chat.microphoneRequired")
-        : t("chat.microphoneDisabled"), "warning");
-      if (!permission.canAskAgain) await Linking.openSettings();
-      return;
-    }
-    try {
-      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-      await recorder.prepareToRecordAsync();
-      recorder.record();
-    } catch {
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-      showFeedback(t("chat.recordingFailed"), "error");
-    }
-  }
-
   const scrollToBottom = useCallback((animated = true) => {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
     scrollFrame.current = requestAnimationFrame(() => {
@@ -965,12 +869,10 @@ export default function ChatScreen() {
             suggestion={clipboardSuggestion}
             onApply={(appliedText) => {
               setText(appliedText);
-              lastDismissedClipboardRef.current = clipboardSuggestion.text;
-              setClipboardSuggestion(null);
+              dismissClipboardSuggestion();
             }}
             onDismiss={() => {
-              lastDismissedClipboardRef.current = clipboardSuggestion.text;
-              setClipboardSuggestion(null);
+              dismissClipboardSuggestion();
             }}
           />
         ) : null}
