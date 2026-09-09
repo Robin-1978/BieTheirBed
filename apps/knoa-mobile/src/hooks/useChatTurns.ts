@@ -28,6 +28,7 @@ export function useChatTurns({
 }: UseChatTurnsOptions) {
   const [turns, setTurns] = useState<ChatTurnSnapshot[]>([]);
   const [nextTurnCursor, setNextTurnCursor] = useState<string | null>(null);
+  const refreshPromiseRef = useRef<Promise<void> | null>(null);
   const sessionHandleRef = useRef(sessionHandle);
   sessionHandleRef.current = sessionHandle;
 
@@ -48,27 +49,35 @@ export function useChatTurns({
     turnWatcher.closeAll();
   }, [turnWatcher]);
 
-  const refresh = useCallback(async () => {
-    if (!hasClient || !sessionHandle) return;
+  const refresh = useCallback((): Promise<void> => {
+    if (!hasClient || !sessionHandle) return Promise.resolve();
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
     const currentSession = sessionHandle;
-    try {
-      const history = await runAuthenticated(
-        (client) => client.listChatTurns(currentSession, 100),
-      );
-      if (sessionHandleRef.current !== currentSession) return;
-      setTurns((current) => mergeConversationTurns(current, history.turns));
-      setNextTurnCursor(history.nextCursor);
-      for (const turn of history.turns) {
-        if (!TERMINAL_STATES.has(turn.state)) watchTurn(turn.turn_id);
+    const pending = (async () => {
+      try {
+        const history = await runAuthenticated(
+          (client) => client.listChatTurns(currentSession, 100),
+        );
+        if (sessionHandleRef.current !== currentSession) return;
+        setTurns((current) => mergeConversationTurns(current, history.turns));
+        setNextTurnCursor(history.nextCursor);
+        for (const turn of history.turns) {
+          if (!TERMINAL_STATES.has(turn.state)) watchTurn(turn.turn_id);
+        }
+      } catch (error) {
+        if (error instanceof GatewayError && error.status === 404) {
+          if (onSessionReplaced) await onSessionReplaced();
+          showFeedback(t("chat.sessionReplaced"), "warning");
+          return;
+        }
+        showFeedback(t("chat.syncUnavailable"), "warning");
       }
-    } catch (error) {
-      if (error instanceof GatewayError && error.status === 404) {
-        if (onSessionReplaced) await onSessionReplaced();
-        showFeedback(t("chat.sessionReplaced"), "warning");
-        return;
-      }
-      showFeedback(t("chat.syncUnavailable"), "warning");
-    }
+    })();
+    const tracked = pending.finally(() => {
+      if (refreshPromiseRef.current === tracked) refreshPromiseRef.current = null;
+    });
+    refreshPromiseRef.current = tracked;
+    return tracked;
   }, [hasClient, onSessionReplaced, runAuthenticated, sessionHandle, showFeedback, t, watchTurn]);
 
   return {
