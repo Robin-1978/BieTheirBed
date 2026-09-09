@@ -99,6 +99,31 @@ describe("GatewayClient conversation requests", () => {
     });
   });
 
+  it("retries one transient idle-transport failure with the same idempotency key", async () => {
+    let attempts = 0;
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError("Network request failed");
+      return new Response(JSON.stringify({ turn: { turn_id: "turn-retried" } }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetch);
+    const client = new GatewayClient("https://knoa.example.com", "token-a");
+
+    await expect(client.createChatTurn({
+      clientRequestId: "message-request-retry",
+      sessionHandle: "session-a",
+      text: "hello again",
+    })).resolves.toEqual({ turn_id: "turn-retried" });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(String((fetch.mock.calls[0]![1] as RequestInit).body));
+    const secondBody = JSON.parse(String((fetch.mock.calls[1]![1] as RequestInit).body));
+    expect(secondBody.client_request_id).toBe(firstBody.client_request_id);
+  });
+
   it("passes and returns conversation pagination cursors", async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       sessions: [],
