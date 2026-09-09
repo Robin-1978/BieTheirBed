@@ -62,12 +62,21 @@ class ToolInventory:
         # stable Core tool prefix.
         schema_char_budget: int = 24_000,
         semantic_selector: Any | None = None,
+        # ``deferred`` preserves the original recall-on-demand behavior.
+        # ``static`` keeps every compact MCP signature in the provider tool
+        # set. ``auto`` chooses static while the bounded compact set fits and
+        # falls back to deferred when an installation grows past the budget.
+        mcp_mode: str = "deferred",
     ) -> None:
         if schema_char_budget < 1000:
             raise ValueError("Tool schema budget must be at least 1000 characters")
+        if mcp_mode not in {"deferred", "static", "auto"}:
+            raise ValueError("mcp_mode must be deferred, static, or auto")
         self._schema_char_budget = schema_char_budget
+        self._mcp_mode = mcp_mode
         self._cache: dict[tuple[str, str], ToolInventorySnapshot] = {}
         self._active_deferred: dict[str, list[str]] = {}
+        self._static_sessions: dict[str, bool] = {}
         self._semantic_selector = semantic_selector or default_tool_selector()
 
     async def load(
@@ -101,6 +110,10 @@ class ToolInventory:
             schema_chars=sum(self._serialized_size(tool) for tool in normalized),
         )
         self._cache[key] = snapshot
+        # Decide once per discovered scope.  The decision is stable for the
+        # lifetime of the snapshot, which keeps the rendered tool prefix
+        # deterministic across turns and avoids cache churn.
+        self._static_sessions[runtime_session_ref] = self._should_use_static(snapshot)
         available = {str(tool["name"]) for tool in normalized}
         active = self._active_deferred.get(runtime_session_ref)
         if active is not None:
@@ -121,6 +134,23 @@ class ToolInventory:
             for tool in snapshot.tools
             if not self._is_deferred(str(tool["name"]))
         )
+        if self._static_sessions.get(runtime_session_ref, False):
+            projected = (
+                *stable,
+                *(
+                    self._model_signature(tool)
+                    for tool in snapshot.tools
+                    if self._is_deferred(str(tool["name"]))
+                ),
+            )
+            projected_chars = sum(self._serialized_size(tool) for tool in projected)
+            if projected_chars > self._schema_char_budget:
+                # A provider may rediscover a larger set under the same
+                # session.  Fail over to deferred rather than emitting an
+                # oversized request.
+                self._static_sessions[runtime_session_ref] = False
+            else:
+                return projected
         deferred = tuple(
             self._model_signature(by_name[name])
             for name in active
@@ -150,6 +180,16 @@ class ToolInventory:
         deferred = tuple(
             tool for tool in snapshot.tools if self._is_deferred(str(tool["name"]))
         )
+        if self._static_sessions.get(runtime_session_ref, False):
+            tools = self.project(runtime_session_ref, snapshot)
+            return ToolProjection(
+                tools=tools,
+                mode="static",
+                matched_names=(),
+                schema_hits=sum(
+                    1 for tool in tools if self._is_deferred(str(tool.get("name") or ""))
+                ),
+            )
         source_names = self._source_namespace_matches(query, deferred)
         lexical_names = (
             frozenset() if source_names else self._lexical_matches(query, deferred)
@@ -247,6 +287,25 @@ class ToolInventory:
             if key[0] == runtime_session_ref:
                 self._cache.pop(key, None)
         self._active_deferred.pop(runtime_session_ref, None)
+        self._static_sessions.pop(runtime_session_ref, None)
+
+    def _should_use_static(self, snapshot: ToolInventorySnapshot) -> bool:
+        if self._mcp_mode == "deferred":
+            return False
+        stable = [
+            self._model_signature(tool)
+            for tool in snapshot.tools
+            if not self._is_deferred(str(tool["name"]))
+        ]
+        deferred = [
+            self._model_signature(tool)
+            for tool in snapshot.tools
+            if self._is_deferred(str(tool["name"]))
+        ]
+        size = sum(self._serialized_size(tool) for tool in (*stable, *deferred))
+        if self._mcp_mode == "static" and size > self._schema_char_budget:
+            raise ValueError("Static MCP tool signatures exceed the configured budget")
+        return bool(deferred) and size <= self._schema_char_budget
 
     @staticmethod
     def _is_deferred(name: str) -> bool:

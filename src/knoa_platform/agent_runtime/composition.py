@@ -556,7 +556,7 @@ def _build_agent_runtime_set(
                 tool_inventory=(
                     ToolInventory(semantic_selector=DisabledToolSelector())
                     if not agent.allowed_platform_tools
-                    else None
+                    else ToolInventory(mcp_mode="auto")
                 ),
             )
             if agent_id == managed.agents.default_agent:
