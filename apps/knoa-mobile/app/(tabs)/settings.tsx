@@ -33,15 +33,17 @@ export default function NodeAndSettingsScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      {/* Node overview and channel status hero card */}
+      {/* Agent Persona & Node Hub Hero */}
       <View style={styles.heroCard}>
         <View style={styles.heroHeader}>
           <View style={styles.nodeIconWrap}>
-            <AppIcon name="node" color={colors.accent} size={28} />
+            <AppIcon name="agent" color={colors.accent} size={28} />
           </View>
           <View style={styles.flex}>
-            <Text style={styles.nodeTitle}>{nodeName}</Text>
-            <Text style={styles.workspaceText}>{workspaceName}</Text>
+            <Text style={styles.nodeTitle}>小诺</Text>
+            <Text style={styles.workspaceText}>
+              {nodeName} · {workspaceName}
+            </Text>
           </View>
           <View style={styles.statusBadge}>
             <Text style={gateway.status === "ready" ? styles.onlineText : styles.offlineText}>
@@ -69,7 +71,7 @@ export default function NodeAndSettingsScreen() {
             </Text>
           </AppPressable>
           <AppPressable
-            onPress={() => router.push("/settings/node")}
+            onPress={() => router.push({ pathname: "/settings/node", params: { workspaceId, workspaceName, nodeId } })}
             style={styles.quickActionButton}
           >
             <AppIcon name="pulse" color={colors.accent} size={16} />
@@ -78,46 +80,14 @@ export default function NodeAndSettingsScreen() {
         </View>
       </View>
 
-      {/* Workspace board and multi-device hub card */}
+      {/* 1. Agent Mind & Capabilities */}
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>{t("nodeSwitch.workspaceHub")}</Text>
+        <Text style={styles.sectionTitle}>{t("settings.agentPersonaTitle")}</Text>
         <SettingRow
-          icon="workspace"
-          title={t("nodeMenu.backToWorkspace")}
-          detail={workspaceName}
-          onPress={() => {
-            if (workspaceId) router.push({ pathname: "/workspaces/[workspaceId]", params: { workspaceId, workspaceName } });
-            else router.push("/account");
-          }}
-        />
-        <SettingRow
-          icon="settings"
-          title={t("nav.account")}
-          detail={t("account.appSection")}
-          onPress={() => router.push("/account")}
-        />
-      </View>
-
-      {/* Core governance and extensions card */}
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>{t("settings.deviceAndApp")}</Text>
-        <SettingRow
-          icon="agent"
-          title={t("nav.nodeResources")}
-          detail={t("nodeMenu.resourcesDetail")}
-          onPress={() => router.push("/capabilities")}
-        />
-        <SettingRow
-          icon="sparkles"
-          title={t("nav.agents")}
-          detail={t("settings.agents.heroDetail")}
-          onPress={() => router.push("/settings/agents")}
-        />
-        <SettingRow
-          icon="desktop"
-          title={t("nav.models")}
-          detail={t("settings.models.heroDetail")}
-          onPress={() => router.push("/settings/models")}
+          icon="history"
+          title={t("settings.memoriesTitle")}
+          detail={t("settings.memoriesDetail")}
+          onPress={() => router.push("/memories")}
         />
         <SettingRow
           icon="code"
@@ -126,16 +96,54 @@ export default function NodeAndSettingsScreen() {
           onPress={() => router.push("/settings/extensions")}
         />
         <SettingRow
-          icon="history"
-          title={t("settings.memoriesTitle")}
-          detail={t("settings.memoriesDetail")}
-          onPress={() => router.push("/memories")}
+          icon="desktop"
+          title={t("nav.models")}
+          detail={t("settings.models.heroDetail")}
+          onPress={() => router.push("/settings/models")}
+        />
+        <SettingRow
+          icon="sparkles"
+          title={t("nav.agents")}
+          detail={t("settings.agents.heroDetail")}
+          onPress={() => router.push("/settings/agents")}
+        />
+        <SettingRow
+          icon="node"
+          title={t("nav.nodeResources")}
+          detail={t("nodeMenu.resourcesDetail")}
+          onPress={() => router.push("/capabilities")}
         />
       </View>
 
-      {/* App settings and system services card */}
+      {/* 2. Host Computer & Workspaces */}
       <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>{t("nav.appSettings")}</Text>
+        <Text style={styles.sectionTitle}>{t("settings.hostAndNetworkTitle")}</Text>
+        <SettingRow
+          icon="workspace"
+          title={t("nodeSwitch.workspaceHub")}
+          detail={workspaceName}
+          onPress={() => {
+            if (workspaceId) router.push({ pathname: "/workspaces/[workspaceId]", params: { workspaceId, workspaceName } });
+            else router.push("/account");
+          }}
+        />
+        <SettingRow
+          icon="user"
+          title={t("nav.account")}
+          detail={t("account.appSection")}
+          onPress={() => router.push("/account")}
+        />
+        <SettingRow
+          icon="pulse"
+          title={t("nav.nodeSettings")}
+          detail={nodeName}
+          onPress={() => router.push({ pathname: "/settings/node", params: { workspaceId, workspaceName, nodeId } })}
+        />
+      </View>
+
+      {/* 3. Preferences & System */}
+      <View style={styles.sectionCard}>
+        <Text style={styles.sectionTitle}>{t("settings.systemAndPrefsTitle")}</Text>
         <SettingRow
           icon="settings"
           title={t("nav.appSettings")}
@@ -147,6 +155,12 @@ export default function NodeAndSettingsScreen() {
           title={t("nav.update")}
           detail={t("settings.checkAppUpdateHint")}
           onPress={() => router.push("/update")}
+        />
+        <SettingRow
+          icon="settings"
+          title={t("settings.systemConfiguration")}
+          detail={t("settings.systemConfigurationDetail")}
+          onPress={() => router.push("/settings/system")}
         />
       </View>
     </ScrollView>
