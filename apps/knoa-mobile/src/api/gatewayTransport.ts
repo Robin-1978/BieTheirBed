@@ -67,10 +67,11 @@ const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
 const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
 const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
-// Give the concurrent mDNS/P2P/Relay upgrades enough time to win the first
-// request.  One second routinely expires while ICE is gathering on mobile
-// networks, forcing an unnecessary relay request and masking a healthy P2P.
-const TRANSPORT_READY_WAIT_TIMEOUT_MS = 3_000;
+// Give a just-started upgrade a tiny head start, then use Relay immediately.
+// Waiting several seconds here made Node selection feel stalled because the
+// first authenticated request sat idle while ICE gathered. P2P continues in
+// the background and becomes preferred for subsequent requests.
+const TRANSPORT_READY_WAIT_TIMEOUT_MS = 300;
 const ICE_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
   { urls: "stun:stun.l.google.com:19302" },

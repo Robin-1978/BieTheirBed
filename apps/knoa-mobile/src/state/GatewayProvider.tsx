@@ -214,20 +214,11 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       await withConnectionTimeout(transport.prepareLanDiscovery());
       let client: GatewayClient;
       if (token) {
+        // Do not spend a separate transport round trip validating a cached
+        // token.  The node descriptor request below is authenticated and
+        // serves as the validation probe for this connection, avoiding a
+        // duplicate Relay/P2P startup on every Node switch.
         client = new GatewayClient(device.gatewayUrl, token, transport);
-        try {
-          await withConnectionTimeout(client.gatewaySession(), 8_000);
-        } catch (error) {
-          if (!(error instanceof GatewayError) || error.status !== 401) throw error;
-          await clearSession();
-          token = null;
-          client = await withConnectionTimeout(authenticateDevice({
-            gateway_url: device.gatewayUrl,
-            deviceId: device.deviceId,
-            binding: identity,
-          }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, relayDiagnosticChanged, transport));
-          token = await loadSessionToken();
-        }
       } else {
         client = await withConnectionTimeout(authenticateDevice({
           gateway_url: device.gatewayUrl,
@@ -238,7 +229,21 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
       }
       if (!token) throw new Error("未能建立安全会话");
       if (generation !== connectionGenerationRef.current) return;
-      const descriptor = await withConnectionTimeout(client.nodeDescriptor(), 8_000);
+      let descriptor: Awaited<ReturnType<GatewayClient["nodeDescriptor"]>>;
+      try {
+        descriptor = await withConnectionTimeout(client.nodeDescriptor(), 8_000);
+      } catch (error) {
+        if (!token || !(error instanceof GatewayError) || error.status !== 401) throw error;
+        await clearSession();
+        client = await withConnectionTimeout(authenticateDevice({
+          gateway_url: device.gatewayUrl,
+          deviceId: device.deviceId,
+          binding: identity,
+        }, transportChanged, p2pDiagnosticChanged, lanDiagnosticChanged, relayDiagnosticChanged, transport));
+        token = await loadSessionToken();
+        if (!token) throw new Error("未能建立安全会话");
+        descriptor = await withConnectionTimeout(client.nodeDescriptor(), 8_000);
+      }
       if (descriptor.display_name) await storeNodeDisplayName(identity.nodeId, descriptor.display_name);
       const refreshedNodes = descriptor.display_name ? await listNodeBindings() : nodes;
       const sessionHandle = identity.coreSessionHandle || "";
