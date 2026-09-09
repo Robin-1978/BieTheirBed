@@ -15,6 +15,7 @@ from knoa_agent import (
     ContextCheckpointRepository,
     DisabledToolSelector,
     KnoaAgentRuntime,
+    CORE_TOOL_NAMES,
     ToolInventory,
 )
 from knoa_agent_contracts import (
@@ -556,7 +557,13 @@ def _build_agent_runtime_set(
                 tool_inventory=(
                     ToolInventory(semantic_selector=DisabledToolSelector())
                     if not agent.allowed_platform_tools
-                    else ToolInventory(mcp_mode="auto")
+                    else ToolInventory(
+                        mcp_mode="auto",
+                        # Recall is about extension ownership, not transport:
+                        # future non-MCP providers are deferred exactly like
+                        # mcp_* tools while Core remains the stable prefix.
+                        deferred_predicate=lambda name: name not in CORE_TOOL_NAMES,
+                    )
                 ),
             )
             if agent_id == managed.agents.default_agent:

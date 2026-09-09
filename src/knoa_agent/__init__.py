@@ -8,6 +8,7 @@ from knoa_agent.context_store import (
 )
 from knoa_agent.runtime import KnoaAgentRuntime
 from knoa_agent.tool_inventory import (
+    CORE_TOOL_NAMES,
     ToolInventory,
     ToolInventorySnapshot,
     ToolProjection,
@@ -21,6 +22,7 @@ from knoa_agent.tool_selector import (
 
 __all__ = [
     "BgeToolSelector",
+    "CORE_TOOL_NAMES",
     "ContextCheckpoint",
     "ContextCheckpointConflictError",
     "ContextCheckpointRepository",

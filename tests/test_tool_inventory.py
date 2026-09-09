@@ -234,6 +234,28 @@ async def test_auto_mode_falls_back_to_deferred_for_large_future_mcp_set() -> No
 
 
 @pytest.mark.asyncio
+async def test_non_mcp_extension_can_use_the_same_recall_path() -> None:
+    inventory = ToolInventory(
+        schema_char_budget=2000,
+        deferred_predicate=lambda name: name == "plugin_search",
+    )
+    snapshot = await inventory.load("session-a", "digest-a", Client())
+    # Rename the discovered MCP entry to model a future non-MCP extension.
+    tools = tuple(
+        {**tool, "name": "plugin_search"}
+        if tool["name"] == "mcp__jira__issue_get"
+        else tool
+        for tool in snapshot.tools
+    )
+    snapshot = type(snapshot)(tools=tools, schema_chars=snapshot.schema_chars)
+
+    projection = await inventory.project_for_turn("session-a", snapshot, "search Jira issue")
+
+    assert projection.matched_names == ("plugin_search",)
+    assert projection.tools[-1]["name"] == "plugin_search"
+
+
+@pytest.mark.asyncio
 async def test_resource_task_automatically_injects_tools_from_its_mcp_source() -> None:
     inventory = ToolInventory(schema_char_budget=4000, semantic_selector=SemanticSelector())
     snapshot = await inventory.load("session-a", "digest-a", Client())

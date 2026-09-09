@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from knoa_agent.tool_selector import SemanticSelection, default_tool_selector
 
@@ -23,6 +23,18 @@ _MODEL_SCHEMA_KEYS = frozenset(
         "allOf",
         "$ref",
         "$defs",
+    }
+)
+
+CORE_TOOL_NAMES = frozenset(
+    {
+        "attach", "clipboard", "create_task", "currency", "edit_file",
+        "glob_files", "grep_search", "hotkey", "memory", "mcp_connect",
+        "mcp_disable", "mcp_inspect", "mouse", "notify", "press_key",
+        "read_artifact", "read_file", "run_command", "screen", "screenshot",
+        "sleep", "spawn_subagent", "subagent", "task", "tool_help",
+        "type_text", "ui", "weather", "web_fetch", "web_search", "windows",
+        "write_file",
     }
 )
 
@@ -62,6 +74,7 @@ class ToolInventory:
         # stable Core tool prefix.
         schema_char_budget: int = 24_000,
         semantic_selector: Any | None = None,
+        deferred_predicate: Callable[[str], bool] | None = None,
         # ``deferred`` preserves the original recall-on-demand behavior.
         # ``static`` keeps every compact MCP signature in the provider tool
         # set. ``auto`` chooses static while the bounded compact set fits and
@@ -74,6 +87,7 @@ class ToolInventory:
             raise ValueError("mcp_mode must be deferred, static, or auto")
         self._schema_char_budget = schema_char_budget
         self._mcp_mode = mcp_mode
+        self._deferred_predicate = deferred_predicate or self._is_deferred
         self._cache: dict[tuple[str, str], ToolInventorySnapshot] = {}
         self._active_deferred: dict[str, list[str]] = {}
         self._static_sessions: dict[str, bool] = {}
@@ -132,7 +146,7 @@ class ToolInventory:
         stable = tuple(
             self._model_signature(tool)
             for tool in snapshot.tools
-            if not self._is_deferred(str(tool["name"]))
+            if not self._deferred_predicate(str(tool["name"]))
         )
         if self._static_sessions.get(runtime_session_ref, False):
             projected = (
@@ -140,7 +154,7 @@ class ToolInventory:
                 *(
                     self._model_signature(tool)
                     for tool in snapshot.tools
-                    if self._is_deferred(str(tool["name"]))
+                    if self._deferred_predicate(str(tool["name"]))
                 ),
             )
             projected_chars = sum(self._serialized_size(tool) for tool in projected)
@@ -178,7 +192,7 @@ class ToolInventory:
         """
 
         deferred = tuple(
-            tool for tool in snapshot.tools if self._is_deferred(str(tool["name"]))
+            tool for tool in snapshot.tools if self._deferred_predicate(str(tool["name"]))
         )
         if self._static_sessions.get(runtime_session_ref, False):
             tools = self.project(runtime_session_ref, snapshot)
@@ -187,7 +201,7 @@ class ToolInventory:
                 mode="static",
                 matched_names=(),
                 schema_hits=sum(
-                    1 for tool in tools if self._is_deferred(str(tool.get("name") or ""))
+                    1 for tool in tools if self._deferred_predicate(str(tool.get("name") or ""))
                 ),
             )
         source_names = self._source_namespace_matches(query, deferred)
@@ -223,7 +237,7 @@ class ToolInventory:
             matched_names=tuple(sorted(recalled)),
             schema_hits=sum(
                 1 for tool in tools
-                if self._is_deferred(str(tool.get("name") or ""))
+                if self._deferred_predicate(str(tool.get("name") or ""))
             ),
         )
 
@@ -239,7 +253,7 @@ class ToolInventory:
         selected = {
             name
             for name in names
-            if name in available and self._is_deferred(name)
+            if name in available and self._deferred_predicate(name)
         }
         if not selected:
             return ()
@@ -275,7 +289,7 @@ class ToolInventory:
             name = str(raw_name)
             if (
                 name in available
-                and self._is_deferred(name)
+                and self._deferred_predicate(name)
                 and name not in active
             ):
                 active.append(name)
@@ -295,12 +309,12 @@ class ToolInventory:
         stable = [
             self._model_signature(tool)
             for tool in snapshot.tools
-            if not self._is_deferred(str(tool["name"]))
+            if not self._deferred_predicate(str(tool["name"]))
         ]
         deferred = [
             self._model_signature(tool)
             for tool in snapshot.tools
-            if self._is_deferred(str(tool["name"]))
+            if self._deferred_predicate(str(tool["name"]))
         ]
         size = sum(self._serialized_size(tool) for tool in (*stable, *deferred))
         if self._mcp_mode == "static" and size > self._schema_char_budget:
