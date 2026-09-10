@@ -346,10 +346,14 @@ export default function ChatScreen() {
     || gateway.lanState === "found";
   const sending = pendingTurn?.state === "sending";
   const hasComposerContent = Boolean(text.trim() || attachments.length);
+  // 与顶部状态胶囊（NodeHeader 的 isOnline）保持同一语义：任一传输就绪即视为
+  // 可发送。 Relay/P2P 诊断回调先于 status=ready 到达，之前这里单独卡
+  // gateway.client 会让胶囊显示"在线·P2P"而发送键仍是禁用；发送时
+  // runAuthenticated 会顺带完成认证恢复。
   const canSend = Boolean(
     !pendingTurn
       && !validatingInput
-      && gateway.client
+      && (gateway.client || transportOnline)
       && !gateway.requiredUpdate
       && hasComposerContent,
   );
@@ -384,7 +388,7 @@ export default function ChatScreen() {
   }, [pendingTurn, turns]);
 
   async function submitPendingTurn(pending: PendingChatTurn) {
-    if (!gateway.client) return;
+    if (!gateway.client && !transportOnline) return;
     setPendingTurn({ ...pending, state: "sending", error: "" });
     setFeedback(null);
 
@@ -507,10 +511,16 @@ export default function ChatScreen() {
   }
 
   const handleSelectPrompt = useCallback((prompt: string, autoSend = false) => {
+    const transportOnline = gateway.status === "ready"
+      || gateway.relayState === "ready"
+      || gateway.relayState === "active"
+      || gateway.p2pState === "ready"
+      || gateway.p2pState === "active"
+      || gateway.lanState === "found";
     const canAutoSend = Boolean(
       !pendingTurn
         && !validatingInput
-        && gateway.client
+        && (gateway.client || transportOnline)
         && !gateway.requiredUpdate,
     );
     if (autoSend && canAutoSend) {
@@ -535,7 +545,7 @@ export default function ChatScreen() {
       setText(prompt);
       showFeedback(t("chat.editedToComposer"), "info");
     }
-  }, [gateway.client, gateway.requiredUpdate, pendingTurn, showFeedback, t, validatingInput]);
+  }, [gateway.client, gateway.requiredUpdate, gateway.status, gateway.relayState, gateway.p2pState, gateway.lanState, pendingTurn, showFeedback, t, validatingInput]);
 
   const handleLaunchTask = useCallback((title: string, goal: string) => {
     const targetNodeId = gateway.nodeId || stringParam(params.nodeId);

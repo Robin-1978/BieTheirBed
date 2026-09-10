@@ -370,8 +370,11 @@ export function GatewayProvider({ children }: React.PropsWithChildren) {
     operation: (client: GatewayClient) => Promise<T>,
   ): Promise<T> => {
     const client = stateRef.current.client;
-    if (!client) return Promise.reject(new Error("小诺尚未连接"));
-    return withAuthenticationRetry(client, refreshAuthentication, operation);
+    if (client) return withAuthenticationRetry(client, refreshAuthentication, operation);
+    // Transport diagnostics can report a live Relay/P2P link before the
+    // connect sequence committed a client.  Recover in place instead of
+    // failing the call with "尚未连接".
+    return refreshAuthentication().then((recovered) => operation(recovered));
   }, [refreshAuthentication]);
 
   const refreshAgents = useCallback(async () => {
