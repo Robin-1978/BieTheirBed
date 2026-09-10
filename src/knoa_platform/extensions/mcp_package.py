@@ -13,6 +13,8 @@ import uuid
 import yaml
 
 from knoa_platform.extensions.manager import (
+    ExtensionDescriptor,
+    ExtensionKind,
     ExtensionManager,
     ExtensionState,
     ExtensionStatus,
@@ -385,6 +387,10 @@ class MCPPackageService:
         stage: Path,
     ) -> ExtensionStatus:
         old_provider = self._providers.get(server_id)
+        if old_provider is None:
+            old_provider = self._manager.provider(
+                ExtensionDescriptor(f"mcp:{server_id}", kind=ExtensionKind.MCP)
+            )
         backup = stage.parent / f"{server_id}.previous"
         if old_provider is not None:
             await self._resource_tasks.remove_provider(old_provider)

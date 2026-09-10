@@ -11,6 +11,10 @@ from knoa_platform.extensions import (
     ExtensionState,
     ExtensionStatus,
 )
+from knoa_platform.extensions.manager import (
+    ExtensionDescriptor,
+    ExtensionKind,
+)
 from knoa_platform.extensions.mcp_package import (
     MCPPackageService,
     build_mcp_package_providers,
@@ -319,3 +323,69 @@ async def test_failed_update_restores_previous_running_package(
     target = tmp_path / "runtime" / "mcp" / "jira"
     assert (target / "version.txt").read_text(encoding="utf-8") == "stable"
     assert service._providers["jira"] is resource_tasks.added[-1]
+
+
+class _ConfiguredProvider:
+    def __init__(self, server_id: str) -> None:
+        self._descriptor = ExtensionDescriptor(
+            f"mcp:{server_id}",
+            kind=ExtensionKind.MCP,
+        )
+
+    @property
+    def descriptor(self) -> ExtensionDescriptor:
+        return self._descriptor
+
+    async def start(self):
+        return ()
+
+    async def stop(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_deploy_replaces_existing_config_managed_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _write_package(tmp_path / "sources", "configured-source")
+    (source / "version.txt").write_text("two", encoding="utf-8")
+    manager = ExtensionManager(ToolRegistry())
+    manager._running = True
+    existing = _ConfiguredProvider("configured")
+    _write_package(tmp_path / "runtime" / "mcp", "configured")
+    (tmp_path / "runtime" / "mcp" / "configured" / "version.txt").write_text(
+        "one",
+        encoding="utf-8",
+    )
+    manager._providers.append(existing)
+    manager._statuses[existing.descriptor] = ExtensionStatus(
+        existing.descriptor,
+        ExtensionState.RUNNING,
+        tools=("old",),
+    )
+    resource_tasks = _ResourceTasks()
+
+    async def add_provider(provider):
+        manager._providers.append(provider)
+        status = ExtensionStatus(provider.descriptor, ExtensionState.RUNNING)
+        manager._statuses[provider.descriptor] = status
+        return status
+
+    monkeypatch.setattr(manager, "add_provider", add_provider)
+    service = MCPPackageService(
+        tmp_path / "runtime" / "mcp",
+        tmp_path / "runtime" / "cache" / "mcp-imports",
+        manager,
+        resource_tasks,  # type: ignore[arg-type]
+    )
+
+    action, _ = await service.deploy_local(source, "configured")
+
+    assert action == "updated"
+    assert existing not in manager._providers
+    assert existing in resource_tasks.removed
+    assert manager.provider(existing.descriptor) is service._providers["configured"]
+    assert (tmp_path / "runtime" / "mcp" / "configured" / "version.txt").read_text(
+        encoding="utf-8"
+    ) == "two"

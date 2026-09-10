@@ -1523,7 +1523,11 @@ def build_core_runtime(
         extensions,
         mcp_resource_tasks,
         (),
-        reserved_ids=frozenset(managed.mcp_servers),
+        reserved_ids=frozenset(
+            server_id
+            for server_id, config in managed.mcp_servers.items()
+            if config.package_id
+        ),
         secret_root=paths.mcp_secrets,
     )
     delegation_repository = DelegationRepository(database)
