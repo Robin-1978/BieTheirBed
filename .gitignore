@@ -29,3 +29,6 @@ node_modules/
 screen_look.png
 screenshot.png
 window_screenshot.png
+
+# BGE model staging cache (downloaded from hf-mirror, copied into the service cache)
+.bge-cache/
