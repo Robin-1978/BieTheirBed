@@ -1,8 +1,9 @@
-import { memo, useCallback, type ReactElement } from "react";
+import { memo, useCallback, useMemo, type ReactElement } from "react";
 import { FlatList, type StyleProp, type ViewStyle } from "react-native";
 import { useMarkdown, type MarkedStyles } from "react-native-marked";
 
 import { colors } from "@/theme";
+import { createKnoaRenderer } from "./KnoaMarkdownRenderer";
 
 const theme = {
   colors: {
@@ -27,7 +28,9 @@ const markdownStyles: MarkedStyles = {
 };
 
 export const AppMarkdown = memo(function AppMarkdown({ value, style }: { value: string; style?: StyleProp<ViewStyle> }) {
-  const elements = useMarkdown(value, { theme, styles: markdownStyles });
+  // Renderer 是有状态的（slugger 计数），每个实例独立，避免跨消息复用。
+  const renderer = useMemo(() => createKnoaRenderer(), []);
+  const elements = useMarkdown(value, { theme, styles: markdownStyles, renderer });
   const renderItem = useCallback(({ item }: { item: unknown }) => item as ReactElement, []);
   const keyExtractor = useCallback((_: unknown, index: number) => index.toString(), []);
   return (

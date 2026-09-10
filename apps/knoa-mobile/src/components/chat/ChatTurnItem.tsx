@@ -95,9 +95,7 @@ export const ChatTurnItem = memo(function ChatTurnItem({
         <TurnProgress turn={turn} />
 
         {response ? (
-          <AppPressable accessibilityRole="button" delayLongPress={320} onLongPress={() => onCopy(response)}>
-            <AppMarkdown value={response} style={styles.markdownList} />
-          </AppPressable>
+          <AppMarkdown value={response} style={styles.markdownList} />
         ) : null}
 
         {artifactItems.length ? (
