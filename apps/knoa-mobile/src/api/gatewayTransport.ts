@@ -189,8 +189,11 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
       // Establish all eligible paths together. The first ready path carries
       // this request; priority is applied again on subsequent requests.
-      this.startP2PUpgrade(baseUrl, init);
       this.startRelayUpgrade(baseUrl, init);
+      // P2P signaling rides Relay (offer + ICE servers go through it), so
+      // starting WebRTC before Relay is ready only delays the first request
+      // behind ICE negotiation. Upgrade once Relay can carry signaling.
+      if (this.relay?.ready()) this.startP2PUpgrade(baseUrl, init);
       const winner = await this.waitForReadyTransport();
       if (winner === "mdns" && this.lanGatewayUrl) {
         try {
@@ -381,8 +384,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
     if (!new Headers(init.headers).get("authorization")) return;
     this.startLanDiscovery();
     if (!this.binding.directGatewayUrl && await this.bindingPointsAtCurrentHub()) {
-      this.startP2PUpgrade(baseUrl, init);
       this.startRelayUpgrade(baseUrl, init);
+      if (this.relay?.ready()) this.startP2PUpgrade(baseUrl, init);
     }
   }
 
@@ -410,6 +413,9 @@ export class ConnectionResolverTransport implements GatewayTransport {
       // a readiness signal) do not remain in "connecting" indefinitely.
       this.setRelayDiagnostic("ready");
       this.updatePreferredActive(true);
+      // Relay can now carry P2P signaling; start the WebRTC upgrade in the
+      // background without blocking the request that warmed Relay up.
+      this.startP2PUpgrade(baseUrl, init);
     })().catch((error) => {
       this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000);
     }).finally(() => {
@@ -441,6 +447,8 @@ export class ConnectionResolverTransport implements GatewayTransport {
         this.relayReconnectAttempt = 0;
         this.setRelayDiagnostic("ready");
         this.updatePreferredActive(true);
+        const context = this.relayReconnectContext;
+        if (context) this.startP2PUpgrade(context.baseUrl, { headers: context.headers });
       }).catch((error) => {
         if (this.relay !== relay) return;
         const nextRetryAt = Date.now() + this.nextRelayReconnectDelay();
