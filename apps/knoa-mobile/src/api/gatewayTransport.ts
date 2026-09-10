@@ -69,6 +69,7 @@ const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
 const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
 const P2P_KEEPALIVE_INTERVAL_MS = 15_000;
 const RELAY_KEEPALIVE_INTERVAL_MS = 15_000;
+const KEEPALIVE_ACK_TIMEOUT_MS = 45_000;
 // Let a just-started P2P/Relay upgrade settle before falling back. A very
 // short wait makes concurrent callers race the same upgrade and create a
 // reconnect storm on mobile networks.
@@ -697,6 +698,7 @@ class WebRtcGatewayTransport implements GatewayTransport {
   private channel: ReturnType<RTCPeerConnection["createDataChannel"]> | null = null;
   private pending = new Map<string, P2PResponseState>();
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private lastKeepaliveAckAt = 0;
   private explicitlyClosed = true;
   private closeNotified = false;
 
@@ -816,7 +818,12 @@ class WebRtcGatewayTransport implements GatewayTransport {
 
   private startKeepalive(): void {
     this.stopKeepalive();
+    this.lastKeepaliveAckAt = Date.now();
     this.keepaliveTimer = setInterval(() => {
+      if (Date.now() - this.lastKeepaliveAckAt > KEEPALIVE_ACK_TIMEOUT_MS) {
+        this.notifyClosed(new Error("P2P 心跳 ACK 超时"));
+        return;
+      }
       void this.send({ type: "keepalive" }).catch((error) => {
         this.notifyClosed(error instanceof Error ? error : new Error("P2P 保活失败"));
       });
@@ -847,6 +854,10 @@ class WebRtcGatewayTransport implements GatewayTransport {
   private receive(raw: string): void {
     try {
       const message = JSON.parse(raw) as Record<string, unknown>;
+      if (message.type === "keepalive_ack") {
+        this.lastKeepaliveAckAt = Date.now();
+        return;
+      }
       const requestId = String(message.request_id ?? "");
       const pending = this.pending.get(requestId);
       if (!pending) return;
@@ -899,6 +910,7 @@ class RelayTransport implements GatewayTransport {
   private nextStreamId = 1;
   private pending = new Map<number, ResponseState>();
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private lastKeepaliveAckAt = 0;
 
   constructor(
     private readonly binding: RelayBinding,
@@ -1081,6 +1093,10 @@ class RelayTransport implements GatewayTransport {
   };
 
   private receiveMessage(streamId: number, message: Record<string, unknown>): void {
+    if (streamId === 0 && message.type === "keepalive_ack") {
+      this.lastKeepaliveAckAt = Date.now();
+      return;
+    }
     const pending = this.pending.get(streamId);
     if (!pending) return;
     if (message.type === "response_start") {
@@ -1148,7 +1164,14 @@ class RelayTransport implements GatewayTransport {
 
   private startKeepalive(): void {
     this.stopKeepalive();
+    this.lastKeepaliveAckAt = Date.now();
     this.keepaliveTimer = setInterval(() => {
+      if (Date.now() - this.lastKeepaliveAckAt > KEEPALIVE_ACK_TIMEOUT_MS) {
+        const error = new Error("Relay 心跳 ACK 超时");
+        this.fail(error);
+        this.onFailure?.(error);
+        return;
+      }
       try {
         this.sendEncrypted(0, { type: "keepalive" });
       } catch (error) {
@@ -1171,6 +1194,7 @@ class RelayTransport implements GatewayTransport {
     this.encryptKey = null;
     this.decryptKey = null;
     this.sessionId = "";
+    this.lastKeepaliveAckAt = 0;
     if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
     for (const response of this.pending.values()) response.reject(error);
     this.pending.clear();
