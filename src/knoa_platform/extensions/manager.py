@@ -114,6 +114,15 @@ class ExtensionManager:
                 await self._start_provider(provider)
             return self._statuses[descriptor]
 
+    def provider(
+        self,
+        descriptor: ExtensionDescriptor,
+    ) -> ExtensionProvider | None:
+        for provider in self._providers:
+            if provider.descriptor == descriptor:
+                return provider
+        return None
+
     async def remove_provider(self, provider: ExtensionProvider) -> None:
         """Stop and remove one dynamically added extension."""
 
