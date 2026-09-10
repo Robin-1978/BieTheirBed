@@ -338,6 +338,14 @@ export default function ChatScreen() {
     () => turns.find((turn) => !TERMINAL_STATES.has(turn.state)),
     [turns],
   );
+  const transportOnline = gateway.status === "ready"
+    || Boolean(gateway.client && (
+      gateway.relayState === "ready"
+      || gateway.relayState === "active"
+      || gateway.p2pState === "ready"
+      || gateway.p2pState === "active"
+      || gateway.lanState === "found"
+    ));
   const sending = pendingTurn?.state === "sending";
   const hasComposerContent = Boolean(text.trim() || attachments.length);
   const canSend = Boolean(
@@ -852,7 +860,7 @@ export default function ChatScreen() {
                 computerName={currentNode ? presentNodeName(currentNode, t("common.unnamedComputer")) : undefined}
                 toolCount={nodeCapability?.toolCount}
                 modelName={nodeCapability?.document?.default_model}
-                isOnline={gateway.status === "ready"}
+                isOnline={transportOnline}
                 savedHours={savedHours}
                 completedTasksCount={completedTasksCount}
                 onSelectPrompt={handleSelectPrompt}
