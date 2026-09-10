@@ -43,11 +43,23 @@ class KnoaRenderer extends Renderer {
       style: bordered,
       children: [
         _jsx(View, { style: [styles.headerRow, rowStyle], children: header.map((cell, index) => (
-          _jsx(View, { style: [styles.cell, this.cellFlexStyle(), cellStyle], children: cell }, `h${index}`)
+          _jsx(View, {
+            style: [styles.cell, this.cellFlexStyle(), cellStyle, this.cellDivider(index, header.length)],
+            children: cell,
+          }, `h${index}`)
         )) }, "header"),
         rows.map((rowData, rowIndex) => (
           _jsx(View, { style: [styles.row, rowStyle], children: rowData.map((cell, cellIndex) => (
-            _jsx(View, { style: [styles.cell, this.cellFlexStyle(), cellStyle], children: cell }, `${rowIndex}-${cellIndex}`)
+            _jsx(View, {
+              style: [
+                styles.cell,
+                this.cellFlexStyle(),
+                cellStyle,
+                ...(rowIndex < rows.length - 1 ? [styles.bodyCellDivider] : []),
+                this.cellDivider(cellIndex, rowData.length),
+              ],
+              children: cell,
+            }, `${rowIndex}-${cellIndex}`)
           )) }, rowIndex)
         )),
       ],
@@ -61,6 +73,11 @@ class KnoaRenderer extends Renderer {
     return this.tableColumnCount > MAX_TABLE_COLUMNS
       ? { width: 160 }
       : { flex: 1 };
+  }
+
+  /** 列分隔线：非最后一列在右缘画线（0.5 接近 hairline）。 */
+  private cellDivider(index: number, total: number): ViewStyle | null {
+    return index < total - 1 ? styles.columnDivider : null;
   }
 
   // 以下方法仅去掉 selectable，其余与 marked 默认实现一致。
@@ -135,6 +152,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     justifyContent: "center",
+  },
+  columnDivider: {
+    borderRightWidth: 0.5,
+    borderRightColor: colors.line,
+  },
+  bodyCellDivider: {
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.line,
   },
 });
 
