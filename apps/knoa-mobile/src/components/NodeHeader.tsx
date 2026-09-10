@@ -28,7 +28,11 @@ export function NodeHeaderTitle() {
   // live client with an active Relay as online instead of showing a stale
   // "connecting" capsule.
   const isOnline = gateway.status === "ready"
-    || Boolean(gateway.client && (gateway.relayState === "ready" || gateway.relayState === "active"));
+    || gateway.relayState === "ready"
+    || gateway.relayState === "active"
+    || gateway.p2pState === "ready"
+    || gateway.p2pState === "active"
+    || gateway.lanState === "found";
   const isConnecting = !isOnline && (gateway.status === "booting" || gateway.status === "selecting");
   const statusLabel = isOnline
     ? `${t("nodeHeader.online")} · ${t(transportCompactLabelKey(gateway.transportMode))}`

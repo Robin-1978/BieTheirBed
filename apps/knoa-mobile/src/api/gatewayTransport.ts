@@ -88,6 +88,9 @@ export class ConnectionResolverTransport implements GatewayTransport {
   private p2pRetryAfter = 0;
   private active: "direct" | "p2p" | "relay" = "direct";
   private relayPreferredUntil = 0;
+  private relayReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private relayReconnectAttempt = 0;
+  private relayReconnectContext: { baseUrl: string; headers: Headers } | null = null;
   private hubEndpointBinding: Promise<boolean> | null = null;
   private lanDiscovery: Promise<void> | null = null;
   private lanGatewayUrl = "";
@@ -275,6 +278,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
   }
 
   close(): void {
+    this.stopRelayReconnect();
     this.p2p?.close();
     this.p2p = null;
     this.relayUpgradePromise = null;
@@ -286,6 +290,7 @@ export class ConnectionResolverTransport implements GatewayTransport {
     this.lanDiscovery = null;
     this.lanGatewayUrl = "";
     this.lanDiscoveryRetryAfter = 0;
+    this.relayReconnectContext = null;
   }
 
   /** Start LAN discovery without delaying authentication or page entry. */
@@ -334,12 +339,17 @@ export class ConnectionResolverTransport implements GatewayTransport {
       this.relay = new RelayTransport(
         this.binding,
         "session",
-        (error) => this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000),
+        (error) => this.handleRelayFailure(this.relay, error),
       );
       this.setRelayDiagnostic("connecting");
     }
+    this.relayReconnectContext = {
+      baseUrl,
+      headers: new Headers(init.headers),
+    };
     try {
       const response = await this.relay.request(baseUrl, path, init);
+      this.relayReconnectAttempt = 0;
       this.setRelayDiagnostic("active");
       return response;
     } catch (error) {
@@ -382,13 +392,18 @@ export class ConnectionResolverTransport implements GatewayTransport {
       this.relay = new RelayTransport(
         this.binding,
         "session",
-        (error) => this.setRelayDiagnostic("cooldown", errorText(error), Date.now() + 10_000),
+        (error) => this.handleRelayFailure(this.relay, error),
       );
       this.setRelayDiagnostic("connecting");
     }
+    this.relayReconnectContext = {
+      baseUrl,
+      headers: new Headers(init.headers),
+    };
     const relay = this.relay;
     const pending = (async () => {
       await relay.connect();
+      this.relayReconnectAttempt = 0;
       // Handshake completion is distinct from the first request.  Expose it
       // explicitly so diagnostics (and consumers that use the diagnostic as
       // a readiness signal) do not remain in "connecting" indefinitely.
@@ -400,6 +415,44 @@ export class ConnectionResolverTransport implements GatewayTransport {
       if (this.relayUpgradePromise === pending) this.relayUpgradePromise = null;
     });
     this.relayUpgradePromise = pending;
+  }
+
+  private handleRelayFailure(relay: RelayTransport | null, error: Error): void {
+    if (!relay || this.relay !== relay) return;
+    const retryAt = Date.now() + this.nextRelayReconnectDelay();
+    this.setRelayDiagnostic("cooldown", errorText(error), retryAt);
+    this.scheduleRelayReconnect(relay, retryAt);
+  }
+
+  private nextRelayReconnectDelay(): number {
+    const attempt = Math.min(this.relayReconnectAttempt++, 5);
+    const base = Math.min(1_000 * (2 ** attempt), 30_000);
+    return base + Math.floor(Math.random() * 250);
+  }
+
+  private scheduleRelayReconnect(relay: RelayTransport, retryAt: number): void {
+    if (this.relayReconnectTimer !== null || this.relay !== relay) return;
+    const delay = Math.max(0, retryAt - Date.now());
+    this.relayReconnectTimer = setTimeout(() => {
+      this.relayReconnectTimer = null;
+      if (this.relay !== relay || !this.relayReconnectContext) return;
+      void relay.connect().then(() => {
+        this.relayReconnectAttempt = 0;
+        this.setRelayDiagnostic("ready");
+        this.updatePreferredActive(true);
+      }).catch((error) => {
+        if (this.relay !== relay) return;
+        const nextRetryAt = Date.now() + this.nextRelayReconnectDelay();
+        this.setRelayDiagnostic("cooldown", errorText(error), nextRetryAt);
+        this.scheduleRelayReconnect(relay, nextRetryAt);
+      });
+    }, delay);
+  }
+
+  private stopRelayReconnect(): void {
+    if (this.relayReconnectTimer !== null) clearTimeout(this.relayReconnectTimer);
+    this.relayReconnectTimer = null;
+    this.relayReconnectAttempt = 0;
   }
 
   private startP2PUpgrade(baseUrl: string, init: RequestInit): void {
