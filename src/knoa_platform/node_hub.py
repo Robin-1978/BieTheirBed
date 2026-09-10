@@ -616,6 +616,17 @@ class NodeRelayManager:
             raise PermissionError("Relay session expired")
         message = session.cipher.decrypt(frame.sequence, raw)
         kind = message.get("type")
+        if kind == "keepalive":
+            await self._send_encrypted(
+                websocket,
+                frame.session_id,
+                0,
+                session,
+                {"type": "keepalive_ack"},
+            )
+            return
+        if kind == "keepalive_ack":
+            return
         if kind == "request_start":
             self._request_start(session, frame.stream_id, message)
         elif kind == "request_body":

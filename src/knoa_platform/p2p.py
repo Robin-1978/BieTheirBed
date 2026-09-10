@@ -327,6 +327,14 @@ class P2PServer:
             message = json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
             request_id = str(message.get("request_id", ""))
             message_type = str(message.get("type", ""))
+            # Keep a quiet data channel/NAT mapping alive without creating a
+            # fake HTTP request.  This is intentionally handled before the
+            # request-id validation because heartbeat frames have no request.
+            if message_type == "keepalive":
+                await _send_json(channel, {"type": "keepalive_ack"})
+                return
+            if message_type == "keepalive_ack":
+                return
             if not request_id or len(request_id) > 128:
                 raise ValueError("P2P request identity is invalid")
             if message_type == "request_start":
