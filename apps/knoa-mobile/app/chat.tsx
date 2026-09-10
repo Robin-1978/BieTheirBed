@@ -339,13 +339,11 @@ export default function ChatScreen() {
     [turns],
   );
   const transportOnline = gateway.status === "ready"
-    || Boolean(gateway.client && (
-      gateway.relayState === "ready"
-      || gateway.relayState === "active"
-      || gateway.p2pState === "ready"
-      || gateway.p2pState === "active"
-      || gateway.lanState === "found"
-    ));
+    || gateway.relayState === "ready"
+    || gateway.relayState === "active"
+    || gateway.p2pState === "ready"
+    || gateway.p2pState === "active"
+    || gateway.lanState === "found";
   const sending = pendingTurn?.state === "sending";
   const hasComposerContent = Boolean(text.trim() || attachments.length);
   const canSend = Boolean(
