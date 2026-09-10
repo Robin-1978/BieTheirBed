@@ -113,6 +113,21 @@ async def test_resource_p2p_rejects_non_resource_gateway_paths(monkeypatch) -> N
         await server.close()
 
 
+@pytest.mark.asyncio
+async def test_p2p_keepalive_is_acknowledged_without_a_request() -> None:
+    class Channel:
+        def __init__(self) -> None:
+            self.messages: list[dict[str, object]] = []
+
+        def send(self, raw: str) -> None:
+            self.messages.append(json.loads(raw))
+
+    server = P2PServer(Starlette())
+    channel = Channel()
+    await server._receive(channel, {}, json.dumps({"type": "keepalive"}), "app")
+    assert channel.messages == [{"type": "keepalive_ack"}]
+
+
 def test_ice_servers_configuration(monkeypatch) -> None:
     from knoa_platform.p2p import build_ice_servers, serialize_ice_servers
 

@@ -67,6 +67,8 @@ const LAN_DISCOVERY_RETRY_DELAY_MS = 10_000;
 const LAN_DISCOVERY_CONNECT_TIMEOUT_MS = 900;
 const P2P_ICE_GATHERING_TIMEOUT_MS = 3_000;
 const P2P_CHANNEL_OPEN_TIMEOUT_MS = 8_000;
+const P2P_KEEPALIVE_INTERVAL_MS = 15_000;
+const RELAY_KEEPALIVE_INTERVAL_MS = 15_000;
 // Let a just-started P2P/Relay upgrade settle before falling back. A very
 // short wait makes concurrent callers race the same upgrade and create a
 // reconnect storm on mobile networks.
@@ -641,6 +643,11 @@ class WebRtcGatewayTransport implements GatewayTransport {
   private peer: RTCPeerConnection | null = null;
   private channel: ReturnType<RTCPeerConnection["createDataChannel"]> | null = null;
   private pending = new Map<string, P2PResponseState>();
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private explicitlyClosed = true;
+  private closeNotified = false;
+
+  constructor(private readonly onClosed?: (error: Error) => void) {}
 
   mode(): "p2p" {
     return "p2p";
@@ -658,19 +665,26 @@ class WebRtcGatewayTransport implements GatewayTransport {
     iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }> = ICE_SERVERS,
   ): Promise<void> {
     this.close();
+    this.explicitlyClosed = false;
+    this.closeNotified = false;
     const peer = new RTCPeerConnection({ iceServers });
     const channel = peer.createDataChannel("knoa-http-v1", { ordered: true });
     this.peer = peer;
     this.channel = channel;
     channel.onmessage = (event: { data: unknown }) => this.receive(String(event.data));
-    channel.onclose = () => this.fail(new Error("P2P 连接已关闭"));
-    channel.onerror = () => this.fail(new Error("P2P 连接错误"));
+    channel.onclose = () => this.notifyClosed(new Error("P2P 连接已关闭"));
+    channel.onerror = () => this.notifyClosed(new Error("P2P 连接错误"));
     const opened = new Promise<void>((resolve, reject) => {
-      channel.onopen = () => resolve();
+      channel.onopen = () => {
+        this.startKeepalive();
+        resolve();
+      };
       const failIfDisconnected = () => {
         if (["failed", "closed", "disconnected"].includes(peer.connectionState)
           || ["failed", "closed", "disconnected"].includes(peer.iceConnectionState)) {
-          reject(new Error("P2P ICE 连接失败"));
+          const error = new Error("P2P ICE 连接失败");
+          this.notifyClosed(error);
+          reject(error);
         }
       };
       peer.onconnectionstatechange = failIfDisconnected;
@@ -738,11 +752,34 @@ class WebRtcGatewayTransport implements GatewayTransport {
   }
 
   close(): void {
+    this.explicitlyClosed = true;
+    this.stopKeepalive();
     const peer = this.peer;
     this.peer = null;
     this.channel = null;
     this.fail(new Error("P2P 连接已关闭"));
     peer?.close();
+  }
+
+  private startKeepalive(): void {
+    this.stopKeepalive();
+    this.keepaliveTimer = setInterval(() => {
+      void this.send({ type: "keepalive" }).catch((error) => {
+        this.notifyClosed(error instanceof Error ? error : new Error("P2P 保活失败"));
+      });
+    }, P2P_KEEPALIVE_INTERVAL_MS);
+  }
+
+  private stopKeepalive(): void {
+    if (this.keepaliveTimer !== null) clearInterval(this.keepaliveTimer);
+    this.keepaliveTimer = null;
+  }
+
+  private notifyClosed(error: Error): void {
+    this.fail(error);
+    if (this.explicitlyClosed || this.closeNotified) return;
+    this.closeNotified = true;
+    this.onClosed?.(error);
   }
 
   private async send(message: Record<string, unknown>): Promise<void> {
@@ -808,6 +845,7 @@ class RelayTransport implements GatewayTransport {
   private receiveSequence = 0;
   private nextStreamId = 1;
   private pending = new Map<number, ResponseState>();
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly binding: RelayBinding,
@@ -959,6 +997,7 @@ class RelayTransport implements GatewayTransport {
     socket.addEventListener("message", this.onMessage);
     socket.addEventListener("error", this.onSocketFailure);
     socket.addEventListener("close", this.onSocketFailure);
+    this.startKeepalive();
   }
 
   private readonly onMessage = (event: MessageEvent) => {
@@ -1054,7 +1093,26 @@ class RelayTransport implements GatewayTransport {
     this.socket.send(JSON.stringify({ frame }));
   }
 
+  private startKeepalive(): void {
+    this.stopKeepalive();
+    this.keepaliveTimer = setInterval(() => {
+      try {
+        this.sendEncrypted(0, { type: "keepalive" });
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error("Relay 保活失败");
+        this.fail(normalized);
+        this.onFailure?.(normalized);
+      }
+    }, RELAY_KEEPALIVE_INTERVAL_MS);
+  }
+
+  private stopKeepalive(): void {
+    if (this.keepaliveTimer !== null) clearInterval(this.keepaliveTimer);
+    this.keepaliveTimer = null;
+  }
+
   private fail(error: Error): void {
+    this.stopKeepalive();
     const socket = this.socket;
     this.socket = null;
     this.encryptKey = null;
