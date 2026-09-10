@@ -115,12 +115,20 @@ async function restoreLanding(
     return "";
   }
   reportStage("session");
-  const preference = await loadNavigationPreference();
+  // These reads are independent.  Serializing them made the splash screen
+  // wait for a slow Hosted Hub request before it could even discover the
+  // locally cached Node binding.
+  const [preference, bindings, hosted] = await Promise.all([
+    loadNavigationPreference(),
+    listNodeBindings(),
+    connection.accountId
+      ? listHostedWorkspaces().catch(() => [] as HostedWorkspace[])
+      : Promise.resolve([] as HostedWorkspace[]),
+  ]);
   if (preference.landing === "account") {
     router.replace("/account");
     return "";
   }
-  const hosted = connection.accountId ? await listHostedWorkspaces() : [];
   const fallback: HostedWorkspace = {
     workspaceId: connection.workspaceId,
     displayName: preference.workspaceName || "Personal Workspace",
@@ -135,17 +143,15 @@ async function restoreLanding(
     await selectHostedWorkspace(workspace);
   }
   reportStage("nodes");
-  const bindings = await listNodeBindings();
   const targetNodeId = preference.nodeId && bindings.some((b) => b.nodeId === preference.nodeId)
     ? preference.nodeId
     : (bindings[0]?.nodeId || gateway.nodeId || "");
 
   if (targetNodeId) {
-    try {
-      await gateway.switchNode(targetNodeId);
-    } catch {
-      // ignore switch error, still proceed to tabs
-    }
+    // Do not keep the entire app behind the splash while Relay/P2P is
+    // negotiating.  The tabs show the live connection state and can recover
+    // in place if the first handshake is slow.
+    void gateway.switchNode(targetNodeId).catch(() => undefined);
     router.replace({
       pathname: "/(tabs)",
       params: {
