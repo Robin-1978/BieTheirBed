@@ -9,6 +9,7 @@ import { AsyncStateView } from "@/components/AsyncStateView";
 import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import {
   createNodeEnrollmentCode,
+  isHubUnauthorized,
   listHubNodes,
   loadWorkspaceResourceState,
   type HubNode,
@@ -59,7 +60,7 @@ export default function WorkspaceNodesScreen() {
       setDeployments(resources.workspaceDeployments);
       await mergeWorkspaceCache(params.workspaceId, { nodes: directory, resources });
     } catch (caught) {
-      setError(userFacingError(caught, t("nodes.loadFailed")));
+      setError(isHubUnauthorized(caught) ? t("nodes.sessionExpired") : userFacingError(caught, t("nodes.loadFailed")));
     } finally {
       setLoading(false);
       setRefreshing(false);

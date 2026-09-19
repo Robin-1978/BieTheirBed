@@ -18,6 +18,25 @@ export class HubRequestError extends Error {
   }
 }
 
+/** Hub REST failures carry their HTTP status and server error code so callers
+ * can tell "session expired, sign in again" apart from "request rejected". */
+export class HubApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HubApiError";
+  }
+}
+
+/** True when the stored Hub account session is no longer accepted. Callers
+ * should route the user back through sign-in instead of retrying. */
+export function isHubUnauthorized(error: unknown): boolean {
+  return error instanceof HubApiError && error.status === 401;
+}
+
 export type HubNode = {
   node_id: string;
   display_name: string;
@@ -371,7 +390,7 @@ export async function resolveAndroidRelease(
   );
   if (response.status === 404) return null;
   if (!response.ok) {
-    throw new Error(response.status === 401 ? "Hub 帐号认证失败" : "Hub App 更新检查失败");
+    throw await hubApiError(response);
   }
   const release = await response.json() as AndroidRelease;
   return {
@@ -685,8 +704,44 @@ async function request<T>(
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     signal: options.signal,
   });
-  if (!response.ok) throw new Error(response.status === 401 ? "Hub 帐号认证失败" : "Hub 请求失败");
+  if (!response.ok) throw hubApiError(response);
   return response.json() as Promise<T>;
+}
+
+async function hubApiError(response: Response): Promise<HubApiError> {
+  const status = response.status;
+  let code = `http_${status}`;
+  let detail = "";
+  try {
+    const payload = (await response.json()) as {
+      error?: unknown;
+      message?: unknown;
+      detail?: unknown;
+    };
+    if (typeof payload.error === "string" && payload.error) code = payload.error;
+    if (typeof payload.detail === "string" && payload.detail) detail = payload.detail;
+    else if (typeof payload.message === "string" && payload.message) detail = payload.message;
+  } catch {
+    // Fall through to status-based copy when the Hub did not return JSON.
+  }
+  if (status === 401) {
+    if (code === "login_rejected") return new HubApiError(status, code, "账号或密码不正确，请重试");
+    if (code === "password_reset_rejected") {
+      return new HubApiError(status, code, "重置凭证无效或已过期，请重新获取后再试");
+    }
+    return new HubApiError(status, code, "Hub 帐号认证已过期，请重新登录");
+  }
+  if (status === 429 || code === "rate_limited") {
+    return new HubApiError(status, code, "操作太频繁，请稍后再试");
+  }
+  if (status === 404) {
+    if (code === "account_not_found") return new HubApiError(status, code, "账号不存在，请检查登录名");
+    return new HubApiError(status, code, "请求的内容不存在，请刷新后重试");
+  }
+  if (status === 400 || code === "invalid_request") {
+    return new HubApiError(status, code, detail || "请求参数无效，请检查后重试");
+  }
+  return new HubApiError(status, code, detail || `Hub 请求失败（HTTP ${status}）`);
 }
 
 async function fetchHub(

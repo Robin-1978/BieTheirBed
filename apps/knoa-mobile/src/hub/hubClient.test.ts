@@ -19,13 +19,40 @@ vi.mock("@/security/deviceIdentity", () => ({
 
 import {
   HUB_REQUEST_TIMEOUT_MS,
+  HubApiError,
   createNodeEnrollmentCode,
+  isHubUnauthorized,
   issueConnectionTicket,
+  listHubNodes,
   loadHubConnection,
   registerHostedAccount,
   resetHostedPassword,
   resolveAndroidRelease,
 } from "./hubClient";
+
+function storeHubConnection() {
+  native.cache.set("knoa.hub.connection.v1", JSON.stringify({
+    url: "https://hosted.example/workspaces/ws_personal_1",
+    rootUrl: "https://hosted.example",
+    token: `khs_${"a".repeat(48)}`,
+    accountId: "account-1",
+    hubId: "hub-hosted",
+    workspaceId: "ws_personal_1",
+    identityIssuerId: "hub-hosted",
+    signingPublicKey: "signing-key",
+    deploymentMode: "hosted_single_node",
+  }));
+}
+
+function errorResponse(status: number, body?: unknown): Response {
+  return new Response(
+    body === undefined ? "gateway exploded" : JSON.stringify(body),
+    {
+      status,
+      headers: { "Content-Type": body === undefined ? "text/plain" : "application/json" },
+    },
+  );
+}
 
 beforeEach(() => {
   native.cache.clear();
@@ -157,6 +184,55 @@ describe("Hosted Hub account onboarding", () => {
     expect(account.connection.token).toBe(accessToken);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     await expect(loadHubConnection()).resolves.toMatchObject({ accountId: "account-2" });
+  });
+});
+
+describe("Hub API error mapping", () => {
+  it("tells wrong credentials apart from an expired session", async () => {
+    storeHubConnection();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      errorResponse(401, { error: "login_rejected" }),
+    );
+    const rejected = await listHubNodes().catch((error: unknown) => error);
+    expect(rejected).toBeInstanceOf(HubApiError);
+    expect(rejected).toMatchObject({ status: 401, code: "login_rejected" });
+    expect(String((rejected as Error).message)).toContain("账号或密码不正确");
+    expect(isHubUnauthorized(rejected)).toBe(true);
+  });
+
+  it("points an expired account session at sign-in", async () => {
+    storeHubConnection();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      errorResponse(401, { error: "unauthorized" }),
+    );
+    const rejected = await listHubNodes().catch((error: unknown) => error);
+    expect(rejected).toMatchObject({ status: 401 });
+    expect(String((rejected as Error).message)).toContain("重新登录");
+    expect(isHubUnauthorized(rejected)).toBe(true);
+  });
+
+  it("explains consumed password-reset grants", async () => {
+    storeHubConnection();
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      errorResponse(401, { error: "password_reset_rejected" }),
+    );
+    const rejected = await listHubNodes().catch((error: unknown) => error);
+    expect(String((rejected as Error).message)).toContain("重置凭证");
+  });
+
+  it("surfaces rate limits and server details instead of a generic failure", async () => {
+    storeHubConnection();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(errorResponse(429, { error: "rate_limited" }))
+      .mockResolvedValueOnce(errorResponse(400, { error: "invalid_request", detail: "password too short" }))
+      .mockResolvedValueOnce(errorResponse(500));
+    expect(String(await listHubNodes().catch((error: unknown) => error))).toContain("频繁");
+    expect(String(await listHubNodes().catch((error: unknown) => error))).toContain("password too short");
+    const fallback = await listHubNodes().catch((error: unknown) => error);
+    expect(fallback).toMatchObject({ status: 500, code: "http_500" });
+    expect(String(fallback)).toContain("HTTP 500");
+    expect(isHubUnauthorized(fallback)).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 
