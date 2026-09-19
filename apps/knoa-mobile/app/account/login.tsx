@@ -6,6 +6,7 @@ import { ActivityIndicator, StyleSheet, Text, TextInput, View } from "react-nati
 import { AppPressable } from "@/components/AppPressable";
 import { FormScreen } from "@/components/FormScreen";
 import {
+  HubApiError,
   loadHubConnection,
   loginHostedAccount,
   registerHostedAccount,
@@ -56,7 +57,11 @@ export default function AccountLoginScreen() {
       setPassword("");
       router.replace("/account");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : t("login.failed"));
+      if (error instanceof HubApiError && error.code === "invalid_request" && mode === "recover") {
+        setMessage(t("login.passwordTooShort"));
+      } else {
+        setMessage(error instanceof Error ? error.message : t("login.failed"));
+      }
     } finally {
       setWorking(false);
     }

@@ -8,6 +8,7 @@ import { AsyncStateView } from "@/components/AsyncStateView";
 import {
   listHostedWorkspaces,
   createHostedWorkspace,
+  isHubUnauthorized,
   loadHostedAccount,
   loadHubConnection,
   logoutHostedAccount,
@@ -67,6 +68,16 @@ export default function AccountHomeScreen() {
         workspacePath: "",
       }]);
     } catch (caught) {
+      if (isHubUnauthorized(caught)) {
+        // The stored account session is expired or revoked. Drop it locally
+        // and send the user through sign-in instead of showing a dead page.
+        await gateway.disconnectNode().catch(() => undefined);
+        await logoutHostedAccount().catch(() => undefined);
+        clearAppCache("all");
+        await clearTaskReminders();
+        router.replace("/account/login");
+        return;
+      }
       setError(caught instanceof Error ? caught.message : t("account.loadFailed"));
     } finally {
       setLoading(false);
