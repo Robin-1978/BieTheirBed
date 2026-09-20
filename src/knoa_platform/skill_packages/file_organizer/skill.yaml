@@ -18,7 +18,7 @@ required_tools:
   - read_file
   - write_file
   - run_command
-  - attach
+  - attach_file
 required_capabilities:
   - host_read
   - host_write

@@ -28,12 +28,12 @@ _MODEL_SCHEMA_KEYS = frozenset(
 
 CORE_TOOL_NAMES = frozenset(
     {
-        "attach", "clipboard", "create_task", "currency", "edit_file",
+        "attach_file", "clipboard", "create_task", "currency_convert", "edit_file",
         "glob_files", "grep_search", "hotkey", "memory", "mcp_connect",
         "mcp_disable", "mcp_inspect", "mouse", "notify", "press_key",
-        "read_artifact", "read_file", "run_command", "screen", "screenshot",
-        "sleep", "spawn_subagent", "subagent", "task", "tool_help",
-        "type_text", "ui", "weather", "web_fetch", "web_search", "windows",
+        "read_artifact", "read_file", "run_command", "screen_look", "screenshot",
+        "sleep", "spawn_subagent", "await_subagent", "task_control", "tool_help",
+        "type_text", "ui_control", "weather", "web_fetch", "web_search", "window_control",
         "write_file",
     }
 )
@@ -387,7 +387,7 @@ class ToolInventory:
         properties = schema.get("properties")
         if not isinstance(properties, dict):
             return
-        if name == "task":
+        if name == "task_control":
             core = {
                 key: properties[key]
                 for key in ("action", "task_id", "execution_id")

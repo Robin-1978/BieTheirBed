@@ -1019,23 +1019,15 @@ async def test_reference_server_runs_over_real_stdio_mcp(
         "jira://assigned-to-me/events",
     ]
     assert [tool.name for tool in tools] == [
-        "jira.query",
+        "jira.search_issues",
         "jira.get_issue",
         "jira.download_attachment",
-        "jira.materialize_issue",
-        "jira.get_comments",
+        "jira.fetch_issue_evidence",
         "jira.find_assignable_users",
-        "jira.list_attachments",
-        "jira.get_attachment_excerpt",
         "jira.add_comment",
         "jira.assign_issue",
         "jira.list_transitions",
         "jira.transition_issue",
-        "jira.correlate_by_sn",
-        "jira.download_oss_evidence",
-        "jira.list_oss_objects",
-        "jira.list_tempo_records",
-        "jira.download_tempo_records",
         "jira.analyze_local_logs",
     ]
 
@@ -1097,37 +1089,8 @@ def test_oss_and_tempo_link_extraction() -> None:
 
 
 @pytest.mark.asyncio
-async def test_jira_client_correlate_by_sn_and_oss_download(tmp_path: Path) -> None:
+async def test_jira_client_oss_download(tmp_path: Path) -> None:
     from examples.jira_mcp_server.oss_downloader import download_oss_file
-
-    settings = _settings(tmp_path)
-    store = JiraStateStore(settings.state_path)
-    client = JiraClient(settings, store)
-
-    async def fake_request(method: str, path: str, **kwargs: Any) -> Any:
-        if path.endswith("/search"):
-            assert kwargs.get("params", {}).get("jql") == 'text ~ "TBPR00123" ORDER BY created DESC'
-            return {
-                "issues": [
-                    {
-                        "key": "SELLSERVIC-101",
-                        "fields": {
-                            "summary": "机器避障异常",
-                            "status": {"name": "Closed"},
-                            "priority": {"name": "High"},
-                            "resolution": {"name": "Fixed"},
-                            "created": "2026-09-01T10:00:00.000+0800",
-                        },
-                    }
-                ]
-            }
-        raise AssertionError(f"Unexpected request path: {path}")
-
-    client._request = fake_request  # type: ignore[method-assign]
-    correlated = await client.correlate_by_sn("TBPR00123")
-    assert len(correlated) == 1
-    assert correlated[0]["key"] == "SELLSERVIC-101"
-    assert correlated[0]["status"] == "Closed"
 
     dummy_payload = b"LOG DATA ARCHIVE"
     transport = httpx.MockTransport(
@@ -1217,10 +1180,10 @@ async def test_enhanced_jira_tools_end_to_end(tmp_path: Path) -> None:
         assert data["domain_signals"]["elevator_related"] is True
         assert data["domain_signals"]["motion_planning_related"] is True
 
-        # 2. Call jira.correlate_by_sn
+        # 2. Same SN lookup via plain JQL (find_by_sn was JQL sugar)
         sn_res = await app._call_tool(
             context,
-            types.CallToolRequestParams(name="jira.correlate_by_sn", arguments={"serial_number": "TBPR123456"}),
+            types.CallToolRequestParams(name="jira.search_issues", arguments={"jql": 'text ~ "TBPR123456" ORDER BY created DESC'}),
         )
         assert len(sn_res.structured_content["issues"]) == 1
         assert sn_res.structured_content["issues"][0]["key"] == "PROJECT-100"

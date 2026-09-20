@@ -188,7 +188,7 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
     remote = set(composition.registry.list_for(REMOTE_SCOPED_CAPABILITIES))
 
     assert {
-        "attach",
+        "attach_file",
         "read_file",
         "write_file",
         "screenshot",
@@ -198,10 +198,10 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
         "mcp_disable",
         "tool_help",
     } <= local
-    assert {"web_search", "web_fetch", "weather", "currency"} <= remote
+    assert {"web_search", "web_fetch", "weather", "currency_convert"} <= remote
     assert (
         not {
-            "attach",
+            "attach_file",
             "read_file",
             "write_file",
             "run_command",
@@ -210,7 +210,7 @@ def test_core_composition_builds_forward_only_registry_and_profiles(
         }
         & remote
     )
-    assert {"screen", "ui"} <= local
+    assert {"screen_look", "ui_control"} <= local
     assert not {"schedule", "inspect_image"} & local
     assert "create_task" in local
     assert "schedule_task" not in local
@@ -399,7 +399,7 @@ async def test_agent_task_lifecycle_keeps_schedule_and_task_in_sync(
         session_handle="chat-a",
     )
     create = composition.registry.get("create_task")
-    task = composition.registry.get("task")
+    task = composition.registry.get("task_control")
     assert create is not None
     assert task is not None
 
@@ -566,7 +566,7 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
     assert "screenshot" in local_tools
     assert "screenshot" not in remote_tools
     assert remote_tools == {
-        "currency",
+        "currency_convert",
         "read_artifact",
         "weather",
         "web_fetch",
@@ -640,7 +640,7 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(
         assert "screenshot" in local_tools
         assert "screenshot" not in remote_tools
         assert remote_tools == {
-            "currency",
+            "currency_convert",
             "read_artifact",
             "weather",
             "web_fetch",

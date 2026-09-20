@@ -27,7 +27,7 @@ tools:
     effect: local_write
     capabilities: [mcp, host_write]
     risk: medium
-  browser.download:
+  browser.download_file:
     effect: local_write
     capabilities: [mcp, network, host_write]
     risk: medium
@@ -43,7 +43,7 @@ tools:
     effect: external_side_effect
     capabilities: [mcp, network]
     risk: high
-  browser.submit:
+  browser.submit_form:
     effect: external_side_effect
     capabilities: [mcp, network]
     risk: high

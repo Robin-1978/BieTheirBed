@@ -23,7 +23,7 @@ def _import_pywinctl():
 
 
 class WindowTool(ToolBase):
-    name = "windows"
+    name = "window_control"
     description = "List, focus, move, resize, or close desktop windows."
     effect = ToolEffect.DESKTOP_CONTROL
     capabilities = frozenset(

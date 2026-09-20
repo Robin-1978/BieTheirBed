@@ -117,3 +117,19 @@ class EditFileTool(ToolBase):
                 "additionalProperties": False,
             },
         }
+
+    def skim_definition(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_string": {"type": "string"},
+                    "new_string": {"type": "string"},
+                    "replace_all": {"type": "boolean"},
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+        }

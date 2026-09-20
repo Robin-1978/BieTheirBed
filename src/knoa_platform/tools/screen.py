@@ -17,7 +17,7 @@ from knoa_platform.vision.grid import crop_region, overlay_grid
 
 
 class ScreenTool(ToolBase):
-    name = "screen"
+    name = "screen_look"
     description = (
         "Capture the desktop for visual grounding, verify GUI actions, or answer "
         "targeted questions about what is visible."

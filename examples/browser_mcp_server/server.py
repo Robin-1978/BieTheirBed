@@ -73,7 +73,7 @@ class BrowserMCPApplication:
                 name="browser.session_open",
                 description=(
                     "Open an isolated temporary browser session, or an explicitly "
-                    "named persistent profile. 打开隔离的浏览器会话。"
+                    "named persistent profile."
                 ),
                 input_schema=_schema({"profile_name": {"type": "string", "maxLength": 64}}, []),
                 annotations=local_write,
@@ -82,8 +82,7 @@ class BrowserMCPApplication:
                 name="browser.navigate",
                 description=(
                     "Navigate to one explicit safe http/https URL. If no session "
-                    "is supplied, open an isolated temporary session automatically. "
-                    "打开浏览器并访问安全的网页网址。"
+                    "is supplied, open an isolated temporary session automatically."
                 ),
                 input_schema=_schema(
                     {**session, "url": {"type": "string", "maxLength": 4096}},
@@ -95,23 +94,22 @@ class BrowserMCPApplication:
                 name="browser.snapshot",
                 description=(
                     "Read a bounded accessibility snapshot with stable short-lived "
-                    "element refs. 读取网页结构、按钮、链接和输入框。"
+                    "element refs."
                 ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=read_only,
             ),
             types.Tool(
                 name="browser.screenshot",
                 description=(
-                    "Capture the current viewport as a managed-file descriptor. "
-                    "截取当前网页画面。"
+                    "Capture the current viewport as a managed-file descriptor."
                 ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=local_write,
             ),
             types.Tool(
-                name="browser.download",
+                name="browser.download_file",
                 description=(
                     "Download one explicitly selected safe URL into the Node-managed "
-                    "download root. 下载网页文件。"
+                    "download root."
                 ),
                 input_schema=_schema({
                     **session, "url": {"type": "string", "maxLength": 4096},
@@ -121,15 +119,14 @@ class BrowserMCPApplication:
             types.Tool(
                 name="browser.session_close",
                 description=(
-                    "Close a session and remove its temporary profile. "
-                    "关闭浏览器会话并清理临时数据。"
+                    "Close a session and remove its temporary profile."
                 ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=local_write,
             ),
             types.Tool(
                 name="browser.click",
                 description=(
-                    "Activate one element ref from the latest snapshot. 点击网页元素。"
+                    "Activate one element ref from the latest snapshot."
                 ),
                 input_schema=_schema(element, ["browser_session_id", "element_ref"]), annotations=external_write,
             ),
@@ -137,15 +134,15 @@ class BrowserMCPApplication:
                 name="browser.fill",
                 description=(
                     "Replace a field value using an element ref. This may trigger "
-                    "page network activity. 填写网页表单字段。"
+                    "page network activity."
                 ),
                 input_schema=_schema({**element, "text": {"type": "string", "maxLength": 20000}}, ["browser_session_id", "element_ref", "text"]),
                 annotations=external_write,
             ),
             types.Tool(
-                name="browser.submit",
+                name="browser.submit_form",
                 description=(
-                    "Explicitly submit the form owning an element ref. 提交网页表单。"
+                    "Explicitly submit the form owning an element ref."
                 ),
                 input_schema=_schema(element, ["browser_session_id", "element_ref"]), annotations=external_write,
             ),
@@ -153,7 +150,7 @@ class BrowserMCPApplication:
                 name="browser.wait_for",
                 description=(
                     "Wait for an explicit URL substring or visible accessibility "
-                    "text. 等待网页跳转或文字出现。"
+                    "text."
                 ),
                 input_schema=_schema({
                     **session,
@@ -179,7 +176,7 @@ class BrowserMCPApplication:
                 result = await self.manager.snapshot(str(args["browser_session_id"]))
             elif name == "browser.screenshot":
                 result = await self.manager.screenshot(str(args["browser_session_id"]))
-            elif name == "browser.download":
+            elif name == "browser.download_file":
                 result = await self.manager.download(str(args["browser_session_id"]), str(args["url"]), str(args.get("filename") or ""))
             elif name == "browser.session_close":
                 result = await self.manager.close(str(args["browser_session_id"]))
@@ -187,7 +184,7 @@ class BrowserMCPApplication:
                 result = await self.manager.click(str(args["browser_session_id"]), str(args["element_ref"]))
             elif name == "browser.fill":
                 result = await self.manager.fill(str(args["browser_session_id"]), str(args["element_ref"]), str(args["text"]))
-            elif name == "browser.submit":
+            elif name == "browser.submit_form":
                 result = await self.manager.submit(str(args["browser_session_id"]), str(args["element_ref"]))
             elif name == "browser.wait_for":
                 result = await self.manager.wait_for(

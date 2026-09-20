@@ -507,31 +507,37 @@ socket and PID files use the operating system runtime directory.
 | `run_command` | Execute shell commands with timeout, working directory, and environment |
 | `read_file` | Read local files (512 KB / 1000 lines max) |
 | `write_file` | Create or overwrite local UTF-8 files |
+| `edit_file` | Exact string replacement in a local text file; fails safely on mismatch |
+| `glob_files` | Find files matching a glob pattern relative to a directory |
+| `grep_search` | Search regex/text patterns across files with paths and line numbers |
 | `read_artifact` | Read text from a session-attached artifact by ID |
 | `web_search` | Web search (DDGS + Bing fallback; Chinese query routing) |
 | `web_fetch` | Fetch URL as text; blocks non-global IPs |
 | `clipboard` | Read or write the system clipboard |
 | `memory` | Store, retrieve, search, and delete user preferences (categories + importance) |
+| `config_draft` | Inspect config, draft validated patches, publish only with confirmation |
+| `sleep` | Pause 1–60s for async waits/API backoff with progress heartbeats |
 | `weather` | Current weather via wttr.in |
-| `currency` | FX rates, conversion, and currency list via frankfurter.dev |
-| `windows` | List, focus, move, resize, minimize, maximize, restore, or close windows |
+| `currency_convert` | FX rates, conversion, and currency list via frankfurter.dev |
+| `window_control` | List, focus, move, resize, minimize, maximize, restore, or close windows |
 | `notify` | Desktop notifications; `critical` triggers an alert |
 | `press_key` | Press a single key via pyautogui |
 | `type_text` | Type text via clipboard paste (Unicode-safe) |
 | `hotkey` | Key combinations via pyautogui |
 | `mouse` | Position, move, click, scroll, drag, press, and release |
 | `screenshot` | Capture a full-desktop JPEG for delivery to the current conversation |
-| `ui` | Semantic GUI via accessibility tree: snapshot, click, fill, select, focus |
-| `screen` | Grid-overlay screenshot for visual grounding: look, verify, understand |
+| `ui_control` | Semantic GUI via accessibility tree: snapshot, click, fill, select, focus |
+| `screen_look` | Grid-overlay screenshot for visual grounding: look, verify, understand |
 | `image_inspect` | Dedicated vision model observation of image artifacts |
-| `attach` | Deliver an existing local file as an artifact (read-only borrow) |
+| `attach_file` | Deliver an existing local file as an artifact (read-only borrow) |
 | `tool_help` | Search tools or return full schema and examples |
 | `spawn_subagent` | Create a governed child Task with a delegate Agent |
-| `subagent` | Await, check status, or cancel delegated child Tasks |
+| `await_subagent` | Await, check status, or cancel delegated child Tasks |
 | `create_task` | Create a Task with launch policy: immediate, one_time, interval, cron, event |
-| `task` | List, get, update, delete, pause, resume, archive, execute, or rerun Tasks |
+| `task_control` | List, get, update, delete, pause, resume, archive, execute, or rerun Tasks |
 | `mcp_inspect` | Probe an MCP server (tools/resources/prompts) without enabling |
 | `mcp_connect` | Confirmation-gated enable of a stdio or streamable HTTP MCP server |
+| `mcp_deploy` | Confirmation-gated install/activation of a local MCP package |
 | `mcp_disable` | Disable a running MCP extension |
 
 ## Development
@@ -561,7 +567,7 @@ src/
 │   ├── tasks/                   # Durable Tasks, executions, checkpoints
 │   ├── approvals/               # Approval workflow and reviewer agent
 │   ├── capabilities/            # Capability Gateway, grants, policy
-│   ├── tools/                   # 29 built-in tools (incl. ui, screen)
+│   ├── tools/                   # 35 built-in tools (incl. ui, screen)
 │   ├── extensions/              # MCP client lifecycle, skill packages
 │   ├── channels/                # Feishu, DingTalk adapters (mixin-based)
 │   ├── context/                 # Memory, prompt assembly, token estimation

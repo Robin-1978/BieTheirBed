@@ -24,7 +24,7 @@ optional_env:
   - JIRA_WRITE_ENABLED
 timeout_seconds: 300
 tools:
-  jira.query:
+  jira.search_issues:
     effect: read_only
     capabilities: [mcp, network]
     risk: low
@@ -32,19 +32,7 @@ tools:
     effect: read_only
     capabilities: [mcp, network]
     risk: low
-  jira.get_comments:
-    effect: read_only
-    capabilities: [mcp, network]
-    risk: low
   jira.find_assignable_users:
-    effect: read_only
-    capabilities: [mcp, network]
-    risk: low
-  jira.list_attachments:
-    effect: read_only
-    capabilities: [mcp, network]
-    risk: low
-  jira.get_attachment_excerpt:
     effect: read_only
     capabilities: [mcp, network]
     risk: low
@@ -52,7 +40,7 @@ tools:
     effect: local_write
     capabilities: [mcp, network, host_write]
     risk: medium
-  jira.materialize_issue:
+  jira.fetch_issue_evidence:
     effect: local_write
     capabilities: [mcp, network, host_write]
     risk: medium
@@ -72,26 +60,6 @@ tools:
     effect: external_side_effect
     capabilities: [mcp, network]
     risk: high
-  jira.correlate_by_sn:
-    effect: read_only
-    capabilities: [mcp, network]
-    risk: low
-  jira.download_oss_evidence:
-    effect: local_write
-    capabilities: [mcp, network, host_write]
-    risk: medium
-  jira.list_oss_objects:
-    effect: read_only
-    capabilities: [mcp, network]
-    risk: low
-  jira.list_tempo_records:
-    effect: read_only
-    capabilities: [mcp, network]
-    risk: low
-  jira.download_tempo_records:
-    effect: local_write
-    capabilities: [mcp, network, host_write]
-    risk: medium
   jira.analyze_local_logs:
     effect: local_write
     capabilities: [mcp, host_write]

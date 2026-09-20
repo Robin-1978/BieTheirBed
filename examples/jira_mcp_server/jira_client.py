@@ -48,12 +48,8 @@ try:
         clean_custom_fields,
         extract_domain_signals,
     )
-    from .oss_downloader import download_oss_file, extract_oss_links, list_oss_objects
-    from .tempo_downloader import (
-        download_tempo_file,
-        extract_tempo_share_links,
-        list_tempo_records,
-    )
+    from .oss_downloader import extract_oss_links
+    from .tempo_downloader import extract_tempo_share_links
     from .log_analyzer import analyze_directory_logs
 except ImportError:
     from field_mapper import (  # type: ignore[no-redef]
@@ -61,15 +57,9 @@ except ImportError:
         clean_custom_fields,
         extract_domain_signals,
     )
-    from oss_downloader import (  # type: ignore[no-redef]
-        download_oss_file,
-        extract_oss_links,
-        list_oss_objects,
-    )
+    from oss_downloader import extract_oss_links  # type: ignore[no-redef]
     from tempo_downloader import (  # type: ignore[no-redef]
-        download_tempo_file,
         extract_tempo_share_links,
-        list_tempo_records,
     )
     from log_analyzer import analyze_directory_logs  # type: ignore[no-redef]
 
@@ -774,102 +764,6 @@ class JiraClient:
             "changelog": issue.get("changelog") if changelog else None,
         }
 
-    async def correlate_by_sn(
-        self, serial_number: str, *, limit: int = 20
-    ) -> tuple[dict[str, Any], ...]:
-        sn = serial_number.strip()
-        if not sn:
-            raise ValueError("Serial number must not be empty")
-        safe_sn = re.sub(r'["\\]', "", sn)
-        bounded_limit = max(1, min(limit, 50))
-        jql = f'text ~ "{safe_sn}" ORDER BY created DESC'
-        payload = await self._request(
-            "GET",
-            f"{self.api_root}/search",
-            params={
-                "jql": jql,
-                "startAt": 0,
-                "maxResults": bounded_limit,
-                "fields": "summary,status,priority,resolution,created",
-            },
-        )
-        issues = payload.get("issues", []) if isinstance(payload, dict) else []
-        records = []
-        for item in issues:
-            if not isinstance(item, dict):
-                continue
-            item_fields = item.get("fields", {})
-            records.append(
-                {
-                    "key": str(item.get("key", "")),
-                    "summary": str(item_fields.get("summary", ""))[:2000],
-                    "status": _named(item_fields.get("status")),
-                    "priority": _named(item_fields.get("priority")),
-                    "resolution": _named(item_fields.get("resolution")),
-                    "created": str(item_fields.get("created", "")),
-                }
-            )
-        return tuple(records)
-
-    async def list_oss_objects(
-        self, prefix: str = "", *, limit: int = 100
-    ) -> list[dict[str, Any]]:
-        return await list_oss_objects(prefix, limit=limit)
-
-    async def download_oss_evidence(
-        self, issue_key: str, oss_url: str
-    ) -> dict[str, Any]:
-        key = validate_issue_key(issue_key)
-        destination_dir = self.settings.attachment_root / key / "oss"
-        self._private_directory(destination_dir)
-        downloaded = await download_oss_file(
-            oss_url,
-            destination_dir,
-            max_bytes=max(self.settings.max_attachment_bytes * 50, 500 * 1024 * 1024),
-        )
-        return {
-            "issue_key": key,
-            **downloaded,
-        }
-
-    async def list_tempo_records(
-        self,
-        share_id: str,
-        sn: str,
-        *,
-        status: str | None = None,
-        file_type: str | None = None,
-        filename: str | None = None,
-        limit: int = 100,
-    ) -> dict[str, Any]:
-        return await list_tempo_records(
-            share_id,
-            sn,
-            status=status,
-            file_type=file_type,
-            filename=filename,
-            limit=limit,
-        )
-
-    async def download_tempo_file(
-        self,
-        issue_key: str,
-        download_url: str,
-        filename: str,
-    ) -> dict[str, Any]:
-        key = validate_issue_key(issue_key)
-        destination_dir = self.settings.attachment_root / key / "tempo"
-        self._private_directory(destination_dir)
-        downloaded = await download_tempo_file(
-            download_url,
-            filename,
-            destination_dir,
-            max_bytes=max(self.settings.max_attachment_bytes * 50, 500 * 1024 * 1024),
-        )
-        return {
-            "issue_key": key,
-            **downloaded,
-        }
 
     async def analyze_local_logs(
         self,

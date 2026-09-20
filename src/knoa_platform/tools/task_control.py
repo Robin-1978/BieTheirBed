@@ -24,7 +24,7 @@ from knoa_platform.tools.task_launch import (
 
 
 class TaskControlTool(ToolBase):
-    name = "task"
+    name = "task_control"
     description = (
         "List, inspect, update, delete, pause, resume, archive, restore, or execute "
         "stable Tasks; get TaskExecution results; or control, rerun, and delete TaskExecutions."
@@ -436,5 +436,45 @@ class TaskControlTool(ToolBase):
                 },
                 "required": ["action"],
                 "additionalProperties": False,
+            },
+        }
+
+    def skim_definition(self) -> dict[str, Any]:
+        # Skim keeps the decision surface (full action enum) plus the
+        # high-frequency selectors. Low-frequency update/lock fields
+        # (launch, expected_revision) and the list flag stay full-only
+        # and remain discoverable via tool_help.
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "list",
+                            "get",
+                            "get_execution",
+                            "update",
+                            "pause",
+                            "resume",
+                            "archive",
+                            "restore",
+                            "delete",
+                            "execute",
+                            "cancel_execution",
+                            "pause_execution",
+                            "resume_execution",
+                            "rerun",
+                            "delete_execution",
+                        ],
+                    },
+                    "task_id": {"type": "string"},
+                    "execution_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "goal": {"type": "string"},
+                },
+                "required": ["action"],
             },
         }

@@ -72,7 +72,7 @@ async def test_ui_tool_forwards_backend_to_desktop_companion(
     result = await UiTool(ui_backend="uia").execute_scoped(None, action="snapshot")
 
     assert result == {"success": True}
-    assert calls == [("ui", {"action": "snapshot", "_ui_backend": "uia"})]
+    assert calls == [("ui_control", {"action": "snapshot", "_ui_backend": "uia"})]
 
 
 @pytest.mark.asyncio

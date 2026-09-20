@@ -38,7 +38,7 @@ def _merge(base: Any, patch: Any) -> Any:
 
 
 class ConfigurationTool(ToolBase):
-    name = "configuration"
+    name = "config_draft"
     description = (
         "Inspect Knoa configuration, create a validated draft, or publish a "
         "previously reviewed draft. Publishing always requires explicit user confirmation."
@@ -97,6 +97,33 @@ class ConfigurationTool(ToolBase):
                     "expected_version": {"type": "integer", "minimum": 0},
                     "revision_id": {"type": "string", "minLength": 1, "maxLength": 128},
                     "summary": {"type": "string", "maxLength": 512},
+                },
+                "required": ["action"],
+            },
+        }
+
+    def skim_definition(self) -> dict[str, Any]:
+        # Skim keeps the action enum plus the draft workflow fields.
+        # Optimistic-lock revisions stay full-only (tool_help).
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "describe",
+                            "inspect",
+                            "propose",
+                            "publish",
+                            "rollback",
+                        ],
+                    },
+                    "changes": {"type": "object"},
+                    "draft_id": {"type": "string"},
+                    "summary": {"type": "string"},
                 },
                 "required": ["action"],
             },

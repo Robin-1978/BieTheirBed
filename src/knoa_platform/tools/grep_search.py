@@ -174,3 +174,20 @@ class GrepSearchTool(ToolBase):
                 "additionalProperties": False,
             },
         }
+
+    def skim_definition(self) -> dict[str, Any]:
+        # High-frequency path/glob selectors stay; case and paging caps
+        # are full-only (tool_help).
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "path": {"type": "string"},
+                    "glob": {"type": "string"},
+                },
+                "required": ["pattern"],
+            },
+        }

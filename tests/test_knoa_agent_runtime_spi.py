@@ -1251,7 +1251,7 @@ def test_runtime_bound_tool_result_preserves_read_artifact_metadata_and_extracts
     }
     step_task = ToolStepResult(
         call_id="call-task-8",
-        tool_name="task",
+        tool_name="task_control",
         status="completed",
         code="ok",
         output=task_exec_output,

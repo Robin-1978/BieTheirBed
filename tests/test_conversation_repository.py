@@ -201,7 +201,7 @@ def test_terminal_checkpoint_expires_racing_approval_and_rejects_late_resolution
         scope.principal_id,
         turn.turn_id,
         step_id="step-a",
-        call=ProposedToolCall(call_id="call-a", name="attach", arguments={}),
+        call=ProposedToolCall(call_id="call-a", name="attach_file", arguments={}),
         reason="external_side_effect:high",
     )
     repository.checkpoint(

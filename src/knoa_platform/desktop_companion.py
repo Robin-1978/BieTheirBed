@@ -30,8 +30,8 @@ _ALLOWED_TOOLS = frozenset(
         "press_key",
         "screenshot",
         "type_text",
-        "ui",
-        "windows",
+        "ui_control",
+        "window_control",
     }
 )
 
@@ -197,7 +197,7 @@ def _capture_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
 async def _execute_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "screenshot":
         return await asyncio.to_thread(_capture_screenshot, arguments)
-    if tool_name == "ui":
+    if tool_name == "ui_control":
         from knoa_platform.tools.ui import UiTool
 
         ui_arguments = dict(arguments)
@@ -222,7 +222,7 @@ async def _execute_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, 
         "notify": NotificationTool,
         "press_key": PressKeyTool,
         "type_text": TypeTextTool,
-        "windows": WindowTool,
+        "window_control": WindowTool,
     }
     tool_type = tool_types.get(tool_name)
     if tool_type is None:

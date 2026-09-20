@@ -39,10 +39,10 @@ def test_ui_click_requires_target() -> None:
 
 def test_describe_gui_action_for_ui_fill() -> None:
     description = KnoaAgentRuntime._describe_gui_action(
-        "ui",
+        "ui_control",
         {"action": "fill", "name": "Search", "value": "knoa"},
     )
-    assert "ui fill" in description
+    assert "ui_control fill" in description
     assert "Search" in description
     assert "characters=4" in description
     assert "knoa" not in description
