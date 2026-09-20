@@ -29,6 +29,7 @@ from knoa_platform.artifacts import artifact_refs_from_tool_output
 from knoa_platform.interactions import ScopedInteractionPort
 from knoa_platform.tasks.approval import DurableApprovalService
 from knoa_platform.tasks.event_hub import TaskEventHub
+from knoa_platform.tasks.input_bound import bound_turn_input
 from knoa_platform.tasks.models import (
     TERMINAL_TASK_STATES,
     TaskRecord,
@@ -60,6 +61,7 @@ class TaskExecutor:
         lease_seconds: float = 60.0,
         max_concurrency: int = 4,
         interactions: ScopedInteractionPort | None = None,
+        artifacts: object | None = None,
     ) -> None:
         if not 1 <= max_concurrency <= 32:
             raise ValueError("Task concurrency must be between 1 and 32")
@@ -73,6 +75,10 @@ class TaskExecutor:
         self._lease_seconds = lease_seconds
         self._max_concurrency = max_concurrency
         self._interactions = interactions
+        # Optional ArtifactStore used to spill overlong turn inputs (e.g.
+        # trigger snapshots) so small local-model windows are not exhausted
+        # before the first LLM call. The stored goal keeps the full text.
+        self._artifacts = artifacts
         self._wake = asyncio.Event()
         self._worker: asyncio.Task[None] | None = None
         self._executions: set[asyncio.Task[None]] = set()
@@ -357,7 +363,12 @@ class TaskExecutor:
                     turn_id=task.task_id,
                     operation_id=f"{task.task_id}:attempt:{task.attempt_count}",
                     client_request_id=task.client_request_id,
-                    input=task.goal,
+                    input=bound_turn_input(
+                        task.goal,
+                        artifacts=self._artifacts,
+                        session_id=task.session_handle,
+                        label=f"task-goal-{task.task_id[:8]}",
+                    ),
                     attachments=task.attachments,
                     tools_enabled=task.tools_enabled,
                     cancellation=cancellation,
