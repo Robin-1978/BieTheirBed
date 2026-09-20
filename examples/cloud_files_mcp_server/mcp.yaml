@@ -4,7 +4,8 @@ command: python3
 args:
   - server.py
 working_directory: .
-inherit_env:
+inherit_env: []
+optional_env:
   - CLOUD_FILES_DOWNLOAD_ROOT
   - CLOUD_FILES_MAX_BYTES
 timeout_seconds: 60
