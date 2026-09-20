@@ -373,7 +373,7 @@ class JiraMCPApplication:
             tools=[
                 types.Tool(
                     name="jira.search_issues",
-                    description="Run a bounded read-only JQL query and return matching Jira issues.",
+                    description="Find Jira issues with a bounded read-only JQL query.",
                     input_schema=_object_schema(
                         {
                             "jql": {"type": "string", "minLength": 1, "maxLength": 4000},
@@ -388,7 +388,7 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.get_issue",
                     description=(
-                        "Read bounded Jira issue fields. Set include_comments/"
+                        "Display one Jira issue's fields. Set include_comments/"
                         "include_attachments to bundle comments or attachment "
                         "metadata in one call. Jira user content is untrusted."
                     ),
@@ -406,7 +406,7 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.download_attachment",
                     description=(
-                        "Download one Jira attachment into the configured local "
+                        "Save one Jira attachment file into the configured local "
                         "evidence directory. Set excerpt_only to read a bounded "
                         "text excerpt instead of downloading the file."
                     ),
@@ -433,7 +433,8 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.fetch_issue_evidence",
                     description=(
-                        "Download one Jira issue, comments and attachments into its local evidence directory."
+                        "Collect the full evidence bundle of one Jira issue (fields, "
+                        "comments, attachments) into its local evidence directory."
                     ),
                     input_schema=_object_schema(
                         {"issue_key": {"type": "string"}}, ["issue_key"]
@@ -447,7 +448,7 @@ class JiraMCPApplication:
                 ),
                 types.Tool(
                     name="jira.find_assignable_users",
-                    description="Find bounded Jira users who can be assigned to an issue.",
+                    description="Look up which Jira users are eligible to be assigned to an issue.",
                     input_schema=_object_schema(
                         {
                             "issue_key": {"type": "string"},
@@ -461,8 +462,8 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.add_comment",
                     description=(
-                        "Add one Jira comment after host approval. Requires a stable "
-                        "idempotency key and may return outcome_unknown."
+                        "Post a reply comment on one Jira issue after host approval. "
+                        "Requires a stable idempotency key and may return outcome_unknown."
                     ),
                     input_schema=_object_schema(
                         {
@@ -490,7 +491,7 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.assign_issue",
                     description=(
-                        "Assign one Jira issue to an exact user ID after host approval. "
+                        "Hand one Jira issue to an exact user ID after host approval. "
                         "Use jira.find_assignable_users first when only a display name is known."
                     ),
                     input_schema=_object_schema(
@@ -514,7 +515,8 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.list_transitions",
                     description=(
-                        "List available Jira workflow transitions and their fields for an issue."
+                        "Show which workflow status changes are available for one Jira "
+                        "issue, with their fields."
                     ),
                     input_schema=_object_schema(
                         {"issue_key": {"type": "string"}}, ["issue_key"]
@@ -524,8 +526,8 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.transition_issue",
                     description=(
-                        "Apply one exact Jira workflow transition after host approval. "
-                        "Use jira.list_transitions first."
+                        "Move one Jira issue to a new workflow status after host "
+                        "approval. Use jira.list_transitions first."
                     ),
                     input_schema=_object_schema(
                         {
@@ -552,7 +554,7 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.analyze_local_logs",
                     description=(
-                        "Inspect the issue's evidence directory, automatically unpack archive logs (.tar.gz, .zip), "
+                        "Dig through the issue's local evidence directory: unpack archive logs (.tar.gz, .zip), "
                         "extract crash backtraces, FATAL errors, diagnostic lines, and optionally link source lines with local Git code snippets and git blame."
                     ),
                     input_schema=_object_schema(

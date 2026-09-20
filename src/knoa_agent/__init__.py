@@ -18,6 +18,7 @@ from knoa_agent.tool_selector import (
     DisabledToolSelector,
     SemanticSelection,
     default_tool_selector,
+    tool_tags_for,
 )
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "ToolInventorySnapshot",
     "ToolProjection",
     "default_tool_selector",
+    "tool_tags_for",
 ]

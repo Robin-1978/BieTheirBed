@@ -72,8 +72,8 @@ class BrowserMCPApplication:
             types.Tool(
                 name="browser.session_open",
                 description=(
-                    "Open an isolated temporary browser session, or an explicitly "
-                    "named persistent profile."
+                    "Start a new isolated temporary browser session, or attach "
+                    "to an explicitly named persistent profile."
                 ),
                 input_schema=_schema({"profile_name": {"type": "string", "maxLength": 64}}, []),
                 annotations=local_write,
@@ -81,8 +81,9 @@ class BrowserMCPApplication:
             types.Tool(
                 name="browser.navigate",
                 description=(
-                    "Navigate to one explicit safe http/https URL. If no session "
-                    "is supplied, open an isolated temporary session automatically."
+                    "Open a web page at one explicit safe http/https URL. If no "
+                    "session is supplied, open an isolated temporary session "
+                    "automatically."
                 ),
                 input_schema=_schema(
                     {**session, "url": {"type": "string", "maxLength": 4096}},
@@ -93,23 +94,24 @@ class BrowserMCPApplication:
             types.Tool(
                 name="browser.snapshot",
                 description=(
-                    "Read a bounded accessibility snapshot with stable short-lived "
-                    "element refs."
+                    "Inspect the page structure: read a bounded accessibility "
+                    "tree with stable short-lived element refs."
                 ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=read_only,
             ),
             types.Tool(
                 name="browser.screenshot",
                 description=(
-                    "Capture the current viewport as a managed-file descriptor."
+                    "Take a screenshot photograph of the current viewport, "
+                    "returned as a managed-file descriptor."
                 ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=local_write,
             ),
             types.Tool(
                 name="browser.download_file",
                 description=(
-                    "Download one explicitly selected safe URL into the Node-managed "
-                    "download root."
+                    "Save a file from one explicitly selected safe web URL into "
+                    "the Node-managed download root."
                 ),
                 input_schema=_schema({
                     **session, "url": {"type": "string", "maxLength": 4096},
@@ -119,22 +121,24 @@ class BrowserMCPApplication:
             types.Tool(
                 name="browser.session_close",
                 description=(
-                    "Close a session and remove its temporary profile."
+                    "Terminate one headless browser automation session and delete "
+                    "its temporary profile directory."
                 ),
                 input_schema=_schema(session, ["browser_session_id"]), annotations=local_write,
             ),
             types.Tool(
                 name="browser.click",
                 description=(
-                    "Activate one element ref from the latest snapshot."
+                    "Click one clickable page element (button, link) identified "
+                    "by an element ref from the latest snapshot."
                 ),
                 input_schema=_schema(element, ["browser_session_id", "element_ref"]), annotations=external_write,
             ),
             types.Tool(
                 name="browser.fill",
                 description=(
-                    "Replace a field value using an element ref. This may trigger "
-                    "page network activity."
+                    "Type text into one page input field identified by an element "
+                    "ref. This may trigger page network activity."
                 ),
                 input_schema=_schema({**element, "text": {"type": "string", "maxLength": 20000}}, ["browser_session_id", "element_ref", "text"]),
                 annotations=external_write,
@@ -142,15 +146,15 @@ class BrowserMCPApplication:
             types.Tool(
                 name="browser.submit_form",
                 description=(
-                    "Explicitly submit the form owning an element ref."
+                    "Press submit on the web form that owns an element ref."
                 ),
                 input_schema=_schema(element, ["browser_session_id", "element_ref"]), annotations=external_write,
             ),
             types.Tool(
                 name="browser.wait_for",
                 description=(
-                    "Wait for an explicit URL substring or visible accessibility "
-                    "text."
+                    "Pause until the page shows an explicit URL substring or "
+                    "visible text."
                 ),
                 input_schema=_schema({
                     **session,

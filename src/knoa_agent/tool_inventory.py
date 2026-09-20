@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from knoa_agent.tool_selector import SemanticSelection, default_tool_selector
+from knoa_agent.tool_selector import SemanticSelection, default_tool_selector, tool_tags_for
 
 _MODEL_SCHEMA_KEYS = frozenset(
     {
@@ -353,7 +353,8 @@ class ToolInventory:
         for tool in deferred:
             name = str(tool["name"])
             description = str(tool.get("description") or "")
-            searchable = cls._tokens(f"{name} {description}")
+            tags = " ".join(tool_tags_for(name))
+            searchable = cls._tokens(f"{name} {description} {tags}")
             score = len(tokens & searchable)
             if score:
                 ranked.append((score, name))

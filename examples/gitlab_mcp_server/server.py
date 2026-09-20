@@ -157,9 +157,9 @@ class GitLabMCPApplication:
         )
         tools = []
         for name, identifier, description in (
-            ("gitlab.get_pipeline", "pipeline_id", "Get a GitLab CI pipeline by project path and pipeline ID."),
-            ("gitlab.list_pipeline_jobs", "pipeline_id", "List compact GitLab CI job summaries for a pipeline; use this before reading failed job traces."),
-            ("gitlab.get_job", "job_id", "Get the current status and metadata of one GitLab CI job."),
+            ("gitlab.get_pipeline", "pipeline_id", "Look up one GitLab CI pipeline by project path and pipeline ID."),
+            ("gitlab.list_pipeline_jobs", "pipeline_id", "Enumerate the compact job summaries of one GitLab CI pipeline; use this before reading failed job traces."),
+            ("gitlab.get_job", "job_id", "Report the run state (pending, running, success, failed) and runner details of one GitLab CI job."),
         ):
             tools.append(
                 types.Tool(
@@ -178,7 +178,7 @@ class GitLabMCPApplication:
         tools.append(
             types.Tool(
                 name="gitlab.get_job_trace",
-                description="Read only the bounded tail of one GitLab CI job log; use it to identify OOM, compiler, test, or infrastructure failures.",
+                description="Dump the bounded log tail of one GitLab CI job to identify OOM, compiler, test, or infrastructure failures.",
                 input_schema=_schema(
                     {
                         "project": {"type": "string"},
@@ -194,7 +194,7 @@ class GitLabMCPApplication:
         tools.append(
             types.Tool(
                 name="gitlab.retry_job",
-                description="Retry one failed GitLab CI job after host approval; eligible OOM jobs may be retried up to three attempts, and the server blocks active or duplicate logical jobs.",
+                description="Re-run one failed GitLab CI job after host approval; eligible OOM jobs may be retried up to three attempts, and the server blocks active or duplicate logical jobs.",
                 input_schema=_schema(
                     {
                         "project": {"type": "string"},
@@ -208,7 +208,7 @@ class GitLabMCPApplication:
         tools.append(
             types.Tool(
                 name="gitlab.retry_oom_jobs",
-                description="After one host approval, retry confirmed OOM compile Jobs independently up to three attempts; stop early when a Job succeeds or ceases to be OOM.",
+                description="Bulk re-run confirmed out-of-memory compile jobs independently after one host approval, up to three attempts; stop early when a job succeeds or ceases to be OOM.",
                 input_schema=_schema(
                     {
                         "project": {"type": "string"},
