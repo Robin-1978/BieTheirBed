@@ -179,10 +179,12 @@ async def test_invalid_skill_is_isolated_from_healthy_skill(tmp_path: Path) -> N
 
 class _CaptureProvider:
     instance: _CaptureProvider | None = None
+    # Shared across instances: the runtime builds one provider per agent,
+    # so per-instance capture misses turns served by other instances.
+    requests: list = []
 
     def __init__(self, model) -> None:
         self.model_alias = model.alias
-        self.requests = []
         type(self).instance = self
 
     async def health_check(self) -> HealthStatus:

@@ -228,11 +228,16 @@ async def test_e2e_immutable_context_stream_and_prefix_caching(tmp_path: Path) -
     assert checkpoint1 is not None
     ckpt_messages1 = checkpoint1.payload["messages"]
     # Checkpoint must contain the envelope, user query, tool calls, and final response
+    # Checkpoint holds the durable turn (query, tool calls, final answer).
+    # The per-request <runtime_context> envelope is injected fresh on every
+    # model call but pruned from checkpoints to avoid multi-turn bloat.
     roles1 = [m["role"] for m in ckpt_messages1]
-    assert roles1 == ["user", "user", "assistant", "tool", "assistant", "tool", "assistant"]
-    # The first message must be the persistent runtime_context envelope
-    assert "<runtime_context>" in ckpt_messages1[0]["content"]
-    assert "user_name: Robin" in ckpt_messages1[0]["content"]
+    assert roles1 == ["user", "assistant", "tool", "assistant", "tool", "assistant"]
+    assert all(
+        "<runtime_context>" not in str(message.get("content", ""))
+        for message in ckpt_messages1
+    )
+    assert "Check the weather for Suzhou" in str(ckpt_messages1[0]["content"])
 
     # =========================================================================
     # TURN 2: Follow-up question in the same session

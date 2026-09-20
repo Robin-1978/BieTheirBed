@@ -87,6 +87,7 @@ from knoa_platform.config import (
 )
 from knoa_platform.configuration import ConfigRegistry, ConfigurationService
 from knoa_platform.configuration.models import (
+    _canonical_value,
     ConfigApplyError,
     ManagedConfig,
     ManagedSkillConfig,
@@ -309,9 +310,12 @@ def _managed_model_alias(config: ManagedConfig, agent_id: str) -> str:
 
 def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
     agent = managed.agents.agents[agent_id]
+    # mode="python" keeps frozensets as sets so _canonical_value can sort
+    # them; mode="json" would freeze arbitrary set-iteration order into the
+    # digest and flip generations across config rebuilds.
     payload: dict[str, object] = {
         "agent_id": agent_id,
-        "agent": agent.model_dump(mode="json"),
+        "agent": agent.model_dump(mode="python"),
     }
     if agent.kind == "knoa":
         model_alias = _managed_model_alias(managed, agent_id)
@@ -319,8 +323,8 @@ def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
         payload.update(
             {
                 "model_alias": model_alias,
-                "model": model.model_dump(mode="json"),
-                "provider": managed.providers[model.provider].model_dump(mode="json"),
+                "model": model.model_dump(mode="python"),
+                "provider": managed.providers[model.provider].model_dump(mode="python"),
                 "operational": {
                     "llm_temperature": managed.operational.llm_temperature,
                     "max_iterations": managed.operational.max_iterations,
@@ -335,13 +339,13 @@ def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
                 "enabled": managed.fallback_enabled,
                 "model": managed.fallback_model,
                 "config": (
-                    managed.models[managed.fallback_model].model_dump(mode="json")
+                    managed.models[managed.fallback_model].model_dump(mode="python")
                     if managed.fallback_enabled and managed.fallback_model
                     else None
                 ),
             }
     encoded = json.dumps(
-        payload,
+        _canonical_value(payload),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -352,16 +356,16 @@ def _agent_generation_id(managed: ManagedConfig, agent_id: str) -> str:
 def _extension_generation_id(managed: ManagedConfig) -> str:
     payload = {
         "skills": {
-            skill_id: skill.model_dump(mode="json")
+            skill_id: skill.model_dump(mode="python")
             for skill_id, skill in sorted(managed.skills.items())
         },
         "mcp_servers": {
-            server_id: server.model_dump(mode="json")
+            server_id: server.model_dump(mode="python")
             for server_id, server in sorted(managed.mcp_servers.items())
         },
     }
     canonical = json.dumps(
-        payload,
+        _canonical_value(payload),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
