@@ -8,6 +8,7 @@ optional local embedding runtime is unavailable.
 from __future__ import annotations
 
 import logging
+import json
 import math
 import os
 import threading
@@ -17,6 +18,54 @@ from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+
+_TAGS_PATH = Path(__file__).with_name("tool_tags.json")
+_TOOL_TAGS: dict[str, dict[str, float]] | None = None
+_TOOL_TAGS_LOCK = threading.Lock()
+
+#: Maximum tags per tool admitted to the recall corpus. Base seeds and
+#: learned tags share one pool ranked by score; nothing is pinned, so later
+#: iterations displace stale seeds (phase 2 adds hit accrual + decay).
+MAX_TAGS_PER_TOOL = 12
+
+#: Seed score for base tags. Learned tags start at 1/hit and displace seeds
+#: once they prove themselves in real traffic.
+BASE_TAG_SEED_SCORE = 5.0
+
+
+def tool_tags_for(name: str) -> tuple[str, ...]:
+    """Return recall tags for a tool, keyed by registry name.
+
+    Tags live outside tool descriptions so the model-facing text stays clean;
+    they only enrich the recall corpus (semantic documents and lexical tokens).
+    The JSON maps tool -> {tag: score}; only the top-ranked tags are returned.
+    Unknown tools yield no tags.
+    """
+
+    global _TOOL_TAGS
+    with _TOOL_TAGS_LOCK:
+        if _TOOL_TAGS is None:
+            try:
+                raw = json.loads(_TAGS_PATH.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raw = {}
+            pool: dict[str, dict[str, float]] = {}
+            if isinstance(raw, dict):
+                for key, value in raw.items():
+                    # Legacy list format: treat every entry as a base seed.
+                    if isinstance(value, list):
+                        value = {str(tag): BASE_TAG_SEED_SCORE for tag in value}
+                    if isinstance(value, dict):
+                        pool[str(key)] = {
+                            str(tag): float(score)
+                            for tag, score in value.items()
+                        }
+            _TOOL_TAGS = pool
+    ranked = sorted(
+        _TOOL_TAGS.get(name, {}).items(), key=lambda item: -item[1]
+    )
+    return tuple(tag for tag, _score in ranked[:MAX_TAGS_PER_TOOL])
 
 
 @dataclass(frozen=True)
@@ -33,7 +82,7 @@ class BgeToolSelector:
         *,
         model_name: str | None = None,
         top_k: int = 6,
-        threshold: float = 0.55,
+        threshold: float = 0.45,
     ) -> None:
         self._model_name = model_name or os.environ.get(
             "KNOA_BGE_MODEL", "BAAI/bge-small-zh-v1.5"
@@ -144,7 +193,10 @@ class BgeToolSelector:
     @staticmethod
     def _document(name: str, description: str) -> str:
         readable_name = name.replace("mcp__", "").replace("__", " ").replace("_", " ")
-        return f"{readable_name}. {description}".strip()
+        # Tags are repeated to give colloquial recall terms weight against
+        # the longer English description (benchmarked: top6 73 -> 83/84).
+        tags = " ".join(tool_tags_for(name) * 2)
+        return f"{readable_name}. {description} {tags}".strip()
 
 
 class DisabledToolSelector:

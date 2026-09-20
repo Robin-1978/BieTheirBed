@@ -65,7 +65,7 @@ class CloudFilesMCPApplication:
                 types.Tool(
                     name="cloud_files.list_files",
                     description=(
-                        "List cloud evidence files. source=oss browses an "
+                        "Browse cloud evidence files. source=oss lists an "
                         "oss://gs-public-shared/ prefix; source=tempo queries a "
                         "Tempo shared-record-list link (needs share_id and sn)."
                     ),
@@ -87,7 +87,7 @@ class CloudFilesMCPApplication:
                 types.Tool(
                     name="cloud_files.download_file",
                     description=(
-                        "Download one cloud evidence file into a caller case "
+                        "Fetch one cloud evidence file into a caller case "
                         "directory after host approval. Tempo downloads also "
                         "need filename."
                     ),
