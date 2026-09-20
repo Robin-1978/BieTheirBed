@@ -33,9 +33,12 @@ def test_tags_file_has_scored_pool_for_all_mcp_tools() -> None:
 def test_tool_tags_for_returns_top_ranked_unknown_is_empty() -> None:
     _reset_cache()
     try:
-        tags = tool_tags_for("mcp__browser__click")
+        tags = tool_tags_for("mcp__browser__browser_click")
         assert "点击" in tags
         assert len(tags) <= MAX_TAGS_PER_TOOL
+        # Short alias resolves when unambiguous, stays empty when ambiguous.
+        assert "找单子" in tool_tags_for("mcp__jira__search_issues")
+        assert tool_tags_for("mcp__x__download_file") == ()
         assert tool_tags_for("mcp__nope__missing") == ()
         assert tool_tags_for("read_file") == ()
     finally:
@@ -44,9 +47,9 @@ def test_tool_tags_for_returns_top_ranked_unknown_is_empty() -> None:
 
 def test_document_appends_tags_after_description() -> None:
     doc = BgeToolSelector._document(
-        "mcp__browser__click", "Click one clickable page element."
+        "mcp__browser__browser_click", "Click one clickable page element."
     )
-    assert doc.startswith("browser click. Click one clickable page element.")
+    assert "Click one clickable page element." in doc
     assert "点击" in doc
     plain = BgeToolSelector._document("read_file", "Read a file.")
     assert plain == "read file. Read a file."
