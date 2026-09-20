@@ -1,6 +1,6 @@
 import * as Clipboard from "expo-clipboard";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
 import { AppIcon } from "@/components/AppIcon";
@@ -21,6 +21,7 @@ import { useGateway } from "@/state/GatewayProvider";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
+import { countdownSeconds, enrollmentShortCode, formatCountdown } from "@/hub/enrollmentPresentation";
 import { userFacingError } from "@/ui/userFacingError";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
 
@@ -40,6 +41,14 @@ export default function WorkspaceNodesScreen() {
   const [showRawPayload, setShowRawPayload] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [nowSec, setNowSec] = useState(() => Date.now() / 1000);
+
+  useEffect(() => {
+    if (!enrollmentPayload) return;
+    setNowSec(Date.now() / 1000);
+    const timer = setInterval(() => setNowSec(Date.now() / 1000), 1000);
+    return () => clearInterval(timer);
+  }, [enrollmentPayload]);
 
   const applyCache = useCallback((snapshot: WorkspaceCacheSnapshot) => {
     setCacheSnapshot(snapshot);
@@ -211,15 +220,27 @@ export default function WorkspaceNodesScreen() {
             <Text style={styles.meta}>{t("nodes.enrollmentHint")}</Text>
 
             <View style={styles.tokenBox}>
+              <Text style={styles.tokenLabel}>{t("nodes.shortCode")}</Text>
+              <Text selectable style={styles.shortCode}>{enrollmentShortCode(enrollmentPayload.grant_id)}</Text>
+              <Text style={styles.meta}>{t("nodes.shortCodeHint")}</Text>
+            </View>
+
+            <View style={styles.tokenBox}>
               <Text style={styles.tokenLabel}>Hub</Text>
               <Text numberOfLines={1} style={styles.tokenValue}>{enrollmentPayload.hub_url}</Text>
             </View>
 
-            <Text style={styles.meta}>
-              {t("nodes.codeExpires", {
-                time: new Date(enrollmentExpiresAt * 1000).toLocaleTimeString(locale === "en-US" ? "en-US" : "zh-CN"),
-              })}
-            </Text>
+            {countdownSeconds(enrollmentExpiresAt, nowSec) > 0 ? (
+              <Text style={styles.meta}>
+                {t("nodes.expiresIn", { countdown: formatCountdown(countdownSeconds(enrollmentExpiresAt, nowSec)) })}
+                {" · "}
+                {t("nodes.codeExpires", {
+                  time: new Date(enrollmentExpiresAt * 1000).toLocaleTimeString(locale === "en-US" ? "en-US" : "zh-CN"),
+                })}
+              </Text>
+            ) : (
+              <Text style={styles.expired}>{t("nodes.codeExpired")}</Text>
+            )}
 
             <View style={styles.enrollmentActions}>
               <AppPressable style={styles.copyButton} onPress={() => void copyEnrollmentCode()}>
@@ -279,6 +300,8 @@ const styles = StyleSheet.create({
   tokenBox: { padding: spacing.medium, borderRadius: radii.small, backgroundColor: colors.surfaceMuted, gap: 2 },
   tokenLabel: { color: colors.muted, ...typography.tiny },
   tokenValue: { color: colors.ink, ...typography.small, fontFamily: "monospace" },
+  shortCode: { color: colors.ink, fontSize: 28, fontWeight: "800", letterSpacing: 4, fontFamily: "monospace" },
+  expired: { color: colors.danger, ...typography.small, fontWeight: "700" },
   enrollmentActions: { flexDirection: "row", gap: spacing.medium },
   copyButton: { flex: 1, minHeight: 42, flexDirection: "row", gap: spacing.small, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accent },
   copyButtonText: { color: colors.onAccent, fontWeight: "700" },

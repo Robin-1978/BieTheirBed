@@ -22,6 +22,7 @@ import {
   categoryDisplayName,
   filterMemories,
   formatConfidencePercent,
+  searchMemories,
   type MemoryFilter,
 } from "@/components/memoryPresentation";
 import { useI18n } from "@/i18n";
@@ -45,6 +46,8 @@ export default function MemoriesScreen() {
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [clearing, setClearing] = useState(false);
   const [filter, setFilter] = useState<MemoryFilter>("all");
 
@@ -64,16 +67,17 @@ export default function MemoriesScreen() {
       return;
     }
     setRefreshing(true);
+    setLoadError("");
     try {
       const response = await gateway.runAuthenticated((client) => client.listMemories());
       setMemories(response.items || []);
     } catch {
-      // ignore load errors
+      setLoadError(t("memories.loadFailed"));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [gateway.client, gateway.runAuthenticated, gateway.status]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.status, t]);
 
   useEffect(() => {
     void load();
@@ -199,8 +203,8 @@ export default function MemoriesScreen() {
   }, [gateway.client, gateway.runAuthenticated, t]);
 
   const filteredItems = useMemo(
-    () => filterMemories(memories, filter),
-    [filter, memories],
+    () => searchMemories(filterMemories(memories, filter), searchQuery),
+    [filter, memories, searchQuery],
   );
 
   const filters: Array<{ label: string; value: MemoryFilter; count: number }> = useMemo(() => [
@@ -276,9 +280,42 @@ export default function MemoriesScreen() {
         })}
       </View>
 
+      {/* 搜索框 */}
+      <View style={styles.searchBar}>
+        <AppIcon name="globe" color={colors.muted} size={16} />
+        <TextInput
+          accessibilityLabel={t("memories.searchPlaceholder")}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder={t("memories.searchPlaceholder")}
+          placeholderTextColor={colors.muted}
+          style={styles.searchInput}
+          returnKeyType="search"
+        />
+        {searchQuery ? (
+          <AppPressable
+            accessibilityLabel={t("common.cancel")}
+            onPress={() => setSearchQuery("")}
+            style={styles.searchClear}
+          >
+            <AppIcon name="x" color={colors.muted} size={14} />
+          </AppPressable>
+        ) : null}
+      </View>
+
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator color={colors.accent} size="large" />
+        </View>
+      ) : loadError && memories.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <View style={styles.emptyIconWrap}>
+            <AppIcon name="history" color={colors.muted} size={36} />
+          </View>
+          <Text style={styles.emptyTitle}>{t("memories.loadFailed")}</Text>
+          <AppPressable style={styles.emptyAddBtn} onPress={() => void load()}>
+            <Text style={styles.emptyAddBtnText}>{t("memories.retry")}</Text>
+          </AppPressable>
         </View>
       ) : (
         <FlatList
@@ -601,6 +638,30 @@ const styles = StyleSheet.create({
   filterChipTextActive: {
     color: colors.onAccent,
     fontWeight: "700",
+  },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.small,
+    marginHorizontal: spacing.large,
+    paddingHorizontal: spacing.medium,
+    minHeight: 44,
+    borderRadius: radii.medium,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 15,
+    paddingVertical: spacing.small,
+  },
+  searchClear: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
   loadingWrap: {
     flex: 1,

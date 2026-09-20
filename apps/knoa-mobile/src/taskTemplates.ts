@@ -13,8 +13,7 @@ export type TaskTemplate = {
   notificationKey: MessageKey;
 };
 
-export const TASK_TEMPLATES: TaskTemplate[] = [
-  { id: "project-maintenance", titleKey: "taskTemplates.projectTitle", detailKey: "taskTemplates.projectDetail", goalKey: "taskTemplates.projectGoal", connectionKey: "taskTemplates.projectConnection", permissionKey: "taskTemplates.projectPermission", durationKey: "taskTemplates.projectDuration", resultKey: "taskTemplates.projectResult", failureKey: "taskTemplates.projectFailure", notificationKey: "taskTemplates.projectNotification" },
+export const TASK_TEMPLATES: TaskTemplate[] = [  { id: "project-maintenance", titleKey: "taskTemplates.projectTitle", detailKey: "taskTemplates.projectDetail", goalKey: "taskTemplates.projectGoal", connectionKey: "taskTemplates.projectConnection", permissionKey: "taskTemplates.projectPermission", durationKey: "taskTemplates.projectDuration", resultKey: "taskTemplates.projectResult", failureKey: "taskTemplates.projectFailure", notificationKey: "taskTemplates.projectNotification" },
   { id: "computer-health", titleKey: "taskTemplates.healthTitle", detailKey: "taskTemplates.healthDetail", goalKey: "taskTemplates.healthGoal", connectionKey: "taskTemplates.healthConnection", permissionKey: "taskTemplates.healthPermission", durationKey: "taskTemplates.healthDuration", resultKey: "taskTemplates.healthResult", failureKey: "taskTemplates.healthFailure", notificationKey: "taskTemplates.healthNotification" },
   { id: "folder-organizer", titleKey: "taskTemplates.folderTitle", detailKey: "taskTemplates.folderDetail", goalKey: "taskTemplates.folderGoal", connectionKey: "taskTemplates.folderConnection", permissionKey: "taskTemplates.folderPermission", durationKey: "taskTemplates.folderDuration", resultKey: "taskTemplates.folderResult", failureKey: "taskTemplates.folderFailure", notificationKey: "taskTemplates.folderNotification" },
   { id: "service-monitor", titleKey: "taskTemplates.serviceTitle", detailKey: "taskTemplates.serviceDetail", goalKey: "taskTemplates.serviceGoal", connectionKey: "taskTemplates.serviceConnection", permissionKey: "taskTemplates.servicePermission", durationKey: "taskTemplates.serviceDuration", resultKey: "taskTemplates.serviceResult", failureKey: "taskTemplates.serviceFailure", notificationKey: "taskTemplates.serviceNotification" },
@@ -23,3 +22,8 @@ export const TASK_TEMPLATES: TaskTemplate[] = [
   { id: "document-digest", titleKey: "taskTemplates.documentTitle", detailKey: "taskTemplates.documentDetail", goalKey: "taskTemplates.documentGoal", connectionKey: "taskTemplates.documentConnection", permissionKey: "taskTemplates.documentPermission", durationKey: "taskTemplates.documentDuration", resultKey: "taskTemplates.documentResult", failureKey: "taskTemplates.documentFailure", notificationKey: "taskTemplates.documentNotification" },
   { id: "research-brief", titleKey: "taskTemplates.researchTitle", detailKey: "taskTemplates.researchDetail", goalKey: "taskTemplates.researchGoal", connectionKey: "taskTemplates.researchConnection", permissionKey: "taskTemplates.researchPermission", durationKey: "taskTemplates.researchDuration", resultKey: "taskTemplates.researchResult", failureKey: "taskTemplates.researchFailure", notificationKey: "taskTemplates.researchNotification" },
 ];
+
+/** 用户已输入内容时，选择模板是否需要二次确认，避免覆盖。 */
+export function shouldConfirmTemplateOverwrite(title: string, goal: string): boolean {
+  return title.trim().length > 0 || goal.trim().length > 0;
+}

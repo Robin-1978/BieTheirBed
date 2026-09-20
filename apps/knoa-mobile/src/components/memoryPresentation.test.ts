@@ -5,6 +5,7 @@ import {
   categoryDisplayName,
   filterMemories,
   formatConfidencePercent,
+  searchMemories,
 } from "./memoryPresentation";
 
 describe("memoryPresentation", () => {
@@ -44,6 +45,14 @@ describe("memoryPresentation", () => {
     expect(formatConfidencePercent(0.0)).toBe("0%");
     expect(formatConfidencePercent(-0.1)).toBe("0%");
     expect(formatConfidencePercent(1.5)).toBe("100%");
+  });
+
+  it("searches memories by key/value/category", () => {
+    expect(searchMemories(sampleMemories, "")).toHaveLength(3);
+    expect(searchMemories(sampleMemories, "editor")).toHaveLength(1);
+    expect(searchMemories(sampleMemories, "CHINESE")).toHaveLength(1);
+    expect(searchMemories(sampleMemories, "environment")).toHaveLength(1);
+    expect(searchMemories(sampleMemories, "不存在")).toHaveLength(0);
   });
 
   it("maps categories to friendly Chinese names with fallback", () => {

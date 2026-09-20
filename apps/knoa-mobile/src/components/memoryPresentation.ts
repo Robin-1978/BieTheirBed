@@ -10,6 +10,17 @@ export function filterMemories(
   return items.filter((item) => item.importance === filter);
 }
 
+/** 关键字搜索 key/value/category，不区分大小写；空关键字返回原列表。 */
+export function searchMemories(items: MemoryRecord[], query: string): MemoryRecord[] {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) return items;
+  return items.filter((item) =>
+    item.key.toLowerCase().includes(keyword)
+    || item.value.toLowerCase().includes(keyword)
+    || item.category.toLowerCase().includes(keyword),
+  );
+}
+
 export function formatConfidencePercent(confidence: number): string {
   const clamped = Math.max(0, Math.min(1, confidence));
   return `${Math.round(clamped * 100)}%`;
