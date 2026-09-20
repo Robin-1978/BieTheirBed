@@ -1255,6 +1255,7 @@ def build_core_runtime(
         task_tool_commits,
         task_events,
         interactions=interactions.for_owner("task_execution"),
+        artifacts=artifacts,
     )
     task_service = TaskService(
         tasks,
@@ -1509,7 +1510,7 @@ def build_core_runtime(
     ))
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
-    trigger_dispatcher = TriggerDispatcher(triggers, task_service)
+    trigger_dispatcher = TriggerDispatcher(triggers, task_service, artifacts=artifacts)
     trigger_service = TriggerService(triggers, trigger_dispatcher)
     mcp_resource_tasks = MCPResourceTaskBridge(
         mcp_providers,
