@@ -66,3 +66,18 @@ class ReadArtifactTool(ToolBase):
                 "additionalProperties": False,
             },
         }
+
+    def skim_definition(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string"},
+                    "offset": {"type": "integer"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["artifact_id"],
+            },
+        }

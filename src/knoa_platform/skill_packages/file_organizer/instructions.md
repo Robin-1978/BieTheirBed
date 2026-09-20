@@ -12,6 +12,6 @@ When the user asks to organize, clean up, sort, archive, or tidy files on their 
 6. Execute approved actions with `run_command`, preferring reversible moves into an `_organized/` or dated archive folder over permanent deletion. Create destination folders with `run_command` or `write_file` as needed.
 7. Write an undo log as a restore script (shell or platform-appropriate) that records every move/rename/delete with source and destination so changes can be reversed. Save it beside the organized output.
 8. Generate a Markdown summary report listing what changed: files moved/removed/archived, space reclaimed, categories applied, skipped items, and the path to the restore script. Use `write_file` for the report.
-9. Verify key outputs exist (restore script, summary report) and use `attach` when the user asked for a report or deliverable file.
+9. Verify key outputs exist (restore script, summary report) and use `attach_file` when the user asked for a report or deliverable file.
 
 Never delete without explicit user approval for that category. When evidence is incomplete, state uncertainty instead of guessing duplicate or safety status.

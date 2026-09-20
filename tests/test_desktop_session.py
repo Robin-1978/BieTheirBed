@@ -94,7 +94,7 @@ def test_x11_recovery_can_infer_one_unambiguous_display(monkeypatch: pytest.Monk
         lambda environment: "/run/user/1000/gdm/Xauthority",
     )
 
-    desktop_session.ensure_desktop_session("windows")
+    desktop_session.ensure_desktop_session("window_control")
 
     assert os.environ["DISPLAY"] == ":1"
 

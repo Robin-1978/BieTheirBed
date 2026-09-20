@@ -71,7 +71,7 @@ class ComplexBuiltinClient:
     async def list_tools(self):
         return (
             {
-                "name": "task",
+                "name": "task_control",
                 "description": "Manage tasks and executions",
                 "inputSchema": {
                     "type": "object",
@@ -320,7 +320,7 @@ async def test_complex_task_parameters_stay_behind_tool_help() -> None:
 
     projected = {tool["name"]: tool for tool in inventory.project("session-a", snapshot)}
 
-    assert set(projected["task"]["inputSchema"]["properties"]) == {
+    assert set(projected["task_control"]["inputSchema"]["properties"]) == {
         "action",
         "task_id",
         "execution_id",

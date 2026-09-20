@@ -13,7 +13,7 @@ required_tools:
   - web_search
   - web_fetch
   - write_file
-  - attach
+  - attach_file
 required_capabilities:
   - network
   - host_write

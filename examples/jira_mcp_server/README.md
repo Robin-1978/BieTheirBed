@@ -176,7 +176,7 @@ evidence directory and `manifest.json` path. Large logs, images and archives do
 not pass through `resources/read`; Codex or another authorized Agent analyzes
 the local files directly.
 
-`jira.download_attachment` and `jira.materialize_issue` are available for
+`jira.download_attachment` and `jira.fetch_issue_evidence` are available for
 manual recovery or explicit refresh. Automatic assignment analysis uses the
 same materialization implementation before publishing its Resource.
 

@@ -132,7 +132,7 @@ class _ArtifactRuntime(_Runtime):
         yield ToolCallFinished(
             **base,
             tool_call_id="call-a",
-            tool_name="attach",
+            tool_name="attach_file",
             status="completed",
             output={"success": True, "artifact": artifact},
         )

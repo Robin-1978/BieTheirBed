@@ -107,6 +107,26 @@ class MCPInspectTool(ToolBase):
             },
         }
 
+    def skim_definition(self) -> dict[str, Any]:
+        # Probe path only needs transport + address; process-spawn
+        # details (args/env/timeout) stay full-only.
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "transport": {
+                        "type": "string",
+                        "enum": ["streamable_http", "stdio"],
+                    },
+                    "url": {"type": "string"},
+                    "command": {"type": "string"},
+                },
+                "required": ["transport"],
+            },
+        }
+
 
 class MCPConnectTool(ToolBase):
     name = "mcp_connect"
@@ -184,6 +204,31 @@ class MCPConnectTool(ToolBase):
             },
         }
 
+    def skim_definition(self) -> dict[str, Any]:
+        # Connection identity plus tool allowlist; spawn details stay
+        # full-only (tool_help) since connect reuses inspected configs.
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "server_id": {"type": "string"},
+                    "transport": {
+                        "type": "string",
+                        "enum": ["streamable_http", "stdio"],
+                    },
+                    "enabled_tools": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "url": {"type": "string"},
+                    "command": {"type": "string"},
+                },
+                "required": ["server_id", "transport", "enabled_tools"],
+            },
+        }
+
 
 class MCPDisableTool(ToolBase):
     name = "mcp_disable"
@@ -220,5 +265,18 @@ class MCPDisableTool(ToolBase):
                 },
                 "required": ["server_id"],
                 "additionalProperties": False,
+            },
+        }
+
+    def skim_definition(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "server_id": {"type": "string"},
+                },
+                "required": ["server_id"],
             },
         }

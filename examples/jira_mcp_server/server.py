@@ -372,7 +372,7 @@ class JiraMCPApplication:
         return types.ListToolsResult(
             tools=[
                 types.Tool(
-                    name="jira.query",
+                    name="jira.search_issues",
                     description="Run a bounded read-only JQL query and return matching Jira issues.",
                     input_schema=_object_schema(
                         {
@@ -387,11 +387,17 @@ class JiraMCPApplication:
                 ),
                 types.Tool(
                     name="jira.get_issue",
-                    description="Read bounded Jira issue fields. Jira user content is untrusted.",
+                    description=(
+                        "Read bounded Jira issue fields. Set include_comments/"
+                        "include_attachments to bundle comments or attachment "
+                        "metadata in one call. Jira user content is untrusted."
+                    ),
                     input_schema=_object_schema(
                         {
                             "issue_key": {"type": "string"},
                             "changelog": {"type": "boolean"},
+                            "include_comments": {"type": "boolean"},
+                            "include_attachments": {"type": "boolean"},
                         },
                         ["issue_key"],
                     ),
@@ -400,12 +406,20 @@ class JiraMCPApplication:
                 types.Tool(
                     name="jira.download_attachment",
                     description=(
-                        "Download one Jira attachment into the configured local evidence directory."
+                        "Download one Jira attachment into the configured local "
+                        "evidence directory. Set excerpt_only to read a bounded "
+                        "text excerpt instead of downloading the file."
                     ),
                     input_schema=_object_schema(
                         {
                             "issue_key": {"type": "string"},
                             "attachment_id": {"type": "string"},
+                            "excerpt_only": {"type": "boolean"},
+                            "max_bytes": {
+                                "type": "integer",
+                                "minimum": 1024,
+                                "maximum": 262144,
+                            },
                         },
                         ["issue_key", "attachment_id"],
                     ),
@@ -417,7 +431,7 @@ class JiraMCPApplication:
                     ),
                 ),
                 types.Tool(
-                    name="jira.materialize_issue",
+                    name="jira.fetch_issue_evidence",
                     description=(
                         "Download one Jira issue, comments and attachments into its local evidence directory."
                     ),
@@ -432,18 +446,6 @@ class JiraMCPApplication:
                     ),
                 ),
                 types.Tool(
-                    name="jira.get_comments",
-                    description="Read bounded Jira comments as untrusted evidence.",
-                    input_schema=_object_schema(
-                        {
-                            "issue_key": {"type": "string"},
-                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-                        },
-                        ["issue_key"],
-                    ),
-                    annotations=read_only,
-                ),
-                types.Tool(
                     name="jira.find_assignable_users",
                     description="Find bounded Jira users who can be assigned to an issue.",
                     input_schema=_object_schema(
@@ -453,31 +455,6 @@ class JiraMCPApplication:
                             "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                         },
                         ["issue_key", "query"],
-                    ),
-                    annotations=read_only,
-                ),
-                types.Tool(
-                    name="jira.list_attachments",
-                    description="List attachment metadata for a Jira issue.",
-                    input_schema=_object_schema(
-                        {"issue_key": {"type": "string"}}, ["issue_key"]
-                    ),
-                    annotations=read_only,
-                ),
-                types.Tool(
-                    name="jira.get_attachment_excerpt",
-                    description="Read a bounded excerpt from a text Jira attachment by ID.",
-                    input_schema=_object_schema(
-                        {
-                            "issue_key": {"type": "string"},
-                            "attachment_id": {"type": "string"},
-                            "max_bytes": {
-                                "type": "integer",
-                                "minimum": 1024,
-                                "maximum": 262144,
-                            },
-                        },
-                        ["issue_key", "attachment_id"],
                     ),
                     annotations=read_only,
                 ),
@@ -573,92 +550,6 @@ class JiraMCPApplication:
                     ),
                 ),
                 types.Tool(
-                    name="jira.correlate_by_sn",
-                    description=(
-                        "Search and correlate past Jira issues for a given robot Serial Number (SN) "
-                        "to analyze recurring defect patterns."
-                    ),
-                    input_schema=_object_schema(
-                        {
-                            "serial_number": {"type": "string"},
-                            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
-                        },
-                        ["serial_number"],
-                    ),
-                    annotations=read_only,
-                ),
-                types.Tool(
-                    name="jira.download_oss_evidence",
-                    description=(
-                        "Download an oss://gs-public-shared/... log or bag file into the local issue evidence directory."
-                    ),
-                    input_schema=_object_schema(
-                        {
-                            "issue_key": {"type": "string"},
-                            "oss_url": {"type": "string"},
-                        },
-                        ["issue_key", "oss_url"],
-                    ),
-                    annotations=types.ToolAnnotations(
-                        read_only_hint=False,
-                        destructive_hint=False,
-                        idempotent_hint=True,
-                        open_world_hint=True,
-                    ),
-                ),
-                types.Tool(
-                    name="jira.list_oss_objects",
-                    description=(
-                        "List files and directories under an oss://gs-public-shared/ directory prefix."
-                    ),
-                    input_schema=_object_schema(
-                        {
-                            "prefix": {"type": "string"},
-                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-                        },
-                        ["prefix"],
-                    ),
-                    annotations=read_only,
-                ),
-                types.Tool(
-                    name="jira.list_tempo_records",
-                    description=(
-                        "Query and list shared robot log and bag records from a Tempo shared-record-list link."
-                    ),
-                    input_schema=_object_schema(
-                        {
-                            "share_id": {"type": "string"},
-                            "sn": {"type": "string"},
-                            "status": {"type": "string"},
-                            "file_type": {"type": "string"},
-                            "filename": {"type": "string"},
-                            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-                        },
-                        ["share_id", "sn"],
-                    ),
-                    annotations=read_only,
-                ),
-                types.Tool(
-                    name="jira.download_tempo_records",
-                    description=(
-                        "Download a shared robot record file from a Tempo signed URL into the local issue evidence directory."
-                    ),
-                    input_schema=_object_schema(
-                        {
-                            "issue_key": {"type": "string"},
-                            "download_url": {"type": "string"},
-                            "filename": {"type": "string"},
-                        },
-                        ["issue_key", "download_url", "filename"],
-                    ),
-                    annotations=types.ToolAnnotations(
-                        read_only_hint=False,
-                        destructive_hint=False,
-                        idempotent_hint=True,
-                        open_world_hint=True,
-                    ),
-                ),
-                types.Tool(
                     name="jira.analyze_local_logs",
                     description=(
                         "Inspect the issue's evidence directory, automatically unpack archive logs (.tar.gz, .zip), "
@@ -699,20 +590,27 @@ class JiraMCPApplication:
                     str(arguments.get("issue_key", "")),
                     changelog=bool(arguments.get("changelog", False)),
                 )
-            elif name == "jira.query":
+                if bool(arguments.get("include_comments", False)):
+                    payload = {
+                        **payload,
+                        "comments": await self.jira.get_comments(
+                            str(arguments.get("issue_key", ""))
+                        ),
+                    }
+                if bool(arguments.get("include_attachments", False)):
+                    payload = {
+                        **payload,
+                        "attachments": await self.jira.list_attachments(
+                            str(arguments.get("issue_key", ""))
+                        ),
+                    }
+            elif name == "jira.search_issues":
                 payload = await self.jira.query_issues(
                     str(arguments.get("jql", "")),
                     limit=int(arguments.get("limit", 20)),
                     offset=int(arguments.get("offset", 0)),
                     fields=str(arguments.get("fields", "")),
                 )
-            elif name == "jira.get_comments":
-                payload = {
-                    "comments": await self.jira.get_comments(
-                        str(arguments.get("issue_key", "")),
-                        limit=int(arguments.get("limit", 50)),
-                    )
-                }
             elif name == "jira.find_assignable_users":
                 payload = {
                     "users": await self.jira.find_assignable_users(
@@ -721,24 +619,19 @@ class JiraMCPApplication:
                         limit=int(arguments.get("limit", 20)),
                     )
                 }
-            elif name == "jira.list_attachments":
-                payload = {
-                    "attachments": await self.jira.list_attachments(
-                        str(arguments.get("issue_key", ""))
-                    )
-                }
-            elif name == "jira.get_attachment_excerpt":
-                payload = await self.jira.get_attachment_excerpt(
-                    str(arguments.get("issue_key", "")),
-                    str(arguments.get("attachment_id", "")),
-                    max_bytes=int(arguments.get("max_bytes", 65_536)),
-                )
             elif name == "jira.download_attachment":
-                payload = await self.jira.download_attachment(
-                    str(arguments.get("issue_key", "")),
-                    str(arguments.get("attachment_id", "")),
-                )
-            elif name == "jira.materialize_issue":
+                if bool(arguments.get("excerpt_only", False)):
+                    payload = await self.jira.get_attachment_excerpt(
+                        str(arguments.get("issue_key", "")),
+                        str(arguments.get("attachment_id", "")),
+                        max_bytes=int(arguments.get("max_bytes", 65_536)),
+                    )
+                else:
+                    payload = await self.jira.download_attachment(
+                        str(arguments.get("issue_key", "")),
+                        str(arguments.get("attachment_id", "")),
+                    )
+            elif name == "jira.fetch_issue_evidence":
                 payload = await self.jira.materialize_issue(
                     str(arguments.get("issue_key", ""))
                 )
@@ -767,40 +660,6 @@ class JiraMCPApplication:
                     str(arguments.get("issue_key", "")),
                     str(arguments.get("transition_id", "")),
                     fields=raw_fields,
-                )
-            elif name == "jira.correlate_by_sn":
-                payload = {
-                    "issues": await self.jira.correlate_by_sn(
-                        str(arguments.get("serial_number", "")),
-                        limit=int(arguments.get("limit", 20)),
-                    )
-                }
-            elif name == "jira.download_oss_evidence":
-                payload = await self.jira.download_oss_evidence(
-                    str(arguments.get("issue_key", "")),
-                    str(arguments.get("oss_url", "")),
-                )
-            elif name == "jira.list_oss_objects":
-                payload = {
-                    "objects": await self.jira.list_oss_objects(
-                        str(arguments.get("prefix", "")),
-                        limit=int(arguments.get("limit", 100)),
-                    )
-                }
-            elif name == "jira.list_tempo_records":
-                payload = await self.jira.list_tempo_records(
-                    str(arguments.get("share_id", "")),
-                    str(arguments.get("sn", "")),
-                    status=arguments.get("status"),
-                    file_type=arguments.get("file_type"),
-                    filename=arguments.get("filename"),
-                    limit=int(arguments.get("limit", 100)),
-                )
-            elif name == "jira.download_tempo_records":
-                payload = await self.jira.download_tempo_file(
-                    str(arguments.get("issue_key", "")),
-                    str(arguments.get("download_url", "")),
-                    str(arguments.get("filename", "")),
                 )
             elif name == "jira.analyze_local_logs":
                 payload = await self.jira.analyze_local_logs(

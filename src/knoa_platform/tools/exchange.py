@@ -20,7 +20,7 @@ def _currency(value: Any, default: str) -> str | None:
 
 
 class ExchangeTool(ToolBase):
-    name = "currency"
+    name = "currency_convert"
     effect = ToolEffect.READ_ONLY
     capabilities = frozenset({ToolCapability.NETWORK})
     risk = ToolRisk.LOW

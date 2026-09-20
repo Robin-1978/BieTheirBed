@@ -77,7 +77,7 @@ async def test_attach_borrows_file_outside_workspace_after_confirmation(
             _context(frozenset({ToolCapability.HOST_READ}), confirmation),
             ProposedToolCall(
                 call_id="call-a",
-                name="attach",
+                name="attach_file",
                 arguments={"path": str(source)},
             ),
         )
@@ -109,7 +109,7 @@ async def test_attach_requires_host_read_and_confirmation(tmp_path: Path) -> Non
     step = _step(workspace, ArtifactPrepareTool(store, working_directory=workspace))
     call = ProposedToolCall(
         call_id="call-a",
-        name="attach",
+        name="attach_file",
         arguments={"path": str(source)},
     )
 

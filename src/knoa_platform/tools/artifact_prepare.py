@@ -10,7 +10,7 @@ from knoa_platform.tools.base import ToolBase, ToolCapability, ToolEffect, ToolR
 
 
 class ArtifactPrepareTool(ToolBase):
-    name = "attach"
+    name = "attach_file"
     description = (
         "Deliver an existing local file, including files in Desktop or Downloads. "
         "The source file is borrowed read-only and is never copied, modified, or deleted."

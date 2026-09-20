@@ -61,15 +61,4 @@ class WriteFileTool(ToolBase):
         }
 
     def skim_definition(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string"},
-                    "content": {"type": "string", "description": "text to write; empty is allowed"},
-                },
-                "required": ["path", "content"],
-            },
-        }
+        return self.definition()

@@ -15,7 +15,7 @@ from knoa_platform.vision.a11y import A11yService
 
 
 class UiTool(ToolBase):
-    name = "ui"
+    name = "ui_control"
     description = (
         "Inspect and interact with desktop UI elements by accessibility role/name "
         "instead of screen coordinates."

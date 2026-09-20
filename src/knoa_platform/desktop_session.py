@@ -24,7 +24,7 @@ DESKTOP_TOOL_NAMES = frozenset(
         "type_text",
         "hotkey",
         "screenshot",
-        "windows",
+        "window_control",
     }
 )
 

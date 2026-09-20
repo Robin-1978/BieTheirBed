@@ -50,7 +50,7 @@ from knoa_agent_contracts import (
 
 logger = logging.getLogger(__name__)
 
-GUI_TOOLS = frozenset({"mouse", "ui", "press_key", "type_text", "hotkey"})
+GUI_TOOLS = frozenset({"mouse", "ui_control", "press_key", "type_text", "hotkey"})
 
 
 class AgentModelRequest(BaseModel):
@@ -1438,13 +1438,13 @@ class KnoaAgentRuntime(AgentRuntime):
             return None
         if isinstance(tool_result, dict) and tool_result.get("error"):
             return None
-        if "screen" not in available_tool_names:
+        if "screen_look" not in available_tool_names:
             return None
 
         description = self._describe_gui_action(tool_name, tool_args)
         return McpToolCall(
             call_id=uuid.uuid4().hex,
-            name="screen",
+            name="screen_look",
             arguments={
                 "action": "verify",
                 "action_description": description,
@@ -1490,7 +1490,7 @@ class KnoaAgentRuntime(AgentRuntime):
         action = str(tool_args.get("action") or "").strip().casefold()
         if tool_name == "mouse":
             return action in {"click", "double_click", "right_click", "drag"}
-        if tool_name == "ui":
+        if tool_name == "ui_control":
             return action in {"click", "fill", "select", "focus"}
         return True
 
@@ -1504,9 +1504,9 @@ class KnoaAgentRuntime(AgentRuntime):
             if tool_args.get("button"):
                 parts.append(f"button={tool_args['button']}")
             return " ".join(parts)
-        if tool_name == "ui":
+        if tool_name == "ui_control":
             target = tool_args.get("element_path") or tool_args.get("name") or "element"
-            parts = [f"ui {action}", f"target={target}"]
+            parts = [f"ui_control {action}", f"target={target}"]
             if action in {"fill", "select"} and tool_args.get("value") is not None:
                 parts.append(f"characters={len(str(tool_args['value']))}")
             return " ".join(parts)

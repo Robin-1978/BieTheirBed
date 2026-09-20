@@ -123,3 +123,18 @@ class GlobFilesTool(ToolBase):
                 "additionalProperties": False,
             },
         }
+
+    def skim_definition(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "path": {"type": "string"},
+                    "limit": {"type": "integer"},
+                },
+                "required": ["pattern"],
+            },
+        }

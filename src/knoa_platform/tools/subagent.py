@@ -117,9 +117,33 @@ class SpawnSubagentTool(ToolBase):
             },
         }
 
+    def skim_definition(self) -> dict[str, Any]:
+        # Skim keeps required fields plus the free-form context object.
+        # Capability/skill allowlists and deadline stay full-only.
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target_agent_id": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "context": {"type": "object"},
+                    "mode": {"type": "string", "enum": ["join", "detached"]},
+                    "idempotency_key": {"type": "string"},
+                },
+                "required": [
+                    "target_agent_id",
+                    "goal",
+                    "mode",
+                    "idempotency_key",
+                ],
+            },
+        }
+
 
 class SubagentTool(ToolBase):
-    name = "subagent"
+    name = "await_subagent"
     description = "Get, await, or cancel a Child Task created by this invocation."
     effect = ToolEffect.INTERNAL_WRITE
     capabilities = frozenset({ToolCapability.TASK_MANAGEMENT})
@@ -201,5 +225,22 @@ class SubagentTool(ToolBase):
                 },
                 "required": ["action", "delegation_id"],
                 "additionalProperties": False,
+            },
+        }
+
+    def skim_definition(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["get", "await", "cancel"],
+                    },
+                    "delegation_id": {"type": "string"},
+                },
+                "required": ["action", "delegation_id"],
             },
         }

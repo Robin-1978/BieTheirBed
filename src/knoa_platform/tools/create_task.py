@@ -176,3 +176,29 @@ class CreateTaskTool(ToolBase):
                 "additionalProperties": False,
             },
         }
+
+    def skim_definition(self) -> dict[str, Any]:
+        # launch is required so it stays, but only the kind selector is
+        # shown; full nested timing fields stay full-only (tool_help).
+        # agent_id is optional routing hint, full-only.
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "goal": {"type": "string"},
+                    "launch": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": ["immediate", "one_time", "interval", "cron", "event"],
+                            },
+                        },
+                    },
+                },
+                "required": ["title", "goal", "launch"],
+            },
+        }

@@ -74,6 +74,6 @@ def test_generated_tool_help_example_contains_only_required_inputs():
     registry = ToolRegistry()
     registry.register(WindowTool())
 
-    detail = registry.detailed_schema("windows")
+    detail = registry.detailed_schema("window_control")
 
     assert detail["examples"] == [{"action": "list"}]

@@ -79,7 +79,7 @@ def test_skill_digest_is_stable_across_python_hash_seeds(tmp_path: Path) -> None
         tmp_path,
         "research",
         manifest_updates={
-            "required_tools": ["web_search", "write_file", "attach"],
+            "required_tools": ["web_search", "write_file", "attach_file"],
             "required_capabilities": ["network", "host_write", "host_read"],
         },
     )

@@ -1,0 +1,19 @@
+enabled: true
+transport: stdio
+command: python3
+args:
+  - server.py
+working_directory: .
+inherit_env:
+  - CLOUD_FILES_DOWNLOAD_ROOT
+  - CLOUD_FILES_MAX_BYTES
+timeout_seconds: 60
+tools:
+  cloud_files.list_files:
+    effect: read_only
+    capabilities: [mcp, network]
+    risk: low
+  cloud_files.download_file:
+    effect: local_write
+    capabilities: [mcp, network, host_write]
+    risk: medium
