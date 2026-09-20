@@ -568,6 +568,7 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
     assert remote_tools == {
         "currency_convert",
         "read_artifact",
+        "sleep",
         "weather",
         "web_fetch",
         "web_search",
@@ -642,6 +643,7 @@ async def test_tcp_endpoint_separates_local_and_remote_credentials(
         assert remote_tools == {
             "currency_convert",
             "read_artifact",
+            "sleep",
             "weather",
             "web_fetch",
             "web_search",
