@@ -1,8 +1,9 @@
 import { router, useLocalSearchParams } from "expo-router";
 import * as Crypto from "expo-crypto";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -21,7 +22,10 @@ import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
 import { AppIcon } from "@/components/AppIcon";
-import { TASK_TEMPLATES } from "@/taskTemplates";
+import { TASK_TEMPLATES, shouldConfirmTemplateOverwrite, type TaskTemplate } from "@/taskTemplates";
+import { parseScheduleFromPrompt } from "@/nlSchedule";
+import { recommendNodeId } from "@/models/nodeRecommendation";
+import { listHubNodes } from "@/hub/hubClient";
 import { enqueueOfflineTask } from "@/storage/offlineTaskQueue";
 import { requestTaskNotificationPermission } from "@/notifications/taskNotifications";
 import { presentNodeName } from "@/presentation/nodePresentation";
@@ -31,6 +35,10 @@ import { pickFolderSnapshot, uploadFolderSnapshot, type FolderSelection } from "
 
 function stringParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+function formatClock(hour: number, minute: number): string {
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 export default function NewTaskScreen() {
@@ -58,6 +66,7 @@ export default function NewTaskScreen() {
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState(gateway.nodeId || stringParam(params.nodeId) || "");
   const [switchingNode, setSwitchingNode] = useState(false);
+  const [hubOnlineIds, setHubOnlineIds] = useState<string[] | null>(null);
   const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
   const [folder, setFolder] = useState<FolderSelection | null>(null);
   const [folderProgress, setFolderProgress] = useState(0);
@@ -89,6 +98,24 @@ export default function NewTaskScreen() {
 
     setTitle(extractedTitle || raw.slice(0, 20));
     setGoal(extractedGoal);
+    const schedule = parseScheduleFromPrompt(raw);
+    if (schedule) {
+      setLaunchPolicy(schedule.policy);
+      if (schedule.kind === "daily") {
+        setNlSuccessMessage(
+          t("taskNew.nlScheduleDaily", { time: formatClock(schedule.hour, schedule.minute) }),
+        );
+      } else if (schedule.kind === "weekly") {
+        setNlSuccessMessage(
+          t("taskNew.nlScheduleWeekly", { time: formatClock(schedule.hour, schedule.minute) }),
+        );
+      } else {
+        setNlSuccessMessage(
+          t("taskNew.nlScheduleInterval", { minutes: Math.round(schedule.intervalSeconds / 60) }),
+        );
+      }
+      return;
+    }
     setNlSuccessMessage(t("taskNew.nlSuccess"));
   }
 
@@ -118,6 +145,24 @@ export default function NewTaskScreen() {
       .catch(() => setMcpResources([]));
   }, [gateway.client, gateway.runAuthenticated]);
 
+  useEffect(() => {
+    let active = true;
+    void listHubNodes()
+      .then((directory) => {
+        if (active) setHubOnlineIds(directory.filter((node) => node.online).map((node) => node.node_id));
+      })
+      .catch(() => {
+        if (active) setHubOnlineIds(null);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const recommendedNodeId = useMemo(
+    () => recommendNodeId(gateway.nodes.map((node) => node.nodeId), hubOnlineIds, gateway.nodeId),
+    [gateway.nodes, gateway.nodeId, hubOnlineIds],
+  );
+  const recommendedNode = gateway.nodes.find((node) => node.nodeId === recommendedNodeId) ?? null;
+
   const activeTemplate = TASK_TEMPLATES.find((template) => template.id === selectedTemplate);
 
   useEffect(() => {
@@ -139,6 +184,26 @@ export default function NewTaskScreen() {
   useEffect(() => {
     if (gateway.nodeId) setSelectedNodeId(gateway.nodeId);
   }, [gateway.nodeId]);
+
+  function applyTemplate(template: TaskTemplate) {
+    const apply = () => {
+      setSelectedTemplate(template.id);
+      setTitle(t(template.titleKey));
+      setGoal(t(template.goalKey));
+    };
+    if (shouldConfirmTemplateOverwrite(title, goal)) {
+      Alert.alert(
+        t("taskNew.templateOverwriteTitle"),
+        t("taskNew.templateOverwriteMessage"),
+        [
+          { text: t("common.cancel"), style: "cancel" },
+          { text: t("taskNew.templateOverwriteApply"), style: "destructive", onPress: apply },
+        ],
+      );
+      return;
+    }
+    apply();
+  }
 
   async function chooseNode(nodeId: string) {
     if (!nodeId || nodeId === gateway.nodeId || switchingNode) return;
@@ -302,9 +367,7 @@ export default function NewTaskScreen() {
                   key={template.id}
                   style={[styles.template, isSelected && styles.templateSelected]}
                   onPress={() => {
-                    setSelectedTemplate(template.id);
-                    setTitle(t(template.titleKey));
-                    setGoal(t(template.goalKey));
+                    applyTemplate(template);
                   }}
                 >
                   <Text style={[styles.templateTitle, isSelected && styles.templateSelectedText]}>
@@ -420,10 +483,21 @@ export default function NewTaskScreen() {
             <AppIcon name="node" color={colors.accent} size={18} />
             <Text style={styles.sectionTitle}>{t("taskNew.executionNode")}</Text>
           </View>
+          {recommendedNode ? (
+            <Text style={styles.recommend}>
+              {recommendedNode.nodeId === gateway.nodeId && gateway.status === "ready"
+                ? t("taskNew.recommendCurrent", { name: presentNodeName(recommendedNode, t("common.unnamedComputer")) })
+                : hubOnlineIds?.includes(recommendedNode.nodeId)
+                  ? t("taskNew.recommendSwitch", { name: presentNodeName(recommendedNode, t("common.unnamedComputer")) })
+                  : t("taskNew.recommendOffline", { name: presentNodeName(recommendedNode, t("common.unnamedComputer")) })}
+            </Text>
+          ) : null}
           {gateway.nodes.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nodeRow}>
               {gateway.nodes.map((node) => {
                 const isSelected = selectedNodeId === node.nodeId;
+                const isCurrentReady = node.nodeId === gateway.nodeId && gateway.status === "ready";
+                const isOffline = hubOnlineIds !== null && !hubOnlineIds.includes(node.nodeId) && !isCurrentReady;
                 return (
                   <AppPressable
                     key={node.nodeId}
@@ -432,9 +506,14 @@ export default function NewTaskScreen() {
                     disabled={switchingNode}
                   >
                     <View style={styles.nodeTopRow}>
+                      {node.nodeId === recommendedNodeId ? (
+                        <View style={styles.recommendBadge}>
+                          <Text style={styles.recommendBadgeText}>{t("taskNew.recommended")}</Text>
+                        </View>
+                      ) : null}
                       <AppIcon name="node" color={isSelected ? colors.accent : colors.muted} size={16} />
                       <Text style={styles.nodeChoiceStatus}>
-                        {node.nodeId === gateway.nodeId && gateway.status === "ready" ? t("taskNew.nodeReady") : t("taskNew.nodeAvailable")}
+                        {isCurrentReady ? t("taskNew.nodeReady") : isOffline ? t("taskNew.nodeOffline") : t("taskNew.nodeAvailable")}
                       </Text>
                     </View>
                     <Text style={[styles.nodeChoiceText, isSelected && styles.nodeChoiceTextSelected]} numberOfLines={1}>
@@ -731,6 +810,23 @@ const styles = StyleSheet.create({
   nodeChoiceStatus: {
     color: colors.muted,
     fontSize: 11,
+  },
+  recommend: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+  },
+  recommendBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.small,
+    backgroundColor: colors.accent,
+  },
+  recommendBadgeText: {
+    color: colors.onAccent,
+    fontSize: 10,
+    fontWeight: "800",
   },
   attachmentGroup: {
     gap: spacing.small,

@@ -29,7 +29,7 @@ type TaskSection = { key: string; title: string; data: Task[] };
 
 export default function TasksScreen() {
   const gateway = useGateway();
-  const { reminders, unreadIndexForNode, markAllRead } = useTaskReminders();
+  const { reminders, unreadIndexForNode, markAllRead, lastSyncedAt, syncNow } = useTaskReminders();
   const { t } = useI18n();
 
   const currentNodeUnread = unreadIndexForNode(gateway.nodeId);
@@ -271,6 +271,25 @@ export default function TasksScreen() {
           </View>
         ) : null}
 
+        {/* 通知同步状态：Hub 为三端已读的事实源，点即手动同步 */}
+        <AppPressable
+          accessibilityRole="button"
+          accessibilityLabel={t("tasks.syncNow")}
+          onPress={() => void syncNow()}
+          style={styles.syncRow}
+        >
+          <AppIcon name="refresh" color={colors.muted} size={13} />
+          <Text style={styles.syncText}>
+            {lastSyncedAt
+              ? t("tasks.syncedAt", {
+                  time: new Date(lastSyncedAt).toLocaleTimeString(
+                    undefined, { hour: "2-digit", minute: "2-digit" },
+                  ),
+                })
+              : t("tasks.notSynced")}
+          </Text>
+        </AppPressable>
+
         {/* 过滤药丸栏 */}
         <View style={styles.filters}>
           {filters.map((item) => {
@@ -508,6 +527,19 @@ const styles = StyleSheet.create({
     gap: spacing.small,
     paddingHorizontal: spacing.large,
     paddingVertical: spacing.small,
+  },
+  syncRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    minHeight: 32,
+    paddingHorizontal: spacing.large,
+  },
+  syncText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
   },
   filter: {
     paddingHorizontal: spacing.medium,

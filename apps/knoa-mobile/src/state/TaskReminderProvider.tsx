@@ -44,6 +44,8 @@ type TaskReminderState = {
   markExecutionRead(executionId: string): void;
   setExecutionViewing(executionId: string | null): void;
   markAllRead(nodeId?: string): void;
+  lastSyncedAt: number | null;
+  syncNow(): Promise<void>;
 };
 
 const Context = createContext<TaskReminderState | null>(null);
@@ -53,6 +55,7 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
   const { locale } = useI18n();
   const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [activeReminder, setActiveReminder] = useState<TaskReminder | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const appIsActiveRef = useRef(AppState.currentState === "active");
   const inboxCursorRef = useRef(0);
   const reconcileRef = useRef<Promise<void> | null>(null);
@@ -198,6 +201,7 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
         inboxCursorRef.current = cursor;
         if (result.notifications.length < 100) break;
       }
+      setLastSyncedAt(Date.now());
     })();
     reconcileRef.current = operation;
     try {
@@ -280,6 +284,10 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
 
   const dismissActive = useCallback(() => setActiveReminder(null), []);
 
+  const syncNow = useCallback(async () => {
+    await reconcileNotifications().catch(() => undefined);
+  }, [reconcileNotifications]);
+
   const unreadCountForNode = useCallback((nodeId?: string) => {
     return reminders.filter((reminder) => {
       if (reminder.read) return false;
@@ -308,8 +316,10 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
       markExecutionRead,
       setExecutionViewing,
       markAllRead,
+      lastSyncedAt,
+      syncNow,
     };
-  }, [activeReminder, dismissActive, markAllRead, markExecutionRead, markRead, reminders, setExecutionViewing, unreadCountForNode, unreadIndexForNode]);
+  }, [activeReminder, dismissActive, markAllRead, markExecutionRead, markRead, reminders, setExecutionViewing, syncNow, lastSyncedAt, unreadCountForNode, unreadIndexForNode]);
 
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
