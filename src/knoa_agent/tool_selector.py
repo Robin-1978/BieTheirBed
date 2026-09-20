@@ -21,6 +21,50 @@ logger = logging.getLogger(__name__)
 
 
 _TAGS_PATH = Path(__file__).with_name("tool_tags.json")
+_DISAMBIGUATION_PATH = Path(__file__).with_name("tool_disambiguation.json")
+_DISAMBIGUATION: dict[str, tuple[tuple[str, str], ...]] | None = None
+
+
+def _readable_tool_name(name: str) -> str:
+    return name.replace("mcp__", "").replace("__", " ").replace("_", " ")
+
+
+def not_for_clauses(name: str) -> tuple[str, ...]:
+    """Return 'other (reason)' boundary clauses for easily-confused tools."""
+
+    global _DISAMBIGUATION
+    with _TOOL_TAGS_LOCK:
+        if _DISAMBIGUATION is None:
+            try:
+                raw = json.loads(_DISAMBIGUATION_PATH.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raw = {}
+            pool: dict[str, tuple[tuple[str, str], ...]] = {}
+            if isinstance(raw, dict):
+                for key, value in raw.items():
+                    if isinstance(value, list):
+                        pool[str(key)] = tuple(
+                            (str(item[0]), str(item[1]))
+                            for item in value
+                            if isinstance(item, list) and len(item) == 2
+                        )
+            _DISAMBIGUATION = pool
+    clauses = []
+    for other, reason in _DISAMBIGUATION.get(name, ()):
+        clauses.append(f"{_readable_tool_name(other)} ({reason})")
+    # Fallback mirrors tool_tags_for short-alias matching.
+    if not clauses:
+        short = name.split("__")[-1]
+        matches = [
+            entries
+            for key, entries in _DISAMBIGUATION.items()
+            if (tail := key.split("__")[-1]) == short
+            or tail.endswith(f"_{short}")
+        ]
+        if len(matches) == 1:
+            for other, reason in matches[0]:
+                clauses.append(f"{_readable_tool_name(other)} ({reason})")
+    return tuple(clauses)
 _TOOL_TAGS: dict[str, dict[str, float]] | None = None
 _TOOL_TAGS_LOCK = threading.Lock()
 
@@ -209,9 +253,12 @@ class BgeToolSelector:
 
     @staticmethod
     def _document(name: str, description: str) -> str:
-        readable_name = name.replace("mcp__", "").replace("__", " ").replace("_", " ")
+        readable_name = _readable_tool_name(name)
         # Tags are repeated to give colloquial recall terms weight against
-        # the longer English description (benchmarked: top6 73 -> 83/84).
+        # the longer English description (benchmarked top6 83/84). NOT FOR
+        # clauses are deliberately excluded: bi-encoder similarity has no
+        # negation, and rival terms dilute the document (measured -5).
+        # tool_disambiguation.json stays as the phase-2 hard-negative seed.
         tags = " ".join(tool_tags_for(name) * 2)
         return f"{readable_name}. {description} {tags}".strip()
 
