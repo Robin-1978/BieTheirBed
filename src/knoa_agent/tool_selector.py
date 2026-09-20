@@ -65,7 +65,24 @@ def tool_tags_for(name: str) -> tuple[str, ...]:
     ranked = sorted(
         _TOOL_TAGS.get(name, {}).items(), key=lambda item: -item[1]
     )
-    return tuple(tag for tag, _score in ranked[:MAX_TAGS_PER_TOOL])
+    if ranked:
+        return tuple(tag for tag, _score in ranked[:MAX_TAGS_PER_TOOL])
+    # Fallback for short registry aliases: match by trailing segment only
+    # when it is unambiguous in the pool (e.g. "search_issues" matches only
+    # mcp__jira__jira_search_issues, while "download_file" matches three
+    # tools and yields nothing).
+    short = name.split("__")[-1]
+    if short != name:
+        matches = [
+            pool
+            for key, pool in _TOOL_TAGS.items()
+            if (tail := key.split("__")[-1]) == short
+            or tail.endswith(f"_{short}")
+        ]
+        if len(matches) == 1:
+            ranked = sorted(matches[0].items(), key=lambda item: -item[1])
+            return tuple(tag for tag, _score in ranked[:MAX_TAGS_PER_TOOL])
+    return ()
 
 
 @dataclass(frozen=True)

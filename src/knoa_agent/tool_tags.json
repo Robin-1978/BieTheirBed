@@ -1,171 +1,171 @@
 {
- "mcp__browser__click": {
+ "mcp__browser__browser_click": {
   "点击": 5,
   "点一下": 5,
   "点按钮": 5,
   "点": 5,
   "登录": 5
  },
- "mcp__browser__download_file": {
+ "mcp__browser__browser_download_file": {
   "下载文件": 5,
   "存文件": 5,
   "下文件": 5,
   "下载": 5,
   "下": 5
  },
- "mcp__browser__fill": {
+ "mcp__browser__browser_fill": {
   "填写": 5,
   "输入": 5,
   "填表": 5,
   "填": 5
  },
- "mcp__browser__navigate": {
+ "mcp__browser__browser_navigate": {
   "打开网页": 5,
   "上网": 5,
   "访问网站": 5,
   "打开": 5,
   "开网页": 5
  },
- "mcp__browser__screenshot": {
+ "mcp__browser__browser_screenshot": {
   "截图": 5,
   "截屏": 5,
   "拍屏": 5,
   "拍": 5
  },
- "mcp__browser__session_close": {
+ "mcp__browser__browser_session_close": {
   "关浏览器": 5,
   "关闭会话": 5,
   "关掉": 5,
   "关": 5
  },
- "mcp__browser__session_open": {
+ "mcp__browser__browser_session_open": {
   "新开浏览器": 5,
   "重新开": 5,
   "全新会话": 5,
   "新开": 5
  },
- "mcp__browser__snapshot": {
+ "mcp__browser__browser_snapshot": {
   "页面有啥": 5,
   "可点元素": 5,
   "页面结构": 5,
   "瞅一眼": 5
  },
- "mcp__browser__submit_form": {
+ "mcp__browser__browser_submit_form": {
   "提交": 5,
   "交表": 5,
   "交": 5
  },
- "mcp__browser__wait_for": {
+ "mcp__browser__browser_wait_for": {
   "等待": 5,
   "等加载": 5,
   "等结果": 5,
   "等": 5
  },
- "mcp__cloud_files__download_file": {
+ "mcp__cloud_files__cloud_files_download_file": {
   "下文件": 5,
   "取文件": 5,
   "下载云文件": 5,
   "拿文件": 5,
   "报告": 5
  },
- "mcp__cloud_files__list_files": {
+ "mcp__cloud_files__cloud_files_list_files": {
   "文件列表": 5,
   "有啥文件": 5,
   "云文件": 5,
   "文件都有啥": 5
  },
- "mcp__gitlab__get_job": {
+ "mcp__gitlab__gitlab_get_job": {
   "任务状态": 5,
   "跑完没": 5,
   "构建状态": 5,
   "查状态": 5
  },
- "mcp__gitlab__get_job_trace": {
+ "mcp__gitlab__gitlab_get_job_trace": {
   "失败日志": 5,
   "为啥失败": 5,
   "看日志": 5,
   "报错日志": 5
  },
- "mcp__gitlab__get_pipeline": {
+ "mcp__gitlab__gitlab_get_pipeline": {
   "构建情况": 5,
   "流水线": 5,
   "构建咋样": 5,
   "构建": 5
  },
- "mcp__gitlab__list_pipeline_jobs": {
+ "mcp__gitlab__gitlab_list_pipeline_jobs": {
   "构建任务": 5,
   "跑了啥": 5,
   "任务列表": 5
  },
- "mcp__gitlab__retry_job": {
+ "mcp__gitlab__gitlab_retry_job": {
   "重跑": 5,
   "再跑一次": 5,
   "重跑构建": 5
  },
- "mcp__gitlab__retry_oom_jobs": {
+ "mcp__gitlab__gitlab_retry_oom_jobs": {
   "爆内存": 5,
   "内存不足": 5,
   "重跑OOM": 5,
   "内存": 5
  },
- "mcp__jira__add_comment": {
+ "mcp__jira__jira_add_comment": {
   "回复": 5,
   "评论": 5,
   "留言": 5,
   "回一句话": 5
  },
- "mcp__jira__analyze_local_logs": {
+ "mcp__jira__jira_analyze_local_logs": {
   "查日志": 5,
   "排错": 5,
   "为啥挂": 5,
   "日志": 5,
   "挂因": 5
  },
- "mcp__jira__assign_issue": {
+ "mcp__jira__jira_assign_issue": {
   "派单": 5,
   "指派": 5,
   "转交": 5,
   "派给": 5,
   "给谁跟": 5
  },
- "mcp__jira__download_attachment": {
+ "mcp__jira__jira_download_attachment": {
   "下附件": 5,
   "附件下载": 5,
   "附件": 5
  },
- "mcp__jira__fetch_issue_evidence": {
+ "mcp__jira__jira_fetch_issue_evidence": {
   "打包资料": 5,
   "全部证据": 5,
   "取证": 5,
   "打包": 5,
   "弄下来": 5
  },
- "mcp__jira__find_assignable_users": {
+ "mcp__jira__jira_find_assignable_users": {
   "派给谁": 5,
   "可指派人": 5,
   "谁能接": 5,
   "谁接": 5
  },
- "mcp__jira__get_issue": {
+ "mcp__jira__jira_get_issue": {
   "单子详情": 5,
   "单子进展": 5,
   "详情": 5,
   "啥情况": 5
  },
- "mcp__jira__list_transitions": {
+ "mcp__jira__jira_list_transitions": {
   "下一步": 5,
   "可选状态": 5,
   "能干嘛": 5,
   "接下来": 5
  },
- "mcp__jira__search_issues": {
+ "mcp__jira__jira_search_issues": {
   "找单子": 5,
   "搜索工单": 5,
   "查单": 5,
   "找": 5,
   "搜": 5
  },
- "mcp__jira__transition_issue": {
+ "mcp__jira__jira_transition_issue": {
   "关单": 5,
   "流转": 5,
   "完结": 5,
