@@ -198,6 +198,73 @@ async def test_large_snapshot_without_store_falls_back_to_refresh_hint(
     assert "MCP read tools" in goal
 
 
+async def test_near_threshold_payload_spills_when_final_goal_exceeds_bound(
+    tmp_path: Path,
+) -> None:
+    """Regression: bound the final goal, not just the payload.
+
+    A payload just under the spill threshold used to ride inline even when
+    the envelope plus trigger goal pushed the final goal over 8000 chars,
+    which forced the approval reviewer into truncation-escalate.
+    """
+    store = _store(tmp_path)
+    service, dispatcher, scope, calls = _trigger_components(
+        tmp_path, artifacts=store
+    )
+    trigger = await service.create(
+        scope,
+        client_request_id="request-a",
+        name="GitLab failure",
+        goal="G" * 1000,
+    )
+    await service.receive(
+        scope.principal_id,
+        trigger.trigger_id,
+        external_event_id="mcp-resource:event-near",
+        payload={"server_id": "gitlab", "blob": "t" * 7500},
+    )
+
+    assert await dispatcher.dispatch_once() is True
+    goal = calls[0][1]["goal_override"]
+    assert len(goal) < TURN_INPUT_SPILL_THRESHOLD_CHARS
+    assert "read_artifact" in goal
+    # Summary excerpts are capped (~500 chars); the full blob must not ride inline.
+    assert "t" * 1000 not in goal
+
+
+async def test_spill_pointer_prefers_read_only_tools_over_shell(
+    tmp_path: Path,
+) -> None:
+    """Spilled goals must steer the agent to read_artifact, not run_command.
+
+    run_command is LOCAL_WRITE/HIGH and can never auto-approve; without
+    guidance the reviewer approves the shell parse and policy escalates to
+    human. Explicit read-only guidance lets the reviewer auto-deny shell
+    parses so the agent retries with a LOW-risk read.
+    """
+    store = _store(tmp_path)
+    service, dispatcher, scope, calls = _trigger_components(
+        tmp_path, artifacts=store
+    )
+    trigger = await service.create(
+        scope,
+        client_request_id="request-a",
+        name="GitLab failure",
+        goal="Analyze this failed pipeline.",
+    )
+    await service.receive(
+        scope.principal_id,
+        trigger.trigger_id,
+        external_event_id="mcp-resource:event-big",
+        payload={"server_id": "gitlab", "blob": "t" * 20000},
+    )
+
+    assert await dispatcher.dispatch_once() is True
+    goal = calls[0][1]["goal_override"]
+    assert "read_artifact" in goal
+    assert "do not use run_command/shell" in goal.lower()
+
+
 # ------------------------------------------------------------------
 # Scheme 3: executor bounds overlong task goals at execution time
 # ------------------------------------------------------------------
