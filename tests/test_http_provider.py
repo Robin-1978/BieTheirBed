@@ -299,3 +299,149 @@ async def test_failover_reports_partial_primary_without_terminal_as_failure() ->
     assert chunks[-1].finish_reason == "error"
     assert chunks[-1].error_code == "provider_failed"
     assert fallback.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_responses_provider_posts_input_and_streams_tool_call() -> None:
+    lines = [
+        "data: " + json.dumps({"type": "response.output_text.delta", "delta": "hi"}),
+        "data: "
+        + json.dumps(
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {"type": "function_call", "call_id": "call-a", "name": "read_file"},
+            }
+        ),
+        "data: "
+        + json.dumps(
+            {
+                "type": "response.function_call_arguments.delta",
+                "output_index": 0,
+                "delta": '{"path":',
+            }
+        ),
+        "data: "
+        + json.dumps(
+            {
+                "type": "response.function_call_arguments.delta",
+                "output_index": 0,
+                "delta": '"a.txt"}',
+            }
+        ),
+        "data: "
+        + json.dumps(
+            {
+                "type": "response.completed",
+                "response": {
+                    "status": "completed",
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                },
+            }
+        ),
+    ]
+    client = FakeClient(FakeResponse(lines))
+    provider = HttpModelProvider(
+        _model("openai_responses"),
+        client_factory=ClientFactory(client),
+    )
+
+    request = _request(
+        tools=(
+            {
+                "name": "read_file",
+                "description": "Read a file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                },
+            },
+        )
+    )
+    chunks = [chunk async for chunk in provider.stream(request, asyncio.Event())]
+
+    assert chunks[0].content_delta == "hi"
+    assert chunks[-1].terminal
+    assert chunks[-1].finish_reason == "tool_calls"
+    assert chunks[-1].tool_calls[0].name == "read_file"
+    assert chunks[-1].tool_calls[0].arguments == {"path": "a.txt"}
+    assert chunks[-1].usage == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
+    method, url, kwargs = client.requests[0]
+    assert method == "POST"
+    assert url.endswith("/responses")
+    payload = kwargs["json"]
+    assert payload["stream"] is True
+    assert payload["model"] == "model-a"
+    assert payload["input"] == [{"role": "user", "content": "hello"}]
+    assert payload["max_output_tokens"] == request.max_output_tokens
+    assert payload["tools"] == [
+        {
+            "type": "function",
+            "name": "read_file",
+            "description": "Read a file",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_responses_provider_replays_tool_history_as_input_items() -> None:
+    lines = [
+        "data: "
+        + json.dumps(
+            {
+                "type": "response.completed",
+                "response": {"status": "completed", "usage": {}},
+            }
+        ),
+    ]
+    client = FakeClient(FakeResponse(lines))
+    provider = HttpModelProvider(
+        _model("openai_responses"),
+        client_factory=ClientFactory(client),
+    )
+
+    request = ProviderCallRequest(
+        call_id="model-call-b",
+        purpose="react",
+        messages=(
+            {"role": "user", "content": "read it"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-a",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": '{"path":"a.txt"}',
+                        },
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call-a", "content": "file-bytes"},
+        ),
+    )
+    chunks = [chunk async for chunk in provider.stream(request, asyncio.Event())]
+
+    assert chunks[-1].terminal
+    assert chunks[-1].finish_reason == "stop"
+    payload = client.requests[0][2]["json"]
+    assert payload["input"] == [
+        {"role": "user", "content": "read it"},
+        {
+            "type": "function_call",
+            "call_id": "call-a",
+            "name": "read_file",
+            "arguments": '{"path":"a.txt"}',
+        },
+        {"type": "function_call_output", "call_id": "call-a", "output": "file-bytes"},
+    ]
