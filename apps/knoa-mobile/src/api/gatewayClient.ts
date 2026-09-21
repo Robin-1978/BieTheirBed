@@ -759,10 +759,15 @@ export class GatewayClient {
     executionId: string,
     command: "cancel" | "pause" | "resume" | "rerun",
     reason = "",
+    options: { acknowledgeOutcomeUnknown?: boolean } = {},
   ): Promise<TaskExecution | null> {
+    const body =
+      command === "resume"
+        ? { reason, acknowledge_outcome_unknown: Boolean(options.acknowledgeOutcomeUnknown) }
+        : { reason };
     const response = await this.json<Json>(
       `/v1/task-executions/${encodeURIComponent(executionId)}/${command}`,
-      command === "rerun" ? { method: "POST" } : { method: "POST", body: { reason } },
+      command === "rerun" ? { method: "POST" } : { method: "POST", body },
     );
     return "execution" in response ? response.execution as TaskExecution : null;
   }

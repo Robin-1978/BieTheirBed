@@ -351,6 +351,8 @@ export const tasks = {
   "execution.pause": "暂停",
   "execution.stop": "停止",
   "execution.resume": "继续",
+  "execution.resumeUnknownTitle": "确认继续？",
+  "execution.resumeUnknownBody": "上次工具调用结果未知，可能已产生部分副作用。继续前请先查看执行过程，确认不会重复操作。",
   "execution.rerun": "按本次配置再次执行",
   "execution.followUpTitle": "补充信息，继续分析",
   "execution.followUpHint": "补充说明、日志、图片或文件后，Agent 会在同一个任务上下文中开始下一轮分析。",
