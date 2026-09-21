@@ -428,6 +428,7 @@ def _resolve_managed_model(
         remote_deployment_id=provider.remote_deployment_id,
         direct_gateway_url=provider.direct_gateway_url,
         proxy_url=provider.proxy_url,
+        session_header=provider.session_header,
     )
 
 

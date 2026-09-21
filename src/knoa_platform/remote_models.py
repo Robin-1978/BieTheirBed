@@ -805,6 +805,7 @@ def _resolve_local_model(
             None if model.thinking is None else ThinkingConfig(type=model.thinking)
         ),
         proxy_url=provider.proxy_url,
+        session_header=provider.session_header,
     )
 
 

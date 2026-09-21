@@ -164,3 +164,19 @@ def test_legacy_resolve_model_passes_proxy() -> None:
     )
     resolved = cfg.resolve_model("luna")
     assert resolved.proxy_url == "http://gfw.gs-robot.cn:6780"
+
+
+def test_session_header_validation() -> None:
+    ManagedProviderConfig(
+        driver="openai_compatible",
+        api_base="https://opencode.ai/zen/go/v1",
+        api_key_ref="provider.supplier.api_key",
+        session_header="x-opencode-session",
+    )
+    with pytest.raises(ValueError, match="session_header"):
+        ManagedProviderConfig(
+            driver="openai_compatible",
+            api_base="https://opencode.ai/zen/go/v1",
+            api_key_ref="provider.supplier.api_key",
+            session_header="not a header!",
+        )

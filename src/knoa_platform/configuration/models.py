@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -67,6 +68,11 @@ class ManagedProviderConfig(ConfigurationModel):
     #: Forward-proxy URL for this provider's traffic (both http and https).
     #: Empty means direct connection.
     proxy_url: str = ""
+    #: Session header name required by some vendors (e.g. Zen's
+    #: ``x-opencode-session`` for routing/caching). Empty means none is sent;
+    #: when set, a stable per-instance ID plus a product User-Agent go out
+    #: on every request from this provider.
+    session_header: str = ""
 
     @model_validator(mode="after")
     def validate_secret_source(self) -> ManagedProviderConfig:
@@ -78,6 +84,10 @@ class ManagedProviderConfig(ConfigurationModel):
                 parts.startswith("http://") or parts.startswith("https://")
             ) or " " in parts:
                 raise ValueError("Provider proxy_url must be an http(s) URL")
+        if self.session_header and not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9-]{0,63}", self.session_header
+        ):
+            raise ValueError("Provider session_header must be a valid header name")
         if self.driver in {"openai", "openai_responses", "anthropic"} and not (
             self.api_key_ref or self.api_key_env
         ):

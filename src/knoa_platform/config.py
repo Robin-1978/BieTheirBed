@@ -51,6 +51,8 @@ class ProviderConfig(BaseModel):
     timeout: float = 120.0
     #: Forward-proxy URL for this provider account's traffic. Empty = direct.
     proxy_url: str = ""
+    #: Session header name required by some vendors. Empty = none sent.
+    session_header: str = ""
 
     def resolved_api_key(self) -> str:
         if self.api_key_env:
@@ -142,6 +144,8 @@ class ResolvedModelConfig(BaseModel):
     #: Forward-proxy URL (http/https) for this model's traffic. Empty means
     #: direct connection. Set per-provider so only chosen suppliers use it.
     proxy_url: str = ""
+    #: Session header name required by some vendors. Empty = none sent.
+    session_header: str = ""
 
 
 class WebhookRouteConfig(BaseModel):
@@ -733,6 +737,7 @@ class AppConfig(BaseModel):
                 remote_deployment_id=endpoint.remote_deployment_id,
                 direct_gateway_url=endpoint.direct_gateway_url,
                 proxy_url=endpoint.proxy_url,
+                session_header=endpoint.session_header,
             )
         return ResolvedModelConfig(
             alias=alias or self.llm_model_name or "default",
