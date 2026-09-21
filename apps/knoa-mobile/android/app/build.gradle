@@ -145,6 +145,12 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+    lint {
+        // lintVitalRelease costs minutes on every release build and no gate
+        // consumes it (mobile gates are typecheck + vitest). Keep local
+        // `npx expo lint` for manual checks instead.
+        checkReleaseBuilds false
+    }
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
