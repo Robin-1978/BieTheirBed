@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -14,6 +15,7 @@ from knoa_platform.agent_runtime.model_step import (
     ProviderCallRequest,
     ProviderChunk,
 )
+from knoa_platform import __version__
 from knoa_platform.agent_runtime.tool_step import ProposedToolCall
 from knoa_platform.config import ResolvedModelConfig
 from knoa_platform.model_adapter.parsers.anthropic import (
@@ -112,6 +114,14 @@ class HttpModelProvider(ModelProviderPort):
             supports_vision=model.supports_vision,
         )
         self._client_factory = client_factory
+        # Vendor session routing (e.g. Zen x-opencode-session): one stable
+        # ID per provider instance. Instances are long-lived per model, so
+        # routing stays stable and prompt caching works across turns.
+        headers = dict(self._profile.headers)
+        if model.session_header:
+            headers[model.session_header] = uuid.uuid4().hex
+            headers["User-Agent"] = f"knoa-node/{__version__}"
+        self._headers = headers
 
     @property
     def model_alias(self) -> str:
@@ -145,7 +155,7 @@ class HttpModelProvider(ModelProviderPort):
                 async with client.stream(
                     "GET",
                     self._profile.health_url,
-                    headers=self._profile.headers,
+                    headers=self._headers,
                 ) as response:
                     response.raise_for_status()
             return HealthStatus(healthy=True, detail=self._model.alias)
@@ -206,7 +216,7 @@ class HttpModelProvider(ModelProviderPort):
                     "POST",
                     self._profile.chat_url,
                     json=payload,
-                    headers=self._profile.headers,
+                    headers=self._headers,
                 ) as response:
                     response.raise_for_status()
                     closer = asyncio.create_task(
@@ -313,7 +323,7 @@ class HttpModelProvider(ModelProviderPort):
                     "POST",
                     self._profile.chat_url,
                     json=payload,
-                    headers=self._profile.headers,
+                    headers=self._headers,
                 ) as response:
                     response.raise_for_status()
                     closer = asyncio.create_task(
@@ -417,7 +427,7 @@ class HttpModelProvider(ModelProviderPort):
                     "POST",
                     self._profile.chat_url,
                     json=payload,
-                    headers=self._profile.headers,
+                    headers=self._headers,
                 ) as response:
                     response.raise_for_status()
                     closer = asyncio.create_task(

@@ -472,3 +472,35 @@ async def test_provider_passes_proxy_to_client_factory_only_when_set() -> None:
     plain = HttpModelProvider(_model(), client_factory=direct_factory)
     [chunk async for chunk in plain.stream(_request(), asyncio.Event())]
     assert "proxy" not in direct_factory.calls[0]
+
+
+def _model_with_session() -> ResolvedModelConfig:
+    model = _model()
+    return model.model_copy(update={"session_header": "x-opencode-session"})
+
+
+@pytest.mark.asyncio
+async def test_provider_sends_stable_session_and_product_ua_only_when_configured() -> None:
+    from knoa_platform import __version__
+
+    lines = ["data: " + json.dumps({"choices": [{"delta": {"content": "hi"}}]}), "data: [DONE]"]
+    sessioned = FakeClient(FakeResponse(list(lines)))
+    provider = HttpModelProvider(
+        _model_with_session(), client_factory=ClientFactory(sessioned)
+    )
+    [chunk async for chunk in provider.stream(_request(), asyncio.Event())]
+    sent = sessioned.requests[0][2]["headers"]
+    assert sent["x-opencode-session"]
+    assert len(sent["x-opencode-session"]) == 32
+    assert sent["User-Agent"] == f"knoa-node/{__version__}"
+    # stable across calls on the same instance
+    second = FakeClient(FakeResponse(list(lines)))
+    provider._client_factory = ClientFactory(second)
+    [chunk async for chunk in provider.stream(_request(), asyncio.Event())]
+    assert second.requests[0][2]["headers"]["x-opencode-session"] == sent["x-opencode-session"]
+
+    direct = FakeClient(FakeResponse(list(lines)))
+    plain = HttpModelProvider(_model(), client_factory=ClientFactory(direct))
+    [chunk async for chunk in plain.stream(_request(), asyncio.Event())]
+    assert "x-opencode-session" not in direct.requests[0][2]["headers"]
+    assert "User-Agent" not in direct.requests[0][2]["headers"]
