@@ -117,6 +117,17 @@ class HttpModelProvider(ModelProviderPort):
     def model_alias(self) -> str:
         return self._model.alias
 
+    def _client_options(self, timeout: httpx.Timeout | float) -> dict[str, Any]:
+        """Build client factory options; only pass proxy when configured.
+
+        Custom factories may not accept a proxy kwarg, so it stays absent
+        for direct connections instead of None.
+        """
+        options: dict[str, Any] = {"timeout": timeout}
+        if self._model.proxy_url:
+            options["proxy"] = self._model.proxy_url
+        return options
+
     def stream(
         self,
         request: ProviderCallRequest,
@@ -130,7 +141,7 @@ class HttpModelProvider(ModelProviderPort):
 
     async def health_check(self) -> HealthStatus:
         try:
-            async with self._client_factory(timeout=5.0) as client:
+            async with self._client_factory(**self._client_options(5.0)) as client:
                 async with client.stream(
                     "GET",
                     self._profile.health_url,
@@ -190,7 +201,7 @@ class HttpModelProvider(ModelProviderPort):
         emitted_terminal = False
         try:
             timeout = self._stream_timeout()
-            async with self._client_factory(timeout=timeout) as client:
+            async with self._client_factory(**self._client_options(timeout)) as client:
                 async with client.stream(
                     "POST",
                     self._profile.chat_url,
@@ -297,7 +308,7 @@ class HttpModelProvider(ModelProviderPort):
         current_event = ""
         try:
             timeout = self._stream_timeout()
-            async with self._client_factory(timeout=timeout) as client:
+            async with self._client_factory(**self._client_options(timeout)) as client:
                 async with client.stream(
                     "POST",
                     self._profile.chat_url,
@@ -401,7 +412,7 @@ class HttpModelProvider(ModelProviderPort):
         current_event = ""
         try:
             timeout = self._stream_timeout()
-            async with self._client_factory(timeout=timeout) as client:
+            async with self._client_factory(**self._client_options(timeout)) as client:
                 async with client.stream(
                     "POST",
                     self._profile.chat_url,

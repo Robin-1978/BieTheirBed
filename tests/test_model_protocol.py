@@ -130,3 +130,37 @@ def test_legacy_resolve_model_honors_protocol() -> None:
         default_model="luna",
     )
     assert cfg.resolve_model("luna").driver == "openai_responses"
+
+
+def test_proxy_url_validation() -> None:
+    provider = ManagedProviderConfig(
+        driver="openai_compatible",
+        api_base="https://opencode.ai/zen/go/v1",
+        api_key_ref="provider.supplier.api_key",
+        proxy_url="http://gfw.gs-robot.cn:6780",
+    )
+    assert provider.proxy_url == "http://gfw.gs-robot.cn:6780"
+    with pytest.raises(ValueError, match="proxy_url"):
+        ManagedProviderConfig(
+            driver="openai_compatible",
+            api_base="https://opencode.ai/zen/go/v1",
+            api_key_ref="provider.supplier.api_key",
+            proxy_url="socks5://proxy.local:1080",
+        )
+
+
+def test_legacy_resolve_model_passes_proxy() -> None:
+    cfg = AppConfig(
+        providers={
+            "zen": {
+                "driver": "openai_compatible",
+                "api_base": "https://opencode.ai/zen/go/v1",
+                "api_key": "test-secret",
+                "proxy_url": "http://gfw.gs-robot.cn:6780",
+            }
+        },
+        models={"luna": {"provider": "zen", "model": "gpt-5.6-luna"}},
+        default_model="luna",
+    )
+    resolved = cfg.resolve_model("luna")
+    assert resolved.proxy_url == "http://gfw.gs-robot.cn:6780"

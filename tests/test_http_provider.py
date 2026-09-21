@@ -59,8 +59,10 @@ class FakeClient:
 class ClientFactory:
     def __init__(self, client: FakeClient):
         self.client = client
+        self.calls: list[dict] = []
 
     def __call__(self, **kwargs):
+        self.calls.append(kwargs)
         return self.client
 
 
@@ -445,3 +447,28 @@ async def test_responses_provider_replays_tool_history_as_input_items() -> None:
         },
         {"type": "function_call_output", "call_id": "call-a", "output": "file-bytes"},
     ]
+
+
+def _model_with_proxy() -> ResolvedModelConfig:
+    model = _model()
+    return model.model_copy(update={"proxy_url": "http://proxy.local:8080"})
+
+
+@pytest.mark.asyncio
+async def test_provider_passes_proxy_to_client_factory_only_when_set() -> None:
+    lines = ["data: " + json.dumps({"choices": [{"delta": {"content": "hi"}}]}), "data: [DONE]"]
+    proxied = FakeClient(FakeResponse(list(lines)))
+    proxied_factory = ClientFactory(proxied)
+    awaitable = HttpModelProvider(
+        _model_with_proxy(), client_factory=proxied_factory
+    )
+    chunks = [chunk async for chunk in awaitable.stream(_request(), asyncio.Event())]
+    assert chunks[0].content_delta == "hi"
+    factory_calls = proxied_factory.calls
+    assert factory_calls[0]["proxy"] == "http://proxy.local:8080"
+
+    direct = FakeClient(FakeResponse(list(lines)))
+    direct_factory = ClientFactory(direct)
+    plain = HttpModelProvider(_model(), client_factory=direct_factory)
+    [chunk async for chunk in plain.stream(_request(), asyncio.Event())]
+    assert "proxy" not in direct_factory.calls[0]

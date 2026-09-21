@@ -64,11 +64,20 @@ class ManagedProviderConfig(ConfigurationModel):
     secret_version: int = Field(default=0, ge=0)
     requires_api_key: bool | None = None
     timeout_seconds: float = Field(default=120.0, gt=0.0, le=3600.0)
+    #: Forward-proxy URL for this provider's traffic (both http and https).
+    #: Empty means direct connection.
+    proxy_url: str = ""
 
     @model_validator(mode="after")
     def validate_secret_source(self) -> ManagedProviderConfig:
         if self.api_key_ref and self.api_key_env:
             raise ValueError("Provider must use one API key source")
+        if self.proxy_url:
+            parts = self.proxy_url.strip().lower()
+            if not (
+                parts.startswith("http://") or parts.startswith("https://")
+            ) or " " in parts:
+                raise ValueError("Provider proxy_url must be an http(s) URL")
         if self.driver in {"openai", "openai_responses", "anthropic"} and not (
             self.api_key_ref or self.api_key_env
         ):
