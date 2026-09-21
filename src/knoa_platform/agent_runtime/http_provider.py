@@ -24,6 +24,10 @@ from knoa_platform.model_adapter.parsers.openai import (
     OpenAIStreamAccumulator,
     build_chat_payload,
 )
+from knoa_platform.model_adapter.parsers.responses import (
+    ResponsesStreamAccumulator,
+    build_responses_payload,
+)
 from knoa_platform.model_adapter.content import (
     ImageNormalizationError,
     normalize_image_messages,
@@ -120,6 +124,8 @@ class HttpModelProvider(ModelProviderPort):
     ) -> AsyncIterator[ProviderChunk]:
         if self._profile.anthropic_style:
             return self._stream_anthropic(request, cancellation)
+        if self._profile.responses_style:
+            return self._stream_responses(request, cancellation)
         return self._stream_openai(request, cancellation)
 
     async def health_check(self) -> HealthStatus:
@@ -339,6 +345,116 @@ class HttpModelProvider(ModelProviderPort):
                                     )
                                     emitted_terminal = True
                                     return
+                    finally:
+                        closer.cancel()
+                        await asyncio.gather(closer, return_exceptions=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if cancellation.is_set():
+                return
+        if not emitted_terminal:
+            yield ProviderChunk(
+                finish_reason="error",
+                terminal=True,
+                error_code="provider_failed",
+                provider_model=self.model_alias,
+            )
+
+    async def _stream_responses(
+        self,
+        request: ProviderCallRequest,
+        cancellation: asyncio.Event,
+    ) -> AsyncIterator[ProviderChunk]:
+        if cancellation.is_set():
+            return
+        messages = [dict(message) for message in request.messages]
+        vision_error = self._profile.vision.validate(messages)
+        if vision_error:
+            yield ProviderChunk(
+                finish_reason="error",
+                terminal=True,
+                error_code="unsupported_input",
+                provider_model=self.model_alias,
+            )
+            return
+        try:
+            messages = normalize_image_messages(messages)
+        except ImageNormalizationError:
+            yield ProviderChunk(
+                finish_reason="error",
+                terminal=True,
+                error_code="image_input_rejected",
+                provider_model=self.model_alias,
+            )
+            return
+        payload = build_responses_payload(
+            self._model.model,
+            messages,
+            list(request.tools) if request.tools else None,
+            request.temperature,
+            request.max_output_tokens,
+        )
+        payload["stream"] = True
+        accumulator = ResponsesStreamAccumulator()
+        emitted_terminal = False
+        current_event = ""
+        try:
+            timeout = self._stream_timeout()
+            async with self._client_factory(timeout=timeout) as client:
+                async with client.stream(
+                    "POST",
+                    self._profile.chat_url,
+                    json=payload,
+                    headers=self._profile.headers,
+                ) as response:
+                    response.raise_for_status()
+                    closer = asyncio.create_task(
+                        self._close_on_cancel(response, cancellation)
+                    )
+                    try:
+                        async for line in iter_limited_lines(
+                            response,
+                            max_line_bytes=_MAX_STREAM_LINE_BYTES,
+                            max_total_bytes=_MAX_MODEL_STREAM_BYTES,
+                        ):
+                            if cancellation.is_set():
+                                return
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if line.startswith("event: "):
+                                current_event = line[7:]
+                                continue
+                            if not line.startswith("data: "):
+                                continue
+                            data = json.loads(line[6:])
+                            if not isinstance(data, dict):
+                                continue
+                            event_type = str(data.get("type") or current_event)
+                            for chunk in accumulator.process_event(event_type, data):
+                                if chunk.delta_content:
+                                    yield ProviderChunk(
+                                        content_delta=chunk.delta_content
+                                    )
+                                if chunk.delta_thinking:
+                                    yield ProviderChunk(
+                                        reasoning_delta=chunk.delta_thinking
+                                    )
+                            if event_type in {
+                                "response.completed",
+                                "response.incomplete",
+                                "response.failed",
+                                "error",
+                            }:
+                                terminal = accumulator.finish()
+                                yield self._terminal_chunk(
+                                    terminal.finish_reason,
+                                    terminal.delta_tool_calls,
+                                    terminal.usage,
+                                )
+                                emitted_terminal = True
+                                return
                     finally:
                         closer.cancel()
                         await asyncio.gather(closer, return_exceptions=True)

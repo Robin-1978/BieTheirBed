@@ -63,6 +63,7 @@ class ProviderProfile:
     health_url: str
     headers: dict[str, str]
     anthropic_style: bool = False
+    responses_style: bool = False
     cache_prompt: bool = False
     stream_options: bool = False
     requires_api_key: bool = False
@@ -99,6 +100,21 @@ def resolve_profile(
         )
 
     if provider == "anthropic":
+        if api_base:
+            # Anthropic-compatible third party (e.g. a Zen /messages
+            # endpoint): honor the explicit base with Bearer auth instead
+            # of the official API host and key headers.
+            base = api_base.rstrip("/")
+            return ProviderProfile(
+                name="anthropic",
+                server_url=base,
+                chat_url=f"{base}/messages",
+                health_url=f"{base}/models",
+                headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+                anthropic_style=True,
+                requires_api_key=True,
+                vision=_vision(True if supports_vision is None else supports_vision),
+            )
         base = "https://api.anthropic.com"
         return ProviderProfile(
             name="anthropic",
@@ -109,6 +125,19 @@ def resolve_profile(
             anthropic_style=True,
             requires_api_key=True,
             vision=_vision(True if supports_vision is None else supports_vision),
+        )
+
+    if provider == "openai_responses":
+        base = (api_base or server_url).rstrip("/")
+        return ProviderProfile(
+            name="openai_responses",
+            server_url=base,
+            chat_url=f"{base}/responses",
+            health_url=f"{base}/models",
+            headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+            responses_style=True,
+            requires_api_key=True,
+            vision=_vision(bool(supports_vision)),
         )
 
     if provider == "openai_compatible":

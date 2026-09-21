@@ -51,6 +51,7 @@ class ManagedProviderConfig(ConfigurationModel):
         "llamacpp",
         "openai",
         "openai_compatible",
+        "openai_responses",
         "anthropic",
         "workspace_remote",
     ]
@@ -68,7 +69,7 @@ class ManagedProviderConfig(ConfigurationModel):
     def validate_secret_source(self) -> ManagedProviderConfig:
         if self.api_key_ref and self.api_key_env:
             raise ValueError("Provider must use one API key source")
-        if self.driver in {"openai", "anthropic"} and not (
+        if self.driver in {"openai", "openai_responses", "anthropic"} and not (
             self.api_key_ref or self.api_key_env
         ):
             raise ValueError("Provider requires an API key reference")
@@ -90,6 +91,19 @@ class ManagedModelConfig(ConfigurationModel):
     supports_vision: bool | None = None
     context_window: int | None = Field(default=None, ge=512, le=10_000_000)
     thinking: Literal["enabled", "disabled", "auto"] | None = None
+    #: Per-model wire protocol. When set, it overrides the provider driver
+    #: for this model only, so one multi-protocol supplier (e.g. Zen with
+    #: chat/responses/messages endpoints) needs a single provider entry.
+    protocol: Literal["openai_compatible", "openai_responses", "anthropic"] | None = None
+
+
+#: Provider drivers that own their wire protocol and reject per-model override.
+_PROTOCOL_PINNED_DRIVERS = frozenset({"workspace_remote", "llamacpp"})
+
+
+def effective_model_driver(provider_driver: str, model_protocol: str | None) -> str:
+    """Return the wire driver for a model (per-model protocol wins)."""
+    return model_protocol or provider_driver
 
 
 class ManagedModelDeploymentConfig(ConfigurationModel):
@@ -253,6 +267,12 @@ class ManagedConfig(ConfigurationModel):
         for alias, model in self.models.items():
             if model.provider not in self.providers:
                 raise ValueError(f"Model '{alias}' references an unknown provider")
+            if model.protocol is not None and (
+                self.providers[model.provider].driver in _PROTOCOL_PINNED_DRIVERS
+            ):
+                raise ValueError(
+                    f"Model '{alias}' sets a protocol its provider driver owns"
+                )
         for deployment_id, deployment in self.model_deployments.items():
             if deployment.model_alias not in self.models:
                 raise ValueError(

@@ -24,6 +24,7 @@ from knoa_platform.configuration.models import (
     ManagedModelConfig,
     ManagedOperationalConfig,
     ManagedProviderConfig,
+    effective_model_driver,
 )
 from knoa_platform.extensions.models import MCP_SERVER_ID_PATTERN, MCPServerConfig
 from knoa_platform.network_tls import is_loopback_host
@@ -66,7 +67,7 @@ class ProviderConfig(BaseModel):
         required = (
             self.requires_api_key
             if self.requires_api_key is not None
-            else self.driver in {"openai", "openai_compatible", "anthropic"}
+            else self.driver in {"openai", "openai_compatible", "openai_responses", "anthropic"}
         )
         if required and not value:
             raise ValueError("API key is required for this provider account")
@@ -110,6 +111,9 @@ class ModelConfig(BaseModel):
     # fallback budget for this model (subject to the completion reserve).
     context_window: int | None = None
     thinking: ThinkingConfig | None = None
+    #: Per-model wire protocol overriding the provider driver (same
+    #: semantics as ManagedModelConfig.protocol).
+    protocol: Literal["openai_compatible", "openai_responses", "anthropic"] | None = None
 
     @field_validator("context_window", mode="before")
     @classmethod
@@ -643,7 +647,7 @@ class AppConfig(BaseModel):
                     f"provider.{provider_id}.api_key" if self.llm_api_key else ""
                 ),
                 requires_api_key=(
-                    self.llm_provider in {"openai", "openai_compatible", "anthropic"}
+                    self.llm_provider in {"openai", "openai_compatible", "openai_responses", "anthropic"}
                 ),
                 timeout_seconds=self.llm_timeout,
             )
@@ -712,7 +716,7 @@ class AppConfig(BaseModel):
             return ResolvedModelConfig(
                 alias=selected,
                 provider_name=model.provider,
-                driver=endpoint.driver,
+                driver=effective_model_driver(endpoint.driver, model.protocol),
                 server_url=endpoint.server_url or endpoint.api_base,
                 api_base=endpoint.api_base,
                 api_key=endpoint.resolved_api_key(),

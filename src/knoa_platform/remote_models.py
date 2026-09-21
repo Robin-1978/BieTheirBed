@@ -23,7 +23,7 @@ from knoa_platform.agent_runtime.model_step import (
     ProviderChunk,
 )
 from knoa_platform.config import AppConfig, ResolvedModelConfig, ThinkingConfig
-from knoa_platform.configuration.models import ManagedConfig
+from knoa_platform.configuration.models import ManagedConfig, effective_model_driver
 from knoa_platform.hub.relay import RelayFrame
 from knoa_platform.node_identity import NodeIdentity, NodeIdentityStore
 from knoa_platform.p2p import P2PClient
@@ -786,14 +786,14 @@ def _resolve_local_model(
     required = (
         provider.requires_api_key
         if provider.requires_api_key is not None
-        else provider.driver in {"openai", "openai_compatible", "anthropic"}
+        else provider.driver in {"openai", "openai_compatible", "openai_responses", "anthropic"}
     )
     if required and not api_key:
         raise ValueError("Local ModelDeployment Provider secret is not configured")
     return ResolvedModelConfig(
         alias=alias,
         provider_name=model.provider,
-        driver=provider.driver,
+        driver=effective_model_driver(provider.driver, model.protocol),
         server_url=provider.server_url or provider.api_base,
         api_base=provider.api_base,
         api_key=api_key,

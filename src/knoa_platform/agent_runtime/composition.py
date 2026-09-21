@@ -91,6 +91,7 @@ from knoa_platform.configuration.models import (
     ConfigApplyError,
     ManagedConfig,
     ManagedSkillConfig,
+    effective_model_driver,
 )
 from knoa_platform.context.memory_db import (
     ScopedEpisodicMemory,
@@ -406,14 +407,14 @@ def _resolve_managed_model(
     required = (
         provider.requires_api_key
         if provider.requires_api_key is not None
-        else provider.driver in {"openai", "openai_compatible", "anthropic"}
+        else provider.driver in {"openai", "openai_compatible", "openai_responses", "anthropic"}
     )
     if required and not api_key:
         raise ValueError(f"Provider '{model.provider}' requires a configured secret")
     return ResolvedModelConfig(
         alias=alias,
         provider_name=model.provider,
-        driver=provider.driver,
+        driver=effective_model_driver(provider.driver, model.protocol),
         server_url=provider.server_url or provider.api_base,
         api_base=provider.api_base,
         api_key=api_key,

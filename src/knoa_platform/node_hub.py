@@ -40,6 +40,7 @@ from knoa_platform.relay_protocol import (
     decode_base64url,
     encode_base64url,
 )
+from knoa_platform.configuration.models import effective_model_driver
 from knoa_platform.resource_protocol import (
     ResourceClientHello,
     accept_resource_client_hello,
@@ -867,7 +868,14 @@ class NodeRelayManager:
         for deployment_id, deployment in managed.model_deployments.items():
             model = managed.models[deployment.model_alias]
             provider = managed.providers[model.provider]
+            wire_driver = effective_model_driver(provider.driver, model.protocol)
             if provider.driver == "workspace_remote":
+                continue
+            if wire_driver == "openai_responses":
+                # The share wire only speaks chat/messages protocols; a
+                # Responses model published as openai_compatible would break
+                # remote callers. Skip until the share protocol grows a third
+                # family. Local use is unaffected.
                 continue
             publication = {
                 "deployment_id": deployment_id,
@@ -875,7 +883,7 @@ class NodeRelayManager:
                 "display_name": deployment.display_name or model.model or deployment.model_alias,
                 "model_identity": model.model or deployment.model_alias,
                 "provider_protocol": (
-                    "anthropic" if provider.driver == "anthropic" else "openai_compatible"
+                    "anthropic" if wire_driver == "anthropic" else "openai_compatible"
                 ),
                 "supports_vision": bool(model.supports_vision),
                 "materialized_digest": hashlib.sha256(
