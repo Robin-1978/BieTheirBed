@@ -134,10 +134,22 @@ export default function TaskExecutionDetailScreen() {
 
   async function command(action: "cancel" | "pause" | "resume" | "rerun") {
     if (!execution || working) return;
+    if (action === "resume" && execution.phase === "outcome_unknown") {
+      Alert.alert(t("execution.resumeUnknownTitle"), t("execution.resumeUnknownBody"), [
+        { text: t("common.cancel"), style: "cancel" },
+        { text: t("execution.resume"), style: "default", onPress: () => void runCommand(action, { acknowledgeOutcomeUnknown: true }) },
+      ]);
+      return;
+    }
+    await runCommand(action);
+  }
+
+  async function runCommand(action: "cancel" | "pause" | "resume" | "rerun", options: { acknowledgeOutcomeUnknown?: boolean } = {}) {
+    if (!execution || working) return;
     setWorking(action);
     setError("");
     try {
-      const next = await gateway.runAuthenticated((client) => client.taskExecutionCommand(execution.execution_id, action));
+      const next = await gateway.runAuthenticated((client) => client.taskExecutionCommand(execution.execution_id, action, "", options));
       if (action === "rerun" && next) {
         router.replace(`/task-executions/${next.execution_id}`);
         return;
@@ -338,7 +350,12 @@ export default function TaskExecutionDetailScreen() {
             <Action label={t("execution.stop")} danger onPress={() => void command("cancel")} disabled={Boolean(working)} busy={working === "cancel"} />
           </>
         ) : null}
-        {execution.state === "paused" ? <Action label={t("execution.resume")} primary onPress={() => void command("resume")} disabled={Boolean(working)} busy={working === "resume"} /> : null}
+        {execution.state === "paused" ? (
+          <>
+            <Action label={t("execution.resume")} primary onPress={() => void command("resume")} disabled={Boolean(working)} busy={working === "resume"} />
+            <Action label={t("execution.stop")} danger onPress={() => void command("cancel")} disabled={Boolean(working)} busy={working === "cancel"} />
+          </>
+        ) : null}
         {isTerminal(execution.state) ? <Action label={t("execution.rerun")} primary onPress={() => void command("rerun")} disabled={Boolean(working)} busy={working === "rerun"} /> : null}
       </View>
 

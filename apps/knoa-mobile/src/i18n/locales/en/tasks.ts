@@ -351,6 +351,8 @@ export const tasks = {
   "execution.pause": "Pause",
   "execution.stop": "Stop",
   "execution.resume": "Resume",
+  "execution.resumeUnknownTitle": "Resume anyway?",
+  "execution.resumeUnknownBody": "The last tool outcome is unknown and may have produced partial side effects. Review the execution steps before resuming to avoid duplicate actions.",
   "execution.rerun": "Run again with these settings",
   "execution.followUpTitle": "Add context and continue",
   "execution.followUpHint": "Add notes, logs, images, or files. The Agent will continue in the same Task context as a new execution.",
