@@ -990,16 +990,43 @@ class GatewayCoreBridge:
     ) -> tuple[dict, ...]:
         # Principal ownership is represented by the authenticated Core client
         # session.  Verify the session exists before returning registry rows.
-        await (await self._client_for(principal_id)).get_conversation_session(session_handle)
-        return tuple(
-            await asyncio.to_thread(
+        client = await self._client_for(principal_id)
+        bounded = max(1, min(int(limit), 200))
+        if session_handle:
+            await client.get_conversation_session(session_handle)
+            return tuple(
+                await asyncio.to_thread(
+                    self._artifact_store.search,
+                    session_handle,
+                    query=query,
+                    kind=kind,
+                    limit=bounded,
+                )
+            )
+        # Global mode: fan out across the principal's own sessions only.
+        sessions, _ = await client.list_conversation_sessions(
+            include_archived=True, limit=50,
+        )
+        handles = [session.session_handle for session in sessions[:20]]
+        if not handles:
+            return ()
+        per_session = max(1, min(50, bounded))
+        found = await asyncio.gather(*(
+            asyncio.to_thread(
                 self._artifact_store.search,
-                session_handle,
+                handle,
                 query=query,
                 kind=kind,
-                limit=limit,
+                limit=per_session,
             )
-        )
+            for handle in handles
+        ))
+        merged: list[dict] = []
+        for handle, items in zip(handles, found):
+            for item in items:
+                merged.append({**item, "session_handle": handle})
+        merged.sort(key=lambda item: str(item.get("artifact_id", "")), reverse=True)
+        return tuple(merged[:bounded])
 
     async def principal_task_events(
         self,

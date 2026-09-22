@@ -232,3 +232,42 @@ def test_session_key_is_uniformly_hashed_to_prevent_collision(tmp_path):
     assert store._session_key(hex_session) == raw_hash
     assert store._session_key(hex_session) != hex_session
 
+
+
+def test_artifact_search_orders_newest_first_with_created_at(tmp_path):
+    now = [1000.0]
+    store = ArtifactStore(tmp_path / "attachments", clock=lambda: now[0])
+    first = tmp_path / "a.txt"
+    first.write_text("a", encoding="utf-8")
+    ref_old = store.prepare_path("session-a", first)
+    now[0] = 2000.0
+    second = tmp_path / "b.txt"
+    second.write_text("b", encoding="utf-8")
+    ref_new = store.prepare_path("session-a", second)
+
+    matches = store.search("session-a")
+    assert [item["artifact_id"] for item in matches] == [
+        ref_new["artifact_id"], ref_old["artifact_id"],
+    ]
+    assert matches[0]["created_at"] == 2000.0
+    assert matches[1]["created_at"] == 1000.0
+
+
+def test_artifact_registry_migrates_legacy_rows_without_created_at(tmp_path):
+    legacy_root = tmp_path / "attachments"
+    store = ArtifactStore(legacy_root)
+    source = tmp_path / "old.txt"
+    source.write_text("old", encoding="utf-8")
+    ref = store.prepare_path("session-a", source)
+    db_path = store._db_path
+
+    with sqlite3.connect(db_path) as db:
+        db.execute("ALTER TABLE artifact_registry DROP COLUMN created_at")
+        db.execute("UPDATE artifact_registry SET delivered_at=1500.0 WHERE artifact_id=?", (ref["artifact_id"],))
+        db.commit()
+
+    reopened = ArtifactStore(legacy_root)
+    matches = reopened.search("session-a")
+    assert len(matches) == 1
+    # Backfilled from delivered_at instead of crashing on the old schema.
+    assert matches[0]["created_at"] == 1500.0

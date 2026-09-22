@@ -314,6 +314,7 @@ class HubApplication:
                     methods=["PUT", "DELETE"],
                 ),
                 Route("/v1/notifications", self.notifications, methods=["GET"]),
+                Route("/v1/notifications/count", self.notification_count, methods=["GET"]),
                 Route(
                     "/v1/notifications/{intent_id:str}/ack",
                     self.notification_ack,
@@ -422,6 +423,7 @@ class HubApplication:
     async def _push_delivery_loop(self) -> None:
         while True:
             try:
+                self.service.repository.prune_expired_notifications()
                 await self._deliver_pending_notifications()
             except asyncio.CancelledError:
                 raise
@@ -432,45 +434,70 @@ class HubApplication:
     async def _deliver_pending_notifications(self) -> None:
         if self._push_delivery is None:
             return
-        for delivery in self.service.repository.pending_notification_deliveries():
-            parameters = json.loads(delivery["parameters_json"])
-            deep_link = json.loads(delivery["deep_link_json"])
-            locale = str(delivery.get("locale") or "")
-            category = str(delivery["category"])
-            body = {
-                "completed": "任务已完成" if locale.startswith("zh") else "Task completed",
-                "failed": "任务执行失败，可查看并恢复" if locale.startswith("zh") else "Task failed; open to recover",
-                "cancelled": "任务已取消" if locale.startswith("zh") else "Task cancelled",
-                "approval_required": "任务需要你的确认" if locale.startswith("zh") else "Task needs your approval",
-                "interaction_required": "任务需要你的输入" if locale.startswith("zh") else "Task needs your input",
-            }.get(category, "小诺有一条新通知" if locale.startswith("zh") else "New Knoa notification")
-            data = {
-                "intent_id": str(delivery["intent_id"]),
-                "category": category,
-                "route": str(deep_link.get("route") or ""),
-                "task_id": str(deep_link.get("task_id") or ""),
-                "execution_id": str(deep_link.get("execution_id") or ""),
-            }
-            token = self.service.decrypt_push_token(str(delivery["token_ciphertext"]))
-            result = await self._push_delivery.deliver(token, {
-                "notification": {
-                    "title": str(parameters.get("title") or "Knoa")[:200],
-                    "body": body,
-                },
-                "data": data,
-                "android": {
-                    "priority": "high" if delivery["priority"] == "urgent" else "normal",
-                    "notification": {"channel_id": "knoa-task-events"},
-                },
-            })
-            self.service.repository.record_notification_delivery(
-                str(delivery["intent_id"]),
-                str(delivery["installation_id"]),
-                state="delivered" if result.delivered else "retry",
-                provider_message_id=result.provider_message_id,
-                error_code=result.error_code,
-                permanent_token_failure=result.permanent_token_failure,
-            )
+        deliveries = self.service.repository.pending_notification_deliveries()
+        semaphore = asyncio.Semaphore(8)
+        await asyncio.gather(*(
+            self._deliver_one(delivery, semaphore) for delivery in deliveries
+        ))
+
+    async def _deliver_one(self, delivery: dict, semaphore: asyncio.Semaphore) -> None:
+        # One slow/poisoned device must not hold the other 99 behind it.
+        # Unexpected failures are recorded as retry (existing backoff applies)
+        # instead of aborting the batch.
+        async with semaphore:
+            try:
+                parameters = json.loads(delivery["parameters_json"])
+                deep_link = json.loads(delivery["deep_link_json"])
+                locale = str(delivery.get("locale") or "")
+                category = str(delivery["category"])
+                body = {
+                    "completed": "任务已完成" if locale.startswith("zh") else "Task completed",
+                    "failed": "任务执行失败，可查看并恢复" if locale.startswith("zh") else "Task failed; open to recover",
+                    "cancelled": "任务已取消" if locale.startswith("zh") else "Task cancelled",
+                    "approval_required": "任务需要你的确认" if locale.startswith("zh") else "Task needs your approval",
+                    "interaction_required": "任务需要你的输入" if locale.startswith("zh") else "Task needs your input",
+                }.get(category, "小诺有一条新通知" if locale.startswith("zh") else "New Knoa notification")
+                data = {
+                    "intent_id": str(delivery["intent_id"]),
+                    "category": category,
+                    "route": str(deep_link.get("route") or ""),
+                    "task_id": str(deep_link.get("task_id") or ""),
+                    "execution_id": str(deep_link.get("execution_id") or ""),
+                }
+                token = self.service.decrypt_push_token(str(delivery["token_ciphertext"]))
+                result = await self._push_delivery.deliver(token, {
+                    "notification": {
+                        "title": str(parameters.get("title") or "Knoa")[:200],
+                        "body": body,
+                    },
+                    "data": data,
+                    "android": {
+                        "priority": "high" if delivery["priority"] == "urgent" else "normal",
+                        "notification": {"channel_id": "knoa-task-events"},
+                    },
+                })
+                self.service.repository.record_notification_delivery(
+                    str(delivery["intent_id"]),
+                    str(delivery["installation_id"]),
+                    state="delivered" if result.delivered else "retry",
+                    provider_message_id=result.provider_message_id,
+                    error_code=result.error_code,
+                    permanent_token_failure=result.permanent_token_failure,
+                )
+            except Exception:
+                logger.exception(
+                    "Push delivery failed for intent %s",
+                    delivery.get("intent_id"),
+                )
+                try:
+                    self.service.repository.record_notification_delivery(
+                        str(delivery["intent_id"]),
+                        str(delivery["installation_id"]),
+                        state="retry",
+                        error_code="hub_internal",
+                    )
+                except Exception:
+                    logger.exception("Push retry bookkeeping failed")
 
     async def health(self, _request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "hub_id": self.service.hub_id})
@@ -562,6 +589,16 @@ class HubApplication:
         return JSONResponse({
             "notifications": list(items),
             "next_cursor": str(next_cursor),
+        })
+
+    async def notification_count(self, request: Request) -> JSONResponse:
+        authenticated = self._member(request)
+        if isinstance(authenticated, JSONResponse):
+            return authenticated
+        counts = self.service.repository.notification_counts(authenticated)
+        return JSONResponse({
+            "unread": counts["unread"],
+            "latest_cursor": str(counts["latest_cursor"]),
         })
 
     async def notification_ack(self, request: Request) -> JSONResponse:
@@ -840,10 +877,17 @@ class HubApplication:
                     entity_kind=request.query_params.get("kind", ""),
                     node_id=request.query_params.get("node_id", ""),
                     limit=int(request.query_params.get("limit", "200")),
+                    updated_after=float(request.query_params.get("updated_after", "0") or "0"),
                 )
             except (TypeError, ValueError):
                 return JSONResponse({"error": "invalid_request"}, status_code=400)
-            return JSONResponse({"items": list(items)})
+            latest = 0.0
+            for item in items:
+                try:
+                    latest = max(latest, float(item.get("source_updated_at", 0) or 0))
+                except (TypeError, ValueError):
+                    continue
+            return JSONResponse({"items": list(items), "latest_updated_at": latest})
         parsed = await self._parse(request, WorkProjectionRequest)
         if isinstance(parsed, JSONResponse):
             return parsed

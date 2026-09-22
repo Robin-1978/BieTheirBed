@@ -399,7 +399,8 @@ class ArtifactUploadQuery(GatewayQuery):
 
 
 class ArtifactSearchQuery(GatewayQuery):
-    session_handle: str = Field(min_length=1, max_length=256)
+    # Empty searches every session owned by the authenticated principal.
+    session_handle: str = Field(default="", max_length=256)
     q: str = Field(default="", max_length=160)
     kind: Literal["", "image", "file"] = ""
     limit: int = Field(default=50, ge=1, le=200)

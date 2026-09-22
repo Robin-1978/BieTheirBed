@@ -29,3 +29,8 @@ class ArtifactRef(BaseModel):
     retention: Literal["temporary", "session", "persistent"] = "temporary"
     status: Literal["available", "delivered"] = "available"
     visibility: Literal["agent", "user"] = "user"
+    # Owning conversation session. Empty for single-session responses that
+    # already carry the session in the request path/query.
+    session_handle: str = Field(default="", max_length=256)
+    # Unix timestamp of registry insertion; 0 for rows predating tracking.
+    created_at: float = Field(default=0.0, ge=0.0)

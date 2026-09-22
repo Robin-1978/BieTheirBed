@@ -669,6 +669,48 @@
         }
       }
     },
+    "/v1/p2p/ice-servers": {
+      "get": {
+        "operationId": "getGatewayP2PIceServers",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configured WebRTC ICE and TURN servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/P2PIceServersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/resource-p2p/offer": {
       "post": {
         "operationId": "createResourceP2PAnswer",
@@ -6035,14 +6077,14 @@
             "gatewaySession": []
           }
         ],
+        "description": "Empty session_handle searches every session owned by the caller.",
         "parameters": [
           {
             "name": "session_handle",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
-              "minLength": 1,
               "maxLength": 256
             }
           },
@@ -7543,6 +7585,86 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "createMemory",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryUpsertRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Memory saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySavedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/memories/clear": {
@@ -7608,6 +7730,107 @@
       }
     },
     "/v1/memories/{key}": {
+      "put": {
+        "operationId": "updateMemory",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryUpsertRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySavedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "operationId": "deleteMemory",
         "security": [
@@ -9507,6 +9730,18 @@
             ],
             "title": "Visibility",
             "type": "string"
+          },
+          "session_handle": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Session Handle",
+            "type": "string"
+          },
+          "created_at": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Created At",
+            "type": "number"
           }
         },
         "required": [
@@ -11529,6 +11764,44 @@
         "title": "DeletedResponse",
         "type": "object"
       },
+      "DesktopGlanceResponse": {
+        "properties": {
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
+          },
+          "attemptId": {
+            "default": "",
+            "title": "Attemptid",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "integer"
+          },
+          "thumbnailBase64": {
+            "default": "",
+            "title": "Thumbnailbase64",
+            "type": "string"
+          },
+          "windowTitle": {
+            "default": "",
+            "title": "Windowtitle",
+            "type": "string"
+          },
+          "activeApp": {
+            "default": "",
+            "title": "Activeapp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "taskId",
+          "timestamp"
+        ],
+        "title": "DesktopGlanceResponse",
+        "type": "object"
+      },
       "DeviceRevokedResponse": {
         "properties": {
           "revoked": {
@@ -12864,6 +13137,23 @@
             ],
             "default": null,
             "title": "Thinking"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "enum": [
+                  "openai_compatible",
+                  "openai_responses",
+                  "anthropic"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Protocol"
           }
         },
         "required": [
@@ -13008,6 +13298,7 @@
               "llamacpp",
               "openai",
               "openai_compatible",
+              "openai_responses",
               "anthropic",
               "workspace_remote"
             ],
@@ -13068,6 +13359,16 @@
             "maximum": 3600.0,
             "title": "Timeout Seconds",
             "type": "number"
+          },
+          "proxy_url": {
+            "default": "",
+            "title": "Proxy Url",
+            "type": "string"
+          },
+          "session_header": {
+            "default": "",
+            "title": "Session Header",
+            "type": "string"
           }
         },
         "required": [
@@ -13101,6 +13402,137 @@
           }
         },
         "title": "ManagedSkillConfig",
+        "type": "object"
+      },
+      "MemoryClearedResponse": {
+        "properties": {
+          "cleared": {
+            "default": true,
+            "title": "Cleared",
+            "type": "boolean"
+          }
+        },
+        "title": "MemoryClearedResponse",
+        "type": "object"
+      },
+      "MemoryItemRecord": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "importance": {
+            "title": "Importance",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          },
+          "source": {
+            "default": "explicit",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "category",
+          "importance",
+          "confidence"
+        ],
+        "title": "MemoryItemRecord",
+        "type": "object"
+      },
+      "MemoryListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MemoryItemRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "MemoryListResponse",
+        "type": "object"
+      },
+      "MemorySavedResponse": {
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "saved": {
+            "default": true,
+            "title": "Saved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "MemorySavedResponse",
+        "type": "object"
+      },
+      "MemoryUpsertRequest": {
+        "properties": {
+          "key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          },
+          "category": {
+            "default": "general",
+            "title": "Category",
+            "type": "string"
+          },
+          "importance": {
+            "default": "relevant",
+            "enum": [
+              "core",
+              "relevant"
+            ],
+            "title": "Importance",
+            "type": "string"
+          },
+          "confidence": {
+            "default": 1.0,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "MemoryUpsertRequest",
         "type": "object"
       },
       "ModelBindingSpec": {
@@ -13593,6 +14025,69 @@
           "answer"
         ],
         "title": "P2PAnswerResponse",
+        "type": "object"
+      },
+      "P2PIceServerConfig": {
+        "properties": {
+          "urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Urls"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Username"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Credential"
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "title": "P2PIceServerConfig",
+        "type": "object"
+      },
+      "P2PIceServersResponse": {
+        "properties": {
+          "ice_servers": {
+            "items": {
+              "$ref": "#/components/schemas/P2PIceServerConfig"
+            },
+            "title": "Ice Servers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ice_servers"
+        ],
+        "title": "P2PIceServersResponse",
         "type": "object"
       },
       "P2POfferRequest": {

@@ -148,6 +148,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/p2p/ice-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getGatewayP2PIceServers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/resource-p2p/offer": {
         parameters: {
             query?: never;
@@ -804,6 +820,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/desktop/glance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getDesktopGlance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tasks/{task_id}/glance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getTaskGlance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/task-executions/{execution_id}": {
         parameters: {
             query?: never;
@@ -955,6 +1003,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description Empty session_handle searches every session owned by the caller. */
         get: operations["searchArtifacts"];
         put?: never;
         post: operations["uploadArtifact"];
@@ -1183,6 +1232,54 @@ export interface paths {
         put?: never;
         post: operations["prepareCatalogCapability"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listMemories"];
+        put?: never;
+        post: operations["createMemory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memories/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["clearMemories"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memories/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["updateMemory"];
+        post?: never;
+        delete: operations["deleteMemory"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1592,6 +1689,16 @@ export interface components {
              * @enum {string}
              */
             visibility: "agent" | "user";
+            /**
+             * Session Handle
+             * @default
+             */
+            session_handle: string;
+            /**
+             * Created At
+             * @default 0
+             */
+            created_at: number;
         };
         /** ArtifactResponse */
         ArtifactResponse: {
@@ -2477,6 +2584,33 @@ export interface components {
              */
             deleted: boolean;
         };
+        /** DesktopGlanceResponse */
+        DesktopGlanceResponse: {
+            /** Taskid */
+            taskId: string;
+            /**
+             * Attemptid
+             * @default
+             */
+            attemptId: string;
+            /** Timestamp */
+            timestamp: number;
+            /**
+             * Thumbnailbase64
+             * @default
+             */
+            thumbnailBase64: string;
+            /**
+             * Windowtitle
+             * @default
+             */
+            windowTitle: string;
+            /**
+             * Activeapp
+             * @default
+             */
+            activeApp: string;
+        };
         /** DeviceRevokedResponse */
         DeviceRevokedResponse: {
             /** Revoked */
@@ -3086,6 +3220,11 @@ export interface components {
              * @default null
              */
             thinking: ("enabled" | "disabled" | "auto") | null;
+            /**
+             * Protocol
+             * @default null
+             */
+            protocol: ("openai_compatible" | "openai_responses" | "anthropic") | null;
         };
         /** ManagedModelDeploymentConfig */
         ManagedModelDeploymentConfig: {
@@ -3143,7 +3282,7 @@ export interface components {
             max_output_tokens: number;
             /**
              * Context Window Budget
-             * @default 8192
+             * @default 65536
              */
             context_window_budget: number;
             /**
@@ -3161,6 +3300,11 @@ export interface components {
              * @default 120
              */
             generation_drain_seconds: number;
+            /**
+             * Agent Configuration Enabled
+             * @default false
+             */
+            agent_configuration_enabled: boolean;
         };
         /** ManagedProviderConfig */
         ManagedProviderConfig: {
@@ -3168,7 +3312,7 @@ export interface components {
              * Driver
              * @enum {string}
              */
-            driver: "llamacpp" | "openai" | "openai_compatible" | "anthropic" | "workspace_remote";
+            driver: "llamacpp" | "openai" | "openai_compatible" | "openai_responses" | "anthropic" | "workspace_remote";
             /**
              * Server Url
              * @default
@@ -3214,6 +3358,16 @@ export interface components {
              * @default 120
              */
             timeout_seconds: number;
+            /**
+             * Proxy Url
+             * @default
+             */
+            proxy_url: string;
+            /**
+             * Session Header
+             * @default
+             */
+            session_header: string;
         };
         /** ManagedSkillConfig */
         ManagedSkillConfig: {
@@ -3237,6 +3391,72 @@ export interface components {
              * @default
              */
             content_digest: string;
+        };
+        /** MemoryClearedResponse */
+        MemoryClearedResponse: {
+            /**
+             * Cleared
+             * @default true
+             */
+            cleared: boolean;
+        };
+        /** MemoryItemRecord */
+        MemoryItemRecord: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+            /** Category */
+            category: string;
+            /** Importance */
+            importance: string;
+            /** Confidence */
+            confidence: number;
+            /**
+             * Source
+             * @default explicit
+             */
+            source: string;
+        };
+        /** MemoryListResponse */
+        MemoryListResponse: {
+            /** Items */
+            items: components["schemas"]["MemoryItemRecord"][];
+            /** Total */
+            total: number;
+        };
+        /** MemorySavedResponse */
+        MemorySavedResponse: {
+            /** Key */
+            key: string;
+            /**
+             * Saved
+             * @default true
+             */
+            saved: boolean;
+        };
+        /** MemoryUpsertRequest */
+        MemoryUpsertRequest: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
+            /**
+             * Category
+             * @default general
+             */
+            category: string;
+            /**
+             * Importance
+             * @default relevant
+             * @enum {string}
+             */
+            importance: "core" | "relevant";
+            /**
+             * Confidence
+             * @default 1
+             */
+            confidence: number;
         };
         /** ModelBindingSpec */
         ModelBindingSpec: {
@@ -3337,6 +3557,12 @@ export interface components {
              * @default []
              */
             command: string[];
+            /**
+             * Backend
+             * @default app_server
+             * @enum {string}
+             */
+            backend: "app_server" | "exec_json";
             /**
              * Home
              * @default
@@ -3473,6 +3699,26 @@ export interface components {
         /** P2PAnswerResponse */
         P2PAnswerResponse: {
             answer: components["schemas"]["P2PAnswer"];
+        };
+        /** P2PIceServerConfig */
+        P2PIceServerConfig: {
+            /** Urls */
+            urls: string[] | string;
+            /**
+             * Username
+             * @default null
+             */
+            username: string | null;
+            /**
+             * Credential
+             * @default null
+             */
+            credential: string | null;
+        };
+        /** P2PIceServersResponse */
+        P2PIceServersResponse: {
+            /** Ice Servers */
+            ice_servers: components["schemas"]["P2PIceServerConfig"][];
         };
         /** P2POfferRequest */
         P2POfferRequest: {
@@ -5144,6 +5390,44 @@ export interface operations {
             };
             /** @description Request rejected */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getGatewayP2PIceServers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configured WebRTC ICE and TURN servers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["P2PIceServersResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8670,6 +8954,120 @@ export interface operations {
             };
         };
     };
+    getDesktopGlance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Live desktop glance */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesktopGlanceResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getTaskGlance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task desktop glance */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesktopGlanceResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     getTaskExecution: {
         parameters: {
             query?: never;
@@ -9384,8 +9782,8 @@ export interface operations {
     };
     searchArtifacts: {
         parameters: {
-            query: {
-                session_handle: string;
+            query?: {
+                session_handle?: string;
                 q?: string;
                 kind?: "image" | "file";
                 limit?: number;
@@ -10480,6 +10878,337 @@ export interface operations {
             };
             /** @description Request rejected */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listMemories: {
+        parameters: {
+            query?: {
+                category?: string;
+                importance?: "core" | "relevant";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of memories */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Memory saved */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemorySavedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    clearMemories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Memories cleared */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryClearedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    updateMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Memory updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemorySavedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteMemory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Memory deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

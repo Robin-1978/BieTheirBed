@@ -469,6 +469,33 @@ class HubRepository:
             ).fetchall()
         return tuple(self._decode_notification(row) for row in rows)
 
+    def notification_counts(self, account_id: str) -> dict:
+        """Lightweight poll state: unread total plus newest inbox cursor.
+
+        Lets mobile clients skip the full page walk when nothing changed
+        instead of pulling up to 1000 rows every 15 seconds.
+        """
+        now = self._clock()
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT COUNT(*) AS unread,
+                          COALESCE(MAX(rowid), 0) AS latest_cursor
+                   FROM notification_inbox
+                   WHERE account_id=? AND expires_at>?
+                     AND acknowledged_at IS NULL""",
+                (account_id, now),
+            ).fetchone()
+            latest_any = db.execute(
+                """SELECT COALESCE(MAX(rowid), 0) AS latest_cursor
+                   FROM notification_inbox
+                   WHERE account_id=? AND expires_at>?""",
+                (account_id, now),
+            ).fetchone()
+        return {
+            "unread": int(row["unread"]),
+            "latest_cursor": int(latest_any["latest_cursor"]),
+        }
+
     def acknowledge_notification(self, account_id: str, intent_id: str) -> dict:
         with self._connect() as db:
             db.execute(
@@ -484,6 +511,27 @@ class HubRepository:
         if row is None:
             raise LookupError("Notification not found")
         return self._decode_notification(row)
+
+    def prune_expired_notifications(self) -> int:
+        """Delete expired inbox rows and their orphaned deliveries.
+
+        Reads filter on `expires_at` but never delete, so without this the
+        inbox and delivery tables grow without bound. Returns rows removed
+        from the inbox; delivery cleanup is best-effort first.
+        """
+        now = self._clock()
+        with self._connect() as db:
+            db.execute(
+                """DELETE FROM notification_deliveries WHERE intent_id IN (
+                       SELECT intent_id FROM notification_inbox WHERE expires_at<=?
+                   )""",
+                (now,),
+            )
+            cursor = db.execute(
+                "DELETE FROM notification_inbox WHERE expires_at<=?",
+                (now,),
+            )
+            return int(cursor.rowcount)
 
     def pending_notification_deliveries(self, *, limit: int = 100) -> tuple[dict, ...]:
         with self._connect() as db:
@@ -1002,12 +1050,13 @@ class HubRepository:
         return self._decode_work_projection(row)
 
     def list_work_projections(
-        self, *, entity_kind: str = "", node_id: str = "", limit: int = 200
+        self, *, entity_kind: str = "", node_id: str = "", limit: int = 200,
+        updated_after: float = 0.0,
     ) -> tuple[dict, ...]:
         if not 1 <= limit <= 500:
             raise ValueError("Work projection limit is invalid")
-        clauses = ["workspace_id=?"]
-        values: list[object] = [self.hub_id]
+        clauses = ["workspace_id=?", "source_updated_at>?"]
+        values: list[object] = [self.hub_id, float(updated_after)]
         if entity_kind:
             clauses.append("entity_kind=?")
             values.append(entity_kind)
