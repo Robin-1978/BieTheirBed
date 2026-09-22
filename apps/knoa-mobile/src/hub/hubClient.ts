@@ -379,6 +379,20 @@ export async function acknowledgeHubNotification(intentId: string): Promise<void
   );
 }
 
+export async function getHubNotificationCounts(): Promise<{ unread: number; latestCursor: number }> {
+  const connection = await requiredHubConnection();
+  const result = await request<{ unread: number; latest_cursor: string }>(
+    connection.url,
+    connection.token,
+    "/v1/notifications/count",
+  );
+  const latestCursor = Number(result.latest_cursor);
+  return {
+    unread: Number(result.unread) || 0,
+    latestCursor: Number.isSafeInteger(latestCursor) ? latestCursor : 0,
+  };
+}
+
 export async function resolveAndroidRelease(
   nodeRelease: () => Promise<AndroidRelease>,
 ): Promise<AndroidRelease | null> {
@@ -597,18 +611,24 @@ export async function loadWorkspaceResourceState(): Promise<WorkspaceResourceSta
 export async function listWorkspaceWork(
   kind: "" | "conversation" | "task" = "",
   nodeId = "",
-): Promise<WorkspaceWorkProjection[]> {
+  updatedAfter = 0,
+): Promise<{ items: WorkspaceWorkProjection[]; latestUpdatedAt: number }> {
   const connection = await requiredHubConnection();
   const query = new URLSearchParams();
   if (kind) query.set("kind", kind);
   if (nodeId) query.set("node_id", nodeId);
+  if (updatedAfter > 0) query.set("updated_after", String(updatedAfter));
   query.set("limit", "300");
-  const result = await request<{ items: WorkspaceWorkProjection[] }>(
+  const result = await request<{ items: WorkspaceWorkProjection[]; latest_updated_at?: number }>(
     connection.url,
     connection.token,
     `/v1/work-projections?${query.toString()}`,
   );
-  return result.items;
+  const latestUpdatedAt = Number(result.latest_updated_at ?? 0);
+  return {
+    items: result.items,
+    latestUpdatedAt: Number.isFinite(latestUpdatedAt) ? latestUpdatedAt : 0,
+  };
 }
 
 export async function putWorkspaceResource(resource: {

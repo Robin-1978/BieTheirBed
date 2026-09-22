@@ -7,3 +7,4 @@ export * from "./AssistantArtifactItem";
 export * from "./ChatFeedbackBanner";
 export * from "./ClipboardSuggestionPill";
 export * from "./ProactiveDeck";
+export * from "./AgentPickerSheet";

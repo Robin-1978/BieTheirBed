@@ -20,7 +20,7 @@ import {
 } from "@/hub/hubClient";
 import { rememberWorkspace } from "@/navigation/navigationPreference";
 import { triggerWelcomeHealthCheck } from "@/onboarding/firstConnect";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { useI18n } from "@/i18n";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
@@ -34,7 +34,9 @@ export default function WorkspaceScreen() {
   const workspaceId = value(params.workspaceId);
   const { t } = useI18n();
   const fallbackName = value(params.workspaceName) || t("nav.workspace");
-  const gateway = useGateway();
+  const gateway = useFleet();
+  const { status } = useConnection();
+  const { runAuthenticated } = useSession();
 
   const [workspace, setWorkspace] = useState<HostedWorkspace | null>(null);
   const [counts, setCounts] = useState({ work: 0, resources: 0, nodes: 0, onlineNodes: 0, members: 0 });
@@ -84,7 +86,7 @@ export default function WorkspaceScreen() {
       const [nodes, resources, work, members] = await Promise.all([
         listHubNodes(),
         loadWorkspaceResourceState().catch(() => null),
-        listWorkspaceWork().catch(() => []),
+        listWorkspaceWork().then((result) => result.items).catch(() => []),
         connection.accountId ? listHostedWorkspaceMembers(target.workspaceId).catch(() => []) : Promise.resolve([]),
       ]);
       const snapshot: WorkspaceCacheSnapshot = {
@@ -144,13 +146,13 @@ export default function WorkspaceScreen() {
   }, [celebration, showConnected]);
 
   useEffect(() => {
-    if (!showConnected || healthCheckStarted.current || gateway.status !== "ready") return;
+    if (!showConnected || healthCheckStarted.current || status !== "ready") return;
     healthCheckStarted.current = true;
-    void triggerWelcomeHealthCheck(gateway, workspaceId, {
+    void triggerWelcomeHealthCheck({ status, defaultAgentId: gateway.defaultAgentId, runAuthenticated }, workspaceId, {
       title: t("taskTemplates.healthTitle"),
       goal: t("taskTemplates.healthGoal"),
     });
-  }, [gateway, gateway.status, showConnected, t, workspaceId]);
+  }, [gateway, runAuthenticated, status, showConnected, t, workspaceId]);
 
   async function startConnectFlow() {
     if (connectWorking) return;
@@ -262,9 +264,9 @@ export default function WorkspaceScreen() {
               <View style={styles.activeNodeHeaderRow}>
                 <Text style={styles.activeNodeLabel}>{t("workspace.activeNode")}</Text>
                 <View style={styles.activeStatusPill}>
-                  <View style={[styles.statusDot, gateway.status === "ready" ? styles.statusDotOnline : styles.statusDotOffline]} />
+                  <View style={[styles.statusDot, status === "ready" ? styles.statusDotOnline : styles.statusDotOffline]} />
                   <Text style={styles.activeStatusText}>
-                    {gateway.status === "ready" ? t("workspace.online") : t("nodeHeader.connecting")}
+                    {status === "ready" ? t("workspace.online") : t("nodeHeader.connecting")}
                   </Text>
                 </View>
               </View>
@@ -391,15 +393,15 @@ export default function WorkspaceScreen() {
             </View>
             <Text style={styles.connectedTitle}>{t("workspace.connectedTitle")}</Text>
             <Text style={styles.connectedDetail}>{t("workspace.connectedDetail")}</Text>
-            {gateway.status === "ready" ? (
+            {status === "ready" ? (
               <Text style={styles.connectedHealthHint}>{t("workspace.connectedHealthCheck")}</Text>
             ) : null}
             <AppPressable
-              style={[styles.connectedAction, gateway.status !== "ready" && styles.connectedActionDisabled]}
-              disabled={gateway.status !== "ready"}
+              style={[styles.connectedAction, status !== "ready" && styles.connectedActionDisabled]}
+              disabled={status !== "ready"}
               onPress={() => router.push({ pathname: "/(tabs)", params: { workspaceId, workspaceName: displayName, nodeId: gateway.nodeId } })}
             >
-              {gateway.status === "ready" ? (
+              {status === "ready" ? (
                 <Text style={styles.connectedActionText}>{t("workspace.startChatting")}</Text>
               ) : (
                 <ActivityIndicator color={colors.accent} size="small" />

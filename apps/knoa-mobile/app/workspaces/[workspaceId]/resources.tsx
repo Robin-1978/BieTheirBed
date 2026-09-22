@@ -15,7 +15,7 @@ import {
 } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet } from "@/state/GatewayProvider";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors, radii, shadows, spacing, typography } from "@/theme";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
@@ -23,7 +23,7 @@ import { userFacingError } from "@/ui/userFacingError";
 
 export default function WorkspaceResourcesScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
-  const gateway = useGateway();
+  const gateway = useFleet();
   const { t } = useI18n();
   const [state, setState] = useState<WorkspaceResourceState | null>(null);
   const [nodes, setNodes] = useState<HubNode[]>([]);
@@ -263,8 +263,8 @@ const styles = StyleSheet.create({
   card: { padding: spacing.medium, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   resourceIcon: { width: 44, height: 44, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
-  cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
-  rowTitle: { color: colors.ink, fontWeight: "800" },
+  cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
+  rowTitle: { color: colors.ink, fontWeight: "700" },
   endpoint: { padding: spacing.medium, gap: spacing.small, borderRadius: radii.medium, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.line },
   healthy: { color: colors.accent, ...typography.small, fontWeight: "700" },
   warning: { color: colors.warning, ...typography.small, fontWeight: "700" },

@@ -8,11 +8,11 @@ import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { cloneManagedConfig } from "@/models/modelConfiguration";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useSession } from "@/state/GatewayProvider";
 import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 export default function AgentsScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
   const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
   meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
   card: { padding: spacing.medium, gap: spacing.small, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
-  cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
+  cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
   detail: { color: colors.muted, ...typography.small, lineHeight: 18 },
   healthy: { color: colors.accent, ...typography.small, lineHeight: 18, fontWeight: "700" },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },

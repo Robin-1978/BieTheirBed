@@ -16,11 +16,11 @@ import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { loadConnectionIdentity } from "@/security/deviceIdentity";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 export default function PairScreen() {
-  const gateway = useGateway();
+  const gateway = useFleet();
   const params = useLocalSearchParams<{
     workspaceId?: string;
     workspaceName?: string;

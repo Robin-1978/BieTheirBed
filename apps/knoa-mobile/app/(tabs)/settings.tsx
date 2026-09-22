@@ -6,18 +6,19 @@ import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { transportLabelKey } from "@/api/transportPresentation";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { presentNodeName } from "@/presentation/nodePresentation";
 
 export default function NodeAndSettingsScreen() {
-  const gateway = useGateway();
+  const fleet = useFleet();
+  const connection = useConnection();
   const { t } = useI18n();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const workspaceId = stringParam(params.workspaceId);
   const workspaceName = stringParam(params.workspaceName) || t("nav.workspace");
-  const nodeId = stringParam(params.nodeId) || gateway.nodeId;
-  const node = gateway.nodes.find((item) => item.nodeId === nodeId);
+  const nodeId = stringParam(params.nodeId) || fleet.nodeId;
+  const node = fleet.nodes.find((item) => item.nodeId === nodeId);
   const nodeName = presentNodeName(node, t("common.unnamedComputer"));
 
   const [working, setWorking] = useState("");
@@ -25,11 +26,11 @@ export default function NodeAndSettingsScreen() {
   const reconnect = useCallback(async () => {
     setWorking("reconnect");
     try {
-      await gateway.reconnect();
+      await connection.reconnect();
     } finally {
       setWorking("");
     }
-  }, [gateway]);
+  }, [connection]);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
@@ -46,16 +47,16 @@ export default function NodeAndSettingsScreen() {
             </Text>
           </View>
           <View style={styles.statusBadge}>
-            <Text style={gateway.status === "ready" ? styles.onlineText : styles.offlineText}>
-              {gateway.status === "ready" ? t("nodeHeader.online") : t("nodeHeader.connecting")}
+            <Text style={connection.status === "ready" ? styles.onlineText : styles.offlineText}>
+              {connection.status === "ready" ? t("nodeHeader.online") : t("nodeHeader.connecting")}
             </Text>
           </View>
         </View>
 
-        {gateway.status === "ready" ? (
+        {connection.status === "ready" ? (
           <View style={styles.transportRow}>
             <Text style={styles.transportLabel}>{t("nodeSettings.activeTransport")}:</Text>
-            <Text style={styles.transportValue}>{t(transportLabelKey(gateway.transportMode))}</Text>
+            <Text style={styles.transportValue}>{t(transportLabelKey(connection.transportMode))}</Text>
           </View>
         ) : null}
 

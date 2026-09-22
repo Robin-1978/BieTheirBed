@@ -26,34 +26,45 @@ import {
   hostRelativePath,
 } from "@/components/trophyPresentation";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { loadTaskCache, storeTaskCache } from "@/storage/taskCache";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 type AssetFilter = "all" | "tasks" | "artifacts";
+type ArtifactKindFilter = "all" | "image" | "file";
 
 export default function UnifiedAssetsScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { status } = useConnection();
+  const { nodeId } = useFleet();
   const { t } = useI18n();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
 
   const [activeFilter, setActiveFilter] = useState<AssetFilter>("all");
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [artifacts, setArtifacts] = useState<Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string }>>([]);
+  const [artifacts, setArtifacts] = useState<Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string; session_handle?: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [sharing, setSharing] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState<ArtifactKindFilter>("all");
+  const [continuing, setContinuing] = useState("");
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [previewFile, setPreviewFile] = useState<ResolvedArtifactFile | null>(null);
 
-  const taskCacheScope = params.nodeId?.trim() || gateway.nodeId || "unselected";
+  const taskCacheScope = params.nodeId?.trim() || nodeId || "unselected";
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const refresh = useCallback(async (manual = false) => {
     if (!gateway.client) {
       setLoading(false);
-      setError(gateway.status === "error" ? t("results.loadFailed") : t("chat.reconnecting"));
+      setError(status === "error" ? t("results.loadFailed") : t("chat.reconnecting"));
       setRefreshing(false);
       return;
     }
@@ -63,9 +74,13 @@ export default function UnifiedAssetsScreen() {
     try {
       const [taskRes, artifactRes] = await Promise.all([
         gateway.runAuthenticated((client) => client.listTasks({ includeArchived: true, limit: 100 })),
-        gateway.sessionHandle
-          ? gateway.runAuthenticated((client) => client.searchArtifacts({ sessionHandle: gateway.sessionHandle || "" }))
-          : Promise.resolve({ artifacts: [] }),
+        gateway.runAuthenticated((client) => client.searchArtifacts({
+          // Empty handle = every session owned by this principal (gateway global mode).
+          sessionHandle: gateway.sessionHandle || "",
+          query: debouncedQuery || undefined,
+          kind: kindFilter === "all" ? undefined : kindFilter,
+          limit: 100,
+        })),
       ]);
       setTasks(taskRes.tasks);
       setArtifacts(artifactRes.artifacts);
@@ -76,7 +91,11 @@ export default function UnifiedAssetsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle, gateway.status, t, taskCacheScope]);
+  }, [gateway.client, gateway.runAuthenticated, gateway.sessionHandle, status, t, taskCacheScope, debouncedQuery, kindFilter]);
+
+  useEffect(() => {
+    void refresh();
+  }, [debouncedQuery, kindFilter, refresh]);
 
   useEffect(() => {
     let active = true;
@@ -97,35 +116,41 @@ export default function UnifiedAssetsScreen() {
     [tasks],
   );
 
-  async function openArtifactPreview(item: (typeof artifacts)[number], saveOnly = false) {
-    if (!gateway.sessionHandle) return;
-    try {
-      const artifactItem = assistantArtifactItems([item])[0];
-      if (!artifactItem) return;
-      const isImage = item.kind === "image" || item.media_type.startsWith("image/");
-      const resolved = await resolveAssistantArtifactFile(
-        {
-          artifact: item,
-          key: item.artifact_id,
-          displayName: item.name,
-          cacheFileName: artifactItem.cacheFileName,
-          isImage,
+  async function resolveArtifact(item: (typeof artifacts)[number]): Promise<ResolvedArtifactFile | null> {
+    const ownerHandle = item.session_handle || gateway.sessionHandle;
+    if (!ownerHandle) return null;
+    const artifactItem = assistantArtifactItems([item])[0];
+    if (!artifactItem) return null;
+    const isImage = item.kind === "image" || item.media_type.startsWith("image/");
+    return resolveAssistantArtifactFile(
+      {
+        artifact: item,
+        key: item.artifact_id,
+        displayName: item.name,
+        cacheFileName: artifactItem.cacheFileName,
+        isImage,
+      },
+      {
+        cachedUri: (name) => {
+          const file = new File(Paths.document, `artifact-${name}`);
+          return file.exists ? file.uri : null;
         },
-        {
-          cachedUri: (name) => {
-            const file = new File(Paths.document, `artifact-${name}`);
-            return file.exists ? file.uri : null;
-          },
-          download: (artifactId) => gateway.runAuthenticated((client) => client.downloadArtifact(gateway.sessionHandle || "", artifactId)),
-          write: (name, bytes) => {
-            const file = new File(Paths.document, `artifact-${name}`);
-            file.create({ overwrite: true, intermediates: true });
-            file.write(bytes);
-            return file.uri;
-          },
+        download: (artifactId) => gateway.runAuthenticated((client) => client.downloadArtifact(ownerHandle, artifactId)),
+        write: (name, bytes) => {
+          const file = new File(Paths.document, `artifact-${name}`);
+          file.create({ overwrite: true, intermediates: true });
+          file.write(bytes);
+          return file.uri;
         },
-      );
+      },
+    );
+  }
 
+  async function openArtifactPreview(item: (typeof artifacts)[number], saveOnly = false) {
+    try {
+      const resolved = await resolveArtifact(item);
+      if (!resolved) return;
+      const isImage = item.kind === "image" || item.media_type.startsWith("image/");
       if (saveOnly) {
         await saveArtifactFile(resolved);
       } else if (isImage) {
@@ -135,6 +160,29 @@ export default function UnifiedAssetsScreen() {
       }
     } catch {
       setError(t("artifacts.loadFailed"));
+    }
+  }
+
+  async function continueFromArtifact(item: (typeof artifacts)[number]) {
+    if (continuing) return;
+    setContinuing(item.artifact_id);
+    try {
+      const resolved = await resolveArtifact(item);
+      if (!resolved) return;
+      router.push({
+        pathname: "/(tabs)",
+        params: {
+          ...params,
+          capturedUri: resolved.uri,
+          capturedName: resolved.name,
+          capturedMediaType: resolved.mediaType,
+          prefill: t("artifacts.continuePrefill", { name: item.name }),
+        },
+      });
+    } catch {
+      setError(t("artifacts.loadFailed"));
+    } finally {
+      setContinuing("");
     }
   }
 
@@ -162,13 +210,15 @@ export default function UnifiedAssetsScreen() {
 
   const filteredArtifacts = useMemo(
     () => artifacts.filter((artifact) => {
+      if (kindFilter === "image" && !(artifact.kind === "image" || artifact.media_type.startsWith("image/"))) return false;
+      if (kindFilter === "file" && (artifact.kind === "image" || artifact.media_type.startsWith("image/"))) return false;
       if (!normalizedQuery) return true;
       return (
         artifact.name.toLowerCase().includes(normalizedQuery) ||
         artifact.media_type.toLowerCase().includes(normalizedQuery)
       );
     }),
-    [artifacts, normalizedQuery],
+    [artifacts, normalizedQuery, kindFilter],
   );
 
   const hasData = (activeFilter === "all" && (filteredTaskResults.length > 0 || filteredArtifacts.length > 0))
@@ -252,6 +302,29 @@ export default function UnifiedAssetsScreen() {
             </Text>
           </AppPressable>
         </View>
+
+        {activeFilter !== "tasks" ? (
+          <View style={styles.kindRow}>
+            {([
+              { id: "all", label: t("assets.kindAll") },
+              { id: "image", label: t("assets.kindImage") },
+              { id: "file", label: t("assets.kindFile") },
+            ] as Array<{ id: ArtifactKindFilter; label: string }>).map((kind) => {
+              const selected = kindFilter === kind.id;
+              return (
+                <AppPressable
+                  key={kind.id}
+                  style={[styles.kindChip, selected && styles.kindChipActive]}
+                  onPress={() => setKindFilter(kind.id)}
+                >
+                  <Text style={[styles.kindChipText, selected && styles.kindChipTextActive]}>
+                    {kind.label}
+                  </Text>
+                </AppPressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         {loading ? <AsyncStateView state="loading" /> : null}
         {error && !loading ? (
@@ -337,7 +410,7 @@ export default function UnifiedAssetsScreen() {
           );
         })}
 
-        {/* 会话生成工件列表 */}
+        {/* 会话生成工件列表：服务端已按创建时间倒序 */}
         {(activeFilter === "all" || activeFilter === "artifacts") && filteredArtifacts.map((artifact) => {
           const typeInfo = classifyArtifactType(artifact.name, artifact.media_type, artifact.kind);
           return (
@@ -383,6 +456,13 @@ export default function UnifiedAssetsScreen() {
                   onPress={() => void openArtifactPreview(artifact, true)}
                 >
                   <Text style={styles.secondaryActionText}>{t("artifacts.save")}</Text>
+                </AppPressable>
+                <AppPressable
+                  style={styles.secondaryAction}
+                  disabled={continuing === artifact.artifact_id}
+                  onPress={() => void continueFromArtifact(artifact)}
+                >
+                  <Text style={styles.secondaryActionText}>{t("artifacts.continue")}</Text>
                 </AppPressable>
               </View>
             </View>
@@ -475,6 +555,30 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: colors.onAccent,
+  },
+  kindRow: {
+    flexDirection: "row",
+    gap: spacing.small,
+  },
+  kindChip: {
+    paddingHorizontal: spacing.medium,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+  },
+  kindChipActive: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
+  kindChipText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  kindChipTextActive: {
+    color: colors.accent,
   },
   card: {
     backgroundColor: colors.surface,

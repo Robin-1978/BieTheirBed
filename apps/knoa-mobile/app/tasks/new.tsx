@@ -14,10 +14,11 @@ import {
   View,
 } from "react-native";
 
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import { AgentSelector } from "@/components/AgentSelector";
+import { TemplatePickerCard } from "@/components/TemplatePickerCard";
 import type { MCPResourceCatalogItem, TaskLaunchPolicy } from "@/api/models";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
@@ -42,7 +43,9 @@ function formatClock(hour: number, minute: number): string {
 }
 
 export default function NewTaskScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { status } = useConnection();
+  const { agents, defaultAgentId, nodeId, nodes, requiredUpdate, switchNode } = useFleet();
   const { t } = useI18n();
   const params = useLocalSearchParams<{
     template?: string;
@@ -61,10 +64,10 @@ export default function NewTaskScreen() {
   const [notifyFailed, setNotifyFailed] = useState(true);
   const [notifyApproval, setNotifyApproval] = useState(true);
   const [launchPolicy, setLaunchPolicy] = useState<TaskLaunchPolicy>(immediatePolicy);
-  const [agentId, setAgentId] = useState(stringParam(params.agentId) || gateway.defaultAgentId || "knoa");
+  const [agentId, setAgentId] = useState(stringParam(params.agentId) || defaultAgentId || "knoa");
   const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState("");
-  const [selectedNodeId, setSelectedNodeId] = useState(gateway.nodeId || stringParam(params.nodeId) || "");
+  const [selectedNodeId, setSelectedNodeId] = useState(nodeId || stringParam(params.nodeId) || "");
   const [switchingNode, setSwitchingNode] = useState(false);
   const [hubOnlineIds, setHubOnlineIds] = useState<string[] | null>(null);
   const [attachments, setAttachments] = useState<PickedAttachment[]>([]);
@@ -158,12 +161,10 @@ export default function NewTaskScreen() {
   }, []);
 
   const recommendedNodeId = useMemo(
-    () => recommendNodeId(gateway.nodes.map((node) => node.nodeId), hubOnlineIds, gateway.nodeId),
-    [gateway.nodes, gateway.nodeId, hubOnlineIds],
+    () => recommendNodeId(nodes.map((node) => node.nodeId), hubOnlineIds, nodeId),
+    [nodes, nodeId, hubOnlineIds],
   );
-  const recommendedNode = gateway.nodes.find((node) => node.nodeId === recommendedNodeId) ?? null;
-
-  const activeTemplate = TASK_TEMPLATES.find((template) => template.id === selectedTemplate);
+  const recommendedNode = nodes.find((node) => node.nodeId === recommendedNodeId) ?? null;
 
   useEffect(() => {
     const paramTitle = stringParam(params.title);
@@ -178,12 +179,13 @@ export default function NewTaskScreen() {
     if (!requested) return;
     setSelectedTemplate(requested.id);
     setTitle(t(requested.titleKey));
-    setGoal(t(requested.goalKey));
+    // 场景入口自带目标描述时保留它，只借模板的结构（标题/预检说明）。
+    if (!paramGoal) setGoal(t(requested.goalKey));
   }, [params.agentId, params.goal, params.template, params.title, t]);
 
   useEffect(() => {
-    if (gateway.nodeId) setSelectedNodeId(gateway.nodeId);
-  }, [gateway.nodeId]);
+    if (nodeId) setSelectedNodeId(nodeId);
+  }, [nodeId]);
 
   function applyTemplate(template: TaskTemplate) {
     const apply = () => {
@@ -205,13 +207,13 @@ export default function NewTaskScreen() {
     apply();
   }
 
-  async function chooseNode(nodeId: string) {
-    if (!nodeId || nodeId === gateway.nodeId || switchingNode) return;
+  async function chooseNode(targetNodeId: string) {
+    if (!targetNodeId || targetNodeId === nodeId || switchingNode) return;
     setSwitchingNode(true);
     setError("");
     try {
-      await gateway.switchNode(nodeId);
-      setSelectedNodeId(nodeId);
+      await switchNode(targetNodeId);
+      setSelectedNodeId(targetNodeId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : t("taskNew.nodeSwitchFailed"));
     } finally {
@@ -219,8 +221,20 @@ export default function NewTaskScreen() {
     }
   }
 
+  // 原位预检：按钮只变灰不说话是最伤的，把阻断原因逐条摆出来。
+  const blockers = useMemo(() => {
+    const items: string[] = [];
+    if (!goal.trim()) items.push(t("taskNew.blockerGoal"));
+    if (!selectedNodeId) items.push(t("taskNew.blockerNode"));
+    else if (switchingNode) items.push(t("taskNew.blockerSwitching"));
+    else if (selectedNodeId !== nodeId) items.push(t("taskNew.blockerNodeMismatch"));
+    if (requiredUpdate) items.push(t("taskNew.blockerUpdate"));
+    if (goal.trim() && !isLaunchPolicyValid(launchPolicy)) items.push(t("taskNew.blockerPolicy"));
+    return items;
+  }, [goal, launchPolicy, nodeId, requiredUpdate, selectedNodeId, switchingNode, t]);
+
   async function create() {
-    if (gateway.requiredUpdate) {
+    if (requiredUpdate) {
       router.replace("/update");
       return;
     }
@@ -279,7 +293,7 @@ export default function NewTaskScreen() {
       }));
       router.replace(`/tasks/${result.task.task_id}`);
     } catch (caught) {
-      if (gateway.status !== "ready") {
+      if (status !== "ready") {
         if (attachments.length || folder) {
           setError(t("taskNew.attachmentOffline"));
           return;
@@ -312,7 +326,7 @@ export default function NewTaskScreen() {
     >
       <ScrollView contentContainerStyle={styles.container}>
         {/* 顶部强制版本更新提示 */}
-        {gateway.requiredUpdate ? (
+        {requiredUpdate ? (
           <AppPressable style={styles.updateRequired} onPress={() => router.replace("/update")}>
             <Text style={styles.updateRequiredTitle}>{t("taskNew.updateRequired")}</Text>
             <Text style={styles.launchText}>{t("taskNew.updateAction")}</Text>
@@ -354,44 +368,7 @@ export default function NewTaskScreen() {
         </View>
 
         {/* 2. 快捷任务模板卡片 */}
-        <View style={styles.card}>
-          <View style={styles.sectionHeader}>
-            <AppIcon name="agent" color={colors.accent} size={18} />
-            <Text style={styles.sectionTitle}>{t("taskTemplates.title")}</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.templateRow}>
-            {TASK_TEMPLATES.map((template) => {
-              const isSelected = selectedTemplate === template.id;
-              return (
-                <AppPressable
-                  key={template.id}
-                  style={[styles.template, isSelected && styles.templateSelected]}
-                  onPress={() => {
-                    applyTemplate(template);
-                  }}
-                >
-                  <Text style={[styles.templateTitle, isSelected && styles.templateSelectedText]}>
-                    {t(template.titleKey)}
-                  </Text>
-                  <Text style={styles.templateDetail} numberOfLines={2}>
-                    {t(template.detailKey)}
-                  </Text>
-                </AppPressable>
-              );
-            })}
-          </ScrollView>
-
-          {activeTemplate ? (
-            <View style={styles.templateDetails}>
-              <Text style={styles.templateDetailsTitle}>{t(activeTemplate.titleKey)}</Text>
-              <View style={styles.chipsRow}>
-                <View style={styles.metaChip}><Text style={styles.metaChipText}>{t(activeTemplate.durationKey)}</Text></View>
-                <View style={styles.metaChip}><Text style={styles.metaChipText}>{t(activeTemplate.connectionKey)}</Text></View>
-              </View>
-              <Text style={styles.templateMeta}>{t("taskTemplates.result", { value: t(activeTemplate.resultKey) })}</Text>
-            </View>
-          ) : null}
-        </View>
+        <TemplatePickerCard selectedTemplate={selectedTemplate} onSelect={applyTemplate} />
 
         {/* 2. 核心任务定义卡片 */}
         <View style={styles.card}>
@@ -485,18 +462,18 @@ export default function NewTaskScreen() {
           </View>
           {recommendedNode ? (
             <Text style={styles.recommend}>
-              {recommendedNode.nodeId === gateway.nodeId && gateway.status === "ready"
+              {recommendedNode.nodeId === nodeId && status === "ready"
                 ? t("taskNew.recommendCurrent", { name: presentNodeName(recommendedNode, t("common.unnamedComputer")) })
                 : hubOnlineIds?.includes(recommendedNode.nodeId)
                   ? t("taskNew.recommendSwitch", { name: presentNodeName(recommendedNode, t("common.unnamedComputer")) })
                   : t("taskNew.recommendOffline", { name: presentNodeName(recommendedNode, t("common.unnamedComputer")) })}
             </Text>
           ) : null}
-          {gateway.nodes.length ? (
+          {nodes.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nodeRow}>
-              {gateway.nodes.map((node) => {
+              {nodes.map((node) => {
                 const isSelected = selectedNodeId === node.nodeId;
-                const isCurrentReady = node.nodeId === gateway.nodeId && gateway.status === "ready";
+                const isCurrentReady = node.nodeId === nodeId && status === "ready";
                 const isOffline = hubOnlineIds !== null && !hubOnlineIds.includes(node.nodeId) && !isCurrentReady;
                 return (
                   <AppPressable
@@ -528,7 +505,7 @@ export default function NewTaskScreen() {
           )}
 
           <AgentSelector
-            agents={gateway.agents}
+            agents={agents}
             selectedAgentId={agentId}
             disabled={saving}
             label={t("agent.selectTask")}
@@ -565,14 +542,21 @@ export default function NewTaskScreen() {
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
+        {blockers.length && !saving ? (
+          <View style={styles.blockers}>
+            {blockers.map((item) => (
+              <Text key={item} style={styles.blockerText}>• {item}</Text>
+            ))}
+          </View>
+        ) : null}
 
         {/* 底部主操作按钮 */}
         <AppPressable
           accessibilityRole="button"
           accessibilityLabel={launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}
-          disabled={!goal.trim() || saving || switchingNode || !selectedNodeId || selectedNodeId !== gateway.nodeId || Boolean(gateway.requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
+          disabled={!goal.trim() || saving || switchingNode || !selectedNodeId || selectedNodeId !== nodeId || Boolean(requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
           onPress={() => void create()}
-          style={[styles.primary, (!goal.trim() || saving || gateway.requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
+          style={[styles.primary, (!goal.trim() || saving || requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
         >
           {saving ? (
             <ActivityIndicator color={colors.onAccent} />
@@ -710,66 +694,6 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 15,
     lineHeight: 20,
-  },
-  templateRow: {
-    gap: spacing.small,
-    paddingVertical: 4,
-  },
-  template: {
-    width: 160,
-    minHeight: 82,
-    padding: spacing.medium,
-    borderRadius: radii.medium,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.background,
-    gap: 4,
-  },
-  templateSelected: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentFaint,
-  },
-  templateTitle: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  templateSelectedText: {
-    color: colors.accent,
-  },
-  templateDetail: {
-    color: colors.muted,
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  templateDetails: {
-    padding: spacing.medium,
-    borderRadius: radii.medium,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.line,
-    gap: spacing.xsmall,
-  },
-  templateDetailsTitle: {
-    color: colors.ink,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  chipsRow: {
-    flexDirection: "row",
-    gap: spacing.small,
-    marginVertical: 4,
-  },
-  metaChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: radii.small,
-    backgroundColor: colors.accentSoft,
-  },
-  metaChipText: {
-    color: colors.accent,
-    fontSize: 11,
-    fontWeight: "700",
   },
   templateMeta: {
     color: colors.muted,
@@ -935,6 +859,16 @@ const styles = StyleSheet.create({
   error: {
     color: colors.danger,
     fontSize: 13,
+    textAlign: "center",
+  },
+  blockers: {
+    gap: 2,
+    paddingHorizontal: spacing.medium,
+  },
+  blockerText: {
+    color: colors.warning,
+    fontSize: 12,
+    lineHeight: 17,
     textAlign: "center",
   },
   updateRequired: {

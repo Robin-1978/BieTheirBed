@@ -2,14 +2,15 @@ import * as Crypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 
 import { immediatePolicy } from "@/components/TaskLaunchEditor";
-import type { useGateway } from "@/state/GatewayProvider";
+import type { GatewayClient } from "@/api/gatewayClient";
 
 const STORAGE_KEY = "knoa.onboarding.welcome-health.v1";
 
-type GatewayLike = Pick<
-  ReturnType<typeof useGateway>,
-  "status" | "defaultAgentId" | "runAuthenticated"
->;
+type GatewayLike = {
+  status: string;
+  defaultAgentId: string;
+  runAuthenticated<T>(operation: (client: GatewayClient) => Promise<T>): Promise<T>;
+};
 
 type WelcomeHealthRecord = Record<string, true>;
 

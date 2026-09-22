@@ -25,7 +25,7 @@ import type {
 import { AppIcon } from "@/components/AppIcon";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useSession } from "@/state/GatewayProvider";
 import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 type Current = {
@@ -36,7 +36,7 @@ type Current = {
 
 export default function SystemConfigurationScreen() {
   const params = useLocalSearchParams<{ draftId?: string }>();
-  const gateway = useGateway();
+  const gateway = useSession();
   const { t } = useI18n();
   const [current, setCurrent] = useState<Current | null>(null);
   const [draft, setDraft] = useState<ConfigDraft | null>(null);

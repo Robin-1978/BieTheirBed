@@ -25,12 +25,12 @@ import {
   setDelegationEnabled,
   upsertNodeAgent,
 } from "@/models/agentConfiguration";
-import { useGateway } from "@/state/GatewayProvider";
+import { useSession } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 
 export default function AgentEditorScreen() {
   const params = useLocalSearchParams<{ agentId?: string; mode?: string }>();
-  const gateway = useGateway();
+  const gateway = useSession();
   const { t } = useI18n();
   const originalAgentId = params.mode === "new" ? "" : String(params.agentId || "");
   const [document, setDocument] = useState<ManagedConfig | null>(null);
@@ -329,7 +329,7 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 20, fontWeight: "800" },
   meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
   section: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
-  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "700" },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.medium },
   field: { gap: spacing.small },
   label: { color: colors.ink, fontSize: 13, fontWeight: "700" },

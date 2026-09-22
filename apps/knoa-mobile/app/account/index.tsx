@@ -23,13 +23,13 @@ import {
   setLandingPreference,
   type LandingPreference,
 } from "@/navigation/navigationPreference";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet } from "@/state/GatewayProvider";
 import { clearAppCache } from "@/storage/appCache";
 import { clearTaskReminders } from "@/reminders/taskReminders";
 import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 export default function AccountHomeScreen() {
-  const gateway = useGateway();
+  const gateway = useFleet();
   const { t } = useI18n();
   const [profile, setProfile] = useState<HostedAccountProfile | null>(null);
   const [workspaces, setWorkspaces] = useState<HostedWorkspace[]>([]);
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
   workspaceIcon: { width: 44, height: 44, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
   workspaceName: { color: colors.ink, fontSize: 16, fontWeight: "700" },
   card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
-  cardTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  cardTitle: { color: colors.ink, ...typography.subheading, fontWeight: "700" },
   input: { minHeight: 46, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, color: colors.ink, paddingHorizontal: spacing.medium },
   primary: { minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: radii.medium, backgroundColor: colors.accent },
   primaryText: { color: colors.onAccent, fontWeight: "700" },
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   choiceText: { color: colors.muted, ...typography.small, fontWeight: "700" },
   choiceTextActive: { color: colors.onAccent, ...typography.small, fontWeight: "700" },
   row: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-  rowTitle: { color: colors.ink, fontWeight: "800" },
+  rowTitle: { color: colors.ink, fontWeight: "700" },
   logout: { alignItems: "center", padding: spacing.medium },
   logoutText: { color: colors.danger, fontWeight: "700" },
 });

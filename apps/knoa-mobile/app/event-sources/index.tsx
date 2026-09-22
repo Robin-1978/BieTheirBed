@@ -1,6 +1,6 @@
 import * as Crypto from "expo-crypto";
 import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, View } from "react-native";
 
 import type { EventSource, EventSourceEvent, MCPResourceCatalogItem } from "@/api/models";
@@ -9,11 +9,12 @@ import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { FormScreen } from "@/components/FormScreen";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet, useSession } from "@/state/GatewayProvider";
 import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 export default function EventSourcesScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { defaultAgentId } = useFleet();
   const { t } = useI18n();
   const [sources, setSources] = useState<EventSource[]>([]);
   const [mcpResources, setMcpResources] = useState<MCPResourceCatalogItem[]>([]);
@@ -52,6 +53,27 @@ export default function EventSourcesScreen() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // 动态派生：只给有可订阅资源的 MCP server 出订阅入口，不写死任何厂商。
+  const subscribableServers = useMemo(() => {
+    const ids: string[] = [];
+    for (const resource of mcpResources) {
+      if (!resource.subscribable || ids.includes(resource.server_id)) continue;
+      ids.push(resource.server_id);
+    }
+    return ids;
+  }, [mcpResources]);
+
+  function applyServerTemplate(serverId: string) {
+    setKind("mcp_resource");
+    setTitle(t("eventSources.templateSubscribeTitle", { server: serverId }));
+    setGoal(t("eventSources.templateSubscribeGoal", { server: serverId }));
+    // 该 server 只有一个资源时直接选中，多个则留给下面的资源列表手选。
+    const candidates = mcpResources.filter((item) => item.server_id === serverId);
+    if (candidates.length === 1 && candidates[0]) {
+      setSelectedResourceKey(resourceKey(candidates[0]));
+    }
+  }
+
   async function create() {
     if (!title.trim() || !goal.trim() || busy) return;
     const selectedResource = mcpResources.find((item) => resourceKey(item) === selectedResourceKey);
@@ -60,7 +82,7 @@ export default function EventSourcesScreen() {
     try {
       const source = await gateway.runAuthenticated((client) => client.createEventSource({
         clientRequestId: Crypto.randomUUID(), kind, title: title.trim(), goal: goal.trim(),
-        agentId: gateway.defaultAgentId || undefined,
+        agentId: defaultAgentId || undefined,
         mcpServerId: selectedResource?.server_id,
         resourceUriPrefix: selectedResource?.uri,
       }));
@@ -127,6 +149,30 @@ export default function EventSourcesScreen() {
       {creating ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{t("eventSources.create")}</Text>
+          <Text style={styles.label}>{t("eventSources.templatesTitle")}</Text>
+          <View style={styles.wrap}>
+            <AppPressable
+              style={styles.choice}
+              onPress={() => {
+                setKind("webhook");
+                setGoal(t("eventSources.templateWebhookGoal"));
+              }}
+            >
+              <Text style={styles.choiceText}>{t("eventSources.templateWebhook")}</Text>
+            </AppPressable>
+            {subscribableServers.map((serverId) => (
+              <AppPressable
+                key={serverId}
+                style={styles.choice}
+                onPress={() => applyServerTemplate(serverId)}
+              >
+                <Text style={styles.choiceText}>{t("eventSources.templateSubscribe", { server: serverId })}</Text>
+              </AppPressable>
+            ))}
+          </View>
+          {!subscribableServers.length && mcpResources.length === 0 ? (
+            <Text style={styles.hint}>{t("eventSources.noMcpHint")}</Text>
+          ) : null}
           <View style={styles.row}>
             <Choice selected={kind === "webhook"} label="Webhook" onPress={() => setKind("webhook")} />
             <Choice selected={kind === "mcp_resource"} label="MCP Resource" onPress={() => setKind("mcp_resource")} />
@@ -193,7 +239,7 @@ const styles = StyleSheet.create({
   card: { padding: spacing.medium, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: spacing.small, ...shadows.card },
   secret: { padding: spacing.medium, borderRadius: radii.large, backgroundColor: colors.warningSoft, gap: spacing.small },
   secretValue: { color: colors.ink, fontFamily: "monospace" },
-  cardTitle: { color: colors.ink, fontWeight: "800", fontSize: 16 },
+  cardTitle: { color: colors.ink, fontWeight: "700", fontSize: 16 },
   label: { color: colors.ink, ...typography.subheading },
   input: { minHeight: 44, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, padding: spacing.medium, color: colors.ink },
   goal: { minHeight: 100, textAlignVertical: "top" },

@@ -12,7 +12,7 @@ import {
 import { AsyncStateView } from "@/components/AsyncStateView";
 import type { AgentSummary, Task, TaskExecution, TaskState } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { blockedPreflightMessages, warningPreflightMessages } from "@/components/preflightPresentation";
@@ -23,7 +23,9 @@ import { loadTaskDetailCache, storeTaskDetailCache } from "@/storage/taskDetailC
 export default function TaskDetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const taskId = String(params.id ?? "");
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { status } = useConnection();
+  const { agents } = useFleet();
   const { unreadExecutionIds } = useTaskReminders();
   const { t } = useI18n();
   const [task, setTask] = useState<Task | null>(null);
@@ -63,9 +65,9 @@ export default function TaskDetailScreen() {
   }, [taskId]);
 
   useEffect(() => {
-    if (!taskId || gateway.status !== "ready") return;
+    if (!taskId || status !== "ready") return;
     void refresh();
-  }, [gateway.status, refresh, taskId]);
+  }, [status, refresh, taskId]);
   useEffect(() => {
     if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
     latestRefreshEvent.current = gateway.latestEvent.feed_event_id;
@@ -171,7 +173,7 @@ export default function TaskDetailScreen() {
     }
   }
 
-  if (!task && !error && gateway.status === "ready") {
+  if (!task && !error && status === "ready") {
     return <View style={styles.loading}><AsyncStateView state="loading" /></View>;
   }
 
@@ -197,7 +199,7 @@ export default function TaskDetailScreen() {
         </View>
         <Text style={styles.title}>{task.title}</Text>
         <Text style={styles.goal}>{task.goal}</Text>
-        <Text style={styles.policy}>{agentName(task.agent_id, gateway.agents)} · {launchLabel(task, t)} · {t("tasks.executions", { count: task.execution_count })}</Text>
+        <Text style={styles.policy}>{agentName(task.agent_id, agents)} · {launchLabel(task, t)} · {t("tasks.executions", { count: task.execution_count })}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
