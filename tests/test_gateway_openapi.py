@@ -77,6 +77,27 @@ def test_gateway_openapi_matches_the_allow_listed_http_surface(tmp_path) -> None
     )
     assert schema["paths"]["/v1/agents"]["get"]["operationId"] == "listAgents"
 
+    # Every local $ref must resolve: a dangling ref breaks mobile codegen
+    # (openapi-typescript) while all other contract tests still pass.
+    schemas = schema["components"]["schemas"]
+    dangling: list[str] = []
+
+    def collect(node: object) -> None:
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+                name = ref.rsplit("/", 1)[-1]
+                if name not in schemas:
+                    dangling.append(ref)
+            for value in node.values():
+                collect(value)
+        elif isinstance(node, list):
+            for value in node:
+                collect(value)
+
+    collect(schema["paths"])
+    assert not dangling, f"dangling openapi refs: {sorted(set(dangling))}"
+
 
 @pytest.mark.asyncio
 async def test_gateway_serves_codegen_contract_without_authentication(tmp_path) -> None:

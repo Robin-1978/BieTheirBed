@@ -229,6 +229,50 @@ def test_duplicate_projection_and_multiple_devices_have_one_delivery_per_device(
     }
 
 
+@pytest.mark.asyncio
+async def test_poisoned_device_does_not_block_other_deliveries(
+    tmp_path: Path,
+) -> None:
+    repository, hub, node = _components(tmp_path)
+    second_key = Ed25519PrivateKey.generate()
+    repository.register_installation(
+        "subject_owner", "installation-b", _public_key(second_key), "Tablet",
+    )
+    for installation_id, token in (
+        ("installation-a", "fcm-token-poisoned"),
+        ("installation-b", "fcm-token-healthy"),
+    ):
+        hub.register_push_token(
+            "subject_owner", installation_id, provider="fcm", token=token,
+            locale="zh-CN", app_version="1",
+        )
+    hub.publish_notification_intent(_intent(node))
+
+    class _Flaky:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def deliver(self, token: str, message: dict) -> PushDeliveryResult:
+            self.calls.append(token)
+            if token == "fcm-token-poisoned":
+                raise RuntimeError("FCM exploded")
+            return PushDeliveryResult(True, provider_message_id="projects/p/messages/9")
+
+    push = _Flaky()
+    await HubApplication(hub, push_delivery=push)._deliver_pending_notifications()
+
+    # Both devices were attempted despite the explosion on the first.
+    assert sorted(push.calls) == ["fcm-token-healthy", "fcm-token-poisoned"]
+    with repository._connect() as db:
+        rows = {
+            row["installation_id"]: dict(row)
+            for row in db.execute("SELECT * FROM notification_deliveries")
+        }
+    assert rows["installation-b"]["state"] == "delivered"
+    assert rows["installation-a"]["state"] == "retry"
+    assert rows["installation-a"]["last_error_code"] == "hub_internal"
+
+
 def test_push_token_registration_is_account_scoped(tmp_path: Path) -> None:
     _repository, hub, _node = _components(tmp_path)
     try:

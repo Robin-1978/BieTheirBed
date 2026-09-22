@@ -76,6 +76,7 @@ class _Artifact:
     height: int = 0
     content_sha256: str = ""
     delivered_at: float | None = None
+    created_at: float = 0.0
 
 
 class ArtifactStore:
@@ -138,10 +139,26 @@ class ArtifactStore:
                     height INTEGER NOT NULL DEFAULT 0,
                     content_sha256 TEXT NOT NULL DEFAULT '',
                     expires_at REAL,
-                    delivered_at REAL
+                    delivered_at REAL,
+                    created_at REAL
                 )
                 """
             )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(artifact_registry)").fetchall()
+            }
+            if "created_at" not in columns:
+                connection.execute("ALTER TABLE artifact_registry ADD COLUMN created_at REAL")
+                columns.add("created_at")
+            if "delivered_at" in columns:
+                # Existing rows predate creation tracking: delivered_at is the
+                # best available proxy, otherwise fall back to now.
+                connection.execute(
+                    "UPDATE artifact_registry SET created_at=COALESCE(delivered_at, ?) "
+                    "WHERE created_at IS NULL",
+                    (time.time(),),
+                )
             require_exact_table(
                 connection,
                 "artifact_registry",
@@ -161,6 +178,7 @@ class ArtifactStore:
                     ("content_sha256", "TEXT", True, "''", 0),
                     ("expires_at", "REAL", False, None, 0),
                     ("delivered_at", "REAL", False, None, 0),
+                    ("created_at", "REAL", False, None, 0),
                 ),
                 label="Artifact registry",
             )
@@ -171,7 +189,7 @@ class ArtifactStore:
                 """
                 SELECT artifact_id, session_key, path, name, media_type, kind,
                        size, direction, ownership, retention, width, height,
-                       content_sha256, expires_at, delivered_at
+                       content_sha256, expires_at, delivered_at, created_at
                 FROM artifact_registry
                 """
             ).fetchall()
@@ -205,6 +223,7 @@ class ArtifactStore:
                 height=int(row[11]),
                 content_sha256=row[12],
                 delivered_at=row[14],
+                created_at=float(row[15] or 0.0),
             )
 
     def _persist(self, entry: _Artifact) -> None:
@@ -214,8 +233,8 @@ class ArtifactStore:
                 INSERT OR REPLACE INTO artifact_registry (
                     artifact_id, session_key, path, name, media_type, kind,
                     size, direction, ownership, retention, width, height,
-                    content_sha256, expires_at, delivered_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    content_sha256, expires_at, delivered_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry.artifact_id,
@@ -233,6 +252,7 @@ class ArtifactStore:
                     entry.content_sha256,
                     entry.expires_at,
                     entry.delivered_at,
+                    entry.created_at,
                 ),
             )
 
@@ -357,6 +377,7 @@ class ArtifactStore:
             width=width,
             height=height,
             content_sha256=content_sha256,
+            created_at=self._clock(),
         )
         self._entries[artifact_id] = entry
         self._persist(entry)
@@ -631,6 +652,7 @@ class ArtifactStore:
             retention=entry.retention,
             status="delivered" if entry.delivered_at else "available",
             visibility="user",
+            created_at=entry.created_at,
         ).model_dump()
 
     def search(
@@ -665,7 +687,10 @@ class ArtifactStore:
             if not entry.path.is_file():
                 continue
             matches.append(entry)
-        matches.sort(key=lambda item: item.artifact_id, reverse=True)
+        matches.sort(
+            key=lambda item: (item.created_at, item.artifact_id),
+            reverse=True,
+        )
         return [self.public_ref(session_id, entry.artifact_id) for entry in matches[:bounded]]
 
     def share_to_session(

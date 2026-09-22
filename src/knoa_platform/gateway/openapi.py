@@ -237,6 +237,12 @@ _MODELS: tuple[type[BaseModel], ...] = (
     P2POfferRequest,
     ResourceP2POfferRequest,
     P2PAnswerResponse,
+    P2PIceServersResponse,
+    DesktopGlanceResponse,
+    MemoryListResponse,
+    MemoryClearedResponse,
+    MemorySavedResponse,
+    MemoryUpsertRequest,
 )
 
 
@@ -291,6 +297,11 @@ def gateway_openapi_schema() -> dict[str, Any]:
         "session_handle",
         {"type": "string", "minLength": 1, "maxLength": 256},
         required=True,
+    )
+    optional_session_query = _query(
+        "session_handle",
+        {"type": "string", "maxLength": 256},
+        required=False,
     )
     return {
         "openapi": "3.1.0",
@@ -1218,8 +1229,9 @@ def gateway_openapi_schema() -> dict[str, Any]:
                 "get": {
                     "operationId": "searchArtifacts",
                     "security": bearer,
+                    "description": "Empty session_handle searches every session owned by the caller.",
                     "parameters": [
-                        session_query,
+                        optional_session_query,
                         _query("q", {"type": "string", "maxLength": 160}),
                         _query("kind", {"type": "string", "enum": ["image", "file"]}),
                         _query("limit", {"type": "integer", "minimum": 1, "maximum": 200}),
