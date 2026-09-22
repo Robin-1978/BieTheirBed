@@ -6,13 +6,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useSession } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors, radii, shadows, spacing } from "@/theme";
 
 export function TaskReminderBanner() {
   const { activeReminder, unreadCount, dismissActive, markRead } = useTaskReminders();
-  const gateway = useGateway();
+  const gateway = useSession();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(-24)).current;
@@ -28,7 +28,10 @@ export function TaskReminderBanner() {
       Animated.spring(translateY, { toValue: 0, useNativeDriver: true, damping: 18, stiffness: 220 }),
       Animated.timing(opacity, { toValue: 1, duration: 160, useNativeDriver: true }),
     ]).start();
-    const timer = setTimeout(dismissActive, isApproval ? 30000 : 6500);
+    // waiting_approval is blocking: never auto-dismiss, require explicit
+    // approve/reject/open/dismiss. Completed/failed auto-dismiss.
+    if (isApproval) return undefined;
+    const timer = setTimeout(dismissActive, 6500);
     return () => clearTimeout(timer);
   }, [activeReminder, dismissActive, isApproval, opacity, translateY]);
 

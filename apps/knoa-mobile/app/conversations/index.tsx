@@ -15,7 +15,7 @@ import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { removeConversationDraft } from "@/security/conversationDrafts";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet, useSession } from "@/state/GatewayProvider";
 import { removeConversationCache } from "@/storage/conversationCache";
 import { loadConversationListCache, storeConversationListCache } from "@/storage/conversationListCache";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
@@ -23,7 +23,8 @@ import { useI18n } from "@/i18n";
 import { formatRelativeTime } from "@/ui/formatRelativeTime";
 
 export default function ConversationHistoryScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { agents, nodeId } = useFleet();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const { t, locale } = useI18n();
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
@@ -38,7 +39,7 @@ export default function ConversationHistoryScreen() {
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const sessionsRef = useRef<ConversationSession[]>([]);
-  const cacheScope = `${params.workspaceId ?? ""}:${params.nodeId ?? gateway.nodeId}:${showArchived ? "archived" : "active"}`;
+  const cacheScope = `${params.workspaceId ?? ""}:${params.nodeId ?? nodeId}:${showArchived ? "archived" : "active"}`;
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -58,7 +59,7 @@ export default function ConversationHistoryScreen() {
       if (!showArchived) {
         void gateway.runAuthenticated((client) => client.listConversationSessions({ includeArchived: true, limit: 50 }))
           .then((archived) => storeConversationListCache(
-            `${params.workspaceId ?? ""}:${params.nodeId ?? gateway.nodeId}:archived`,
+            `${params.workspaceId ?? ""}:${params.nodeId ?? nodeId}:archived`,
             archived.sessions,
             archived.nextCursor,
           ))
@@ -216,7 +217,7 @@ export default function ConversationHistoryScreen() {
               <AppPressable disabled={session.state === "archived"} onPress={() => void open(session)}>
                 <Text style={styles.title}>{session.title}</Text>
                 <Text style={styles.meta}>
-                  {agentName(session.agent_id, gateway.agents)} · {isCurrent ? `${t("conversations.current")} · ` : ""}{t("conversations.turns", { count: session.turn_count })} · {formatTime(session.last_turn_at ?? session.created_at, locale)}
+                  {agentName(session.agent_id, agents)} · {isCurrent ? `${t("conversations.current")} · ` : ""}{t("conversations.turns", { count: session.turn_count })} · {formatTime(session.last_turn_at ?? session.created_at, locale)}
                 </Text>
               </AppPressable>
             )}

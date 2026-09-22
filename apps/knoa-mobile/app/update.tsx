@@ -13,7 +13,7 @@ import {
 import type { AndroidRelease } from "@/api/models";
 import { AppPressable } from "@/components/AppPressable";
 import { resolveAndroidRelease } from "@/hub/hubClient";
-import { useGateway } from "@/state/GatewayProvider";
+import { useSession } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
 import {
@@ -31,7 +31,7 @@ import { requiresAndroidUpdate } from "@/update/releasePolicy";
 type DownloadState = "idle" | "downloading" | "paused" | "ready" | "error";
 
 export default function UpdateScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
   const { t } = useI18n();
   const [release, setRelease] = useState<AndroidRelease | null>(null);
   const [checking, setChecking] = useState(true);

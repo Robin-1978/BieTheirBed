@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,7 +15,7 @@ import {
   View,
 } from "react-native";
 
-import type { AgentSummary, ArtifactInput, ChatArtifact, HumanInteraction, Task, TaskApproval, TaskExecution } from "@/api/models";
+import type { AgentSummary, ArtifactInput, ChatArtifact, DesktopGlanceRecord, HumanInteraction, Task, TaskApproval, TaskExecution } from "@/api/models";
 import type { ResolvedArtifactFile } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { shouldRefreshExecution } from "@/api/taskEvents";
@@ -28,7 +29,7 @@ import { InteractionCard } from "@/components/InteractionCard";
 import { WorkResultSummary } from "@/components/WorkResultSummary";
 import { mergeTaskTimeline, type TaskTimelineItem } from "@/components/taskTimeline";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { loadExecutionCache, storeExecutionCache } from "@/storage/executionCache";
@@ -36,7 +37,9 @@ import { loadExecutionCache, storeExecutionCache } from "@/storage/executionCach
 export default function TaskExecutionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const executionId = String(id ?? "");
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { status } = useConnection();
+  const { agents } = useFleet();
   const { setExecutionViewing } = useTaskReminders();
   const { t } = useI18n();
   const [execution, setExecution] = useState<TaskExecution | null>(null);
@@ -52,6 +55,8 @@ export default function TaskExecutionDetailScreen() {
   const [stepsExpanded, setStepsExpanded] = useState(false);
   const [followUp, setFollowUp] = useState("");
   const [followUpFiles, setFollowUpFiles] = useState<PendingFollowUpFile[]>([]);
+  const [failureGlance, setFailureGlance] = useState<DesktopGlanceRecord | null>(null);
+  const failureGlanceForRef = useRef("");
   const executionRef = useRef<TaskExecution | null>(null);
   executionRef.current = execution;
 
@@ -84,11 +89,19 @@ export default function TaskExecutionDetailScreen() {
   }, [executionId, setExecutionViewing]);
 
   useEffect(() => {
-    if (!executionId || gateway.status !== "ready") return;
+    if (!executionId || status !== "ready") return;
     void refresh();
-  }, [executionId, gateway.status, refresh]);
+  }, [executionId, status, refresh]);
 
   useEffect(() => () => setExecutionViewing(null), [executionId, setExecutionViewing]);
+
+  useEffect(() => {
+    if (!execution || execution.state !== "failed" || failureGlanceForRef.current === execution.execution_id) return;
+    failureGlanceForRef.current = execution.execution_id;
+    void gateway.runAuthenticated((client) => client.getTaskGlance(execution.task_id))
+      .then((record) => { if (record?.thumbnailBase64) setFailureGlance(record); })
+      .catch(() => undefined);
+  }, [execution, gateway.runAuthenticated]);
 
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -266,7 +279,7 @@ export default function TaskExecutionDetailScreen() {
     }
   }
 
-  if (!execution && !error && gateway.status === "ready") return <AsyncStateView state="loading" />;
+  if (!execution && !error && status === "ready") return <AsyncStateView state="loading" />;
   if (!execution) return (
     <AsyncStateView state="error" message={error || t("chat.reconnecting")} retryLabel={t("tasks.reload")} onRetry={() => void refresh()} />
   );
@@ -317,6 +330,22 @@ export default function TaskExecutionDetailScreen() {
       ))}
 
       <WorkResultSummary execution={execution} />
+
+      {failureGlance?.thumbnailBase64 ? (
+        <View style={styles.glanceCard}>
+          <Text style={styles.sectionTitle}>{t("execution.glanceTitle")}</Text>
+          <Image
+            source={{ uri: `data:image/jpeg;base64,${failureGlance.thumbnailBase64}` }}
+            style={styles.glanceImage}
+            resizeMode="contain"
+          />
+          {[failureGlance.activeApp, failureGlance.windowTitle].filter(Boolean).join(" · ") ? (
+            <Text style={styles.meta} numberOfLines={1}>
+              {[failureGlance.activeApp, failureGlance.windowTitle].filter(Boolean).join(" · ")}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {timeline.length ? (
         <View style={styles.timeline}>
@@ -392,7 +421,7 @@ export default function TaskExecutionDetailScreen() {
       </AppPressable>
       {technicalExpanded ? (
         <View style={styles.technicalCard}>
-          <Text style={styles.technicalLine}>{t("agent.executionSnapshot", { agent: agentName(execution.agent_id_snapshot, gateway.agents) })}</Text>
+          <Text style={styles.technicalLine}>{t("agent.executionSnapshot", { agent: agentName(execution.agent_id_snapshot, agents) })}</Text>
           <Text style={styles.technicalLine}>{t("execution.taskRevision", { revision: execution.task_revision })}</Text>
           {execution.phase ? <Text selectable style={styles.technicalLine}>{t("execution.phase", { phase: execution.phase })}</Text> : null}
           {execution.failure_code ? <Text selectable style={styles.technicalLine}>{t("execution.failureCode", { code: execution.failure_code })}</Text> : null}
@@ -580,6 +609,9 @@ const styles = StyleSheet.create({
   timeline: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.xlarge, borderWidth: 1, borderColor: colors.line, gap: spacing.medium , ...shadows.card },
   stepsToggle: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   followUpCard: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.xlarge, borderWidth: 1, borderColor: colors.line, gap: spacing.medium , ...shadows.card },
+  glanceCard: { backgroundColor: colors.surface, borderRadius: radii.large, padding: spacing.medium, borderWidth: 1, borderColor: colors.line, gap: spacing.small },
+  glanceImage: { width: "100%", height: 200, borderRadius: radii.medium, backgroundColor: colors.surfaceMuted },
+  meta: { color: colors.muted, fontSize: 12 },
   followUpHint: { color: colors.muted, lineHeight: 20 },
   followUpInput: { minHeight: 96, borderWidth: 1, borderColor: colors.line, borderRadius: radii.medium, padding: spacing.medium, color: colors.ink, textAlignVertical: "top", backgroundColor: colors.surfaceMuted },
   followUpFile: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: spacing.small },

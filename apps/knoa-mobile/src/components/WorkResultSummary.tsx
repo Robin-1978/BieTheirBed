@@ -17,7 +17,9 @@ export function WorkResultSummary({ execution }: { execution: TaskExecution }) {
       {execution.failure_code ? (
         <View style={styles.incomplete}>
           <Text style={styles.incompleteTitle}>{t("execution.incomplete")}</Text>
+          <Text selectable style={styles.detail}>{t("execution.failureReason", { code: execution.failure_code })}</Text>
           <Text style={styles.detail}>{t("execution.incompleteHelp")}</Text>
+          <Text style={styles.impact}>{t("execution.recoveryHint")}</Text>
           {execution.work_status?.side_effect === "unknown" ? <Text style={styles.impact}>{t("execution.sideEffectUnknown")}</Text> : null}
           {execution.work_status?.side_effect === "possible" ? <Text style={styles.impact}>{t("execution.sideEffectPossible")}</Text> : null}
         </View>
@@ -36,11 +38,11 @@ export function WorkResultSummary({ execution }: { execution: TaskExecution }) {
 
 const styles = StyleSheet.create({
   card: { padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, gap: 10 },
-  title: { color: colors.ink, fontSize: 17, fontWeight: "800" },
-  subtitle: { color: colors.ink, fontWeight: "800" },
+  title: { color: colors.ink, fontSize: 17, fontWeight: "700" },
+  subtitle: { color: colors.ink, fontWeight: "700" },
   markdown: { width: "100%", alignSelf: "stretch" },
   incomplete: { padding: 12, borderRadius: 12, backgroundColor: colors.dangerSoft, gap: 4 },
-  incompleteTitle: { color: colors.danger, fontWeight: "800" },
+  incompleteTitle: { color: colors.danger, fontWeight: "700" },
   detail: { color: colors.muted, lineHeight: 20 },
   impact: { color: colors.danger, lineHeight: 20 },
   changes: { gap: 5 },

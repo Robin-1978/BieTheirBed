@@ -6,21 +6,22 @@ import type { ManagedConfig } from "@/api/models";
 import { AppIcon, type AppIconName } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
-import { CAPABILITY_SCENARIOS } from "@/capabilityScenarios";
+import { CAPABILITY_SCENARIOS, type CapabilityScenario } from "@/capabilityScenarios";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet, useSession } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { loadCapabilityCache, storeCapabilityCache } from "@/storage/capabilityCache";
 
 export default function CapabilitiesScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { nodeId } = useFleet();
   const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [toolCount, setToolCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const capabilityScope = gateway.nodeId || "unselected";
+  const capabilityScope = nodeId || "unselected";
 
   const load = useCallback(async () => {
     if (!gateway.client) return;
@@ -64,7 +65,23 @@ export default function CapabilitiesScreen() {
     ? Object.values(document.model_deployments).filter((deployment) => deployment.share_enabled).length
     : 0;
 
-  function openScenario(prompt: string) {
+  // 保守规则：配置里明确 disabled 才置灰；未知（离线/老 Node）不断流。
+  function isSkillDisabled(skillId: string): boolean {
+    return document?.skills?.[skillId]?.enabled === false;
+  }
+
+  function openScenario(scenario: CapabilityScenario) {
+    // 依赖的 Skill 被明确禁用时，不进流程，直接导向扩展中心启用。
+    if (scenario.skillId && isSkillDisabled(scenario.skillId)) {
+      router.push("/settings/extensions");
+      return;
+    }
+    const prompt = t(scenario.promptKey);
+    // 有任务模板的场景进任务创建（范围→预检→执行→证据），纯开放场景进对话。
+    if (scenario.taskTemplateId) {
+      router.push({ pathname: "/tasks/new", params: { template: scenario.taskTemplateId, goal: prompt } });
+      return;
+    }
     router.push({ pathname: "/(tabs)", params: { prefill: prompt } });
   }
 
@@ -87,19 +104,25 @@ export default function CapabilitiesScreen() {
 
       <View style={styles.scenarioCard}>
         <View style={styles.scenarioGrid}>
-          {CAPABILITY_SCENARIOS.map((scenario) => (
-            <AppPressable
-              key={scenario.id}
-              style={styles.scenario}
-              onPress={() => openScenario(t(scenario.promptKey))}
-            >
-              <View style={styles.scenarioIcon}>
-                <AppIcon name={scenario.icon} color={colors.accent} size={20} />
-              </View>
-              <Text style={styles.scenarioTitle} numberOfLines={2}>{t(scenario.titleKey)}</Text>
-              <Text style={styles.scenarioDetail} numberOfLines={2}>{t(scenario.detailKey)}</Text>
-            </AppPressable>
-          ))}
+          {CAPABILITY_SCENARIOS.map((scenario) => {
+            const locked = Boolean(scenario.skillId) && isSkillDisabled(scenario.skillId!);
+            return (
+              <AppPressable
+                key={scenario.id}
+                style={[styles.scenario, locked && styles.scenarioLocked]}
+                onPress={() => openScenario(scenario)}
+              >
+                <View style={styles.scenarioIcon}>
+                  <AppIcon name={scenario.icon} color={locked ? colors.muted : colors.accent} size={20} />
+                </View>
+                <Text style={styles.scenarioTitle} numberOfLines={2}>{t(scenario.titleKey)}</Text>
+                <Text style={styles.scenarioDetail} numberOfLines={2}>{t(scenario.detailKey)}</Text>
+                {locked ? (
+                  <Text style={styles.scenarioLockedHint} numberOfLines={1}>{t("capabilities.scenarioNeedSkill")}</Text>
+                ) : null}
+              </AppPressable>
+            );
+          })}
         </View>
       </View>
 
@@ -199,16 +222,18 @@ const styles = StyleSheet.create({
   scenarioGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.small },
   scenario: { width: "48%", minHeight: 112, padding: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.background, gap: spacing.xsmall },
   scenarioIcon: { width: 36, height: 36, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.accentSoft },
-  scenarioTitle: { color: colors.ink, ...typography.small, fontWeight: "800" },
+  scenarioTitle: { color: colors.ink, ...typography.small, fontWeight: "700" },
   scenarioDetail: { color: colors.muted, fontSize: 11, lineHeight: 15 },
+  scenarioLocked: { opacity: 0.62 },
+  scenarioLockedHint: { color: colors.warning, fontSize: 11, fontWeight: "700" },
   advancedCard: { borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, overflow: "hidden", ...shadows.card },
   advancedToggle: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: spacing.small, paddingHorizontal: spacing.large, paddingVertical: spacing.medium },
-  advancedTitle: { color: colors.ink, fontWeight: "800", fontSize: 16 },
+  advancedTitle: { color: colors.ink, fontWeight: "700", fontSize: 16 },
   advancedHint: { flex: 1, color: colors.muted, ...typography.small, textAlign: "right" },
   advancedBody: { paddingHorizontal: spacing.large, paddingBottom: spacing.medium, gap: spacing.xsmall },
-  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800", marginTop: spacing.medium, marginBottom: spacing.xsmall },
+  sectionTitle: { color: colors.ink, ...typography.subheading, fontWeight: "700", marginTop: spacing.medium, marginBottom: spacing.xsmall },
   row: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-  rowTitle: { color: colors.ink, fontWeight: "800" },
+  rowTitle: { color: colors.ink, fontWeight: "700" },
   agentRow: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
   enabled: { color: colors.accent, ...typography.small, fontWeight: "700" },
   disabled: { color: colors.muted, ...typography.small, fontWeight: "700" },

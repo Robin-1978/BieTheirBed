@@ -7,6 +7,10 @@ export type CapabilityScenario = {
   titleKey: MessageKey;
   detailKey: MessageKey;
   promptKey: MessageKey;
+  /** 映射的任务模板：有则进任务创建（范围→预检→执行），无则进对话。 */
+  taskTemplateId?: string;
+  /** 依赖的内置 Skill 包：已加载配置里明确禁用时，卡片置灰并导向扩展中心。 */
+  skillId?: string;
 };
 
 export const CAPABILITY_SCENARIOS: CapabilityScenario[] = [
@@ -16,6 +20,8 @@ export const CAPABILITY_SCENARIOS: CapabilityScenario[] = [
     titleKey: "capabilities.scenarios.fileOrganization.title",
     detailKey: "capabilities.scenarios.fileOrganization.detail",
     promptKey: "capabilities.scenarios.fileOrganization.prompt",
+    taskTemplateId: "folder-organizer",
+    skillId: "file_organizer",
   },
   {
     id: "health-check",
@@ -23,6 +29,8 @@ export const CAPABILITY_SCENARIOS: CapabilityScenario[] = [
     titleKey: "capabilities.scenarios.healthCheck.title",
     detailKey: "capabilities.scenarios.healthCheck.detail",
     promptKey: "capabilities.scenarios.healthCheck.prompt",
+    taskTemplateId: "computer-health",
+    skillId: "health_check",
   },
   {
     id: "web-research",
@@ -30,6 +38,8 @@ export const CAPABILITY_SCENARIOS: CapabilityScenario[] = [
     titleKey: "capabilities.scenarios.webResearch.title",
     detailKey: "capabilities.scenarios.webResearch.detail",
     promptKey: "capabilities.scenarios.webResearch.prompt",
+    taskTemplateId: "research-brief",
+    skillId: "research_report",
   },
   {
     id: "monitor",
@@ -37,6 +47,8 @@ export const CAPABILITY_SCENARIOS: CapabilityScenario[] = [
     titleKey: "capabilities.scenarios.monitor.title",
     detailKey: "capabilities.scenarios.monitor.detail",
     promptKey: "capabilities.scenarios.monitor.prompt",
+    taskTemplateId: "service-monitor",
+    skillId: "monitor",
   },
   {
     id: "image-docs",
@@ -44,6 +56,8 @@ export const CAPABILITY_SCENARIOS: CapabilityScenario[] = [
     titleKey: "capabilities.scenarios.imageDocs.title",
     detailKey: "capabilities.scenarios.imageDocs.detail",
     promptKey: "capabilities.scenarios.imageDocs.prompt",
+    taskTemplateId: "media-review",
+    skillId: "image_doc",
   },
   {
     id: "desktop-control",

@@ -811,14 +811,14 @@ export class GatewayClient {
     query?: string;
     kind?: "image" | "file";
     limit?: number;
-  }): Promise<{ artifacts: Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string; [key: string]: unknown }>; nextCursor: string }> {
+  }): Promise<{ artifacts: Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string; session_handle?: string; created_at?: number; [key: string]: unknown }>; nextCursor: string }> {
     const query = new URLSearchParams({
-      session_handle: input.sessionHandle,
       q: input.query ?? "",
       kind: input.kind ?? "",
       limit: String(input.limit ?? 50),
     });
-    const response = await this.json<{ artifacts: Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string; [key: string]: unknown }>; next_cursor?: string }>(
+    if (input.sessionHandle) query.set("session_handle", input.sessionHandle);
+    const response = await this.json<{ artifacts: Array<{ artifact_id: string; name: string; media_type: string; size: number; kind: string; session_handle?: string; created_at?: number; [key: string]: unknown }>; next_cursor?: string }>(
       `/v1/artifacts?${query}`,
     );
     return { artifacts: response.artifacts, nextCursor: response.next_cursor ?? "" };

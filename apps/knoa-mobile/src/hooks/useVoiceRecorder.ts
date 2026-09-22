@@ -9,6 +9,7 @@ import * as Linking from "expo-linking";
 import { useCallback, useState } from "react";
 
 import type { GatewayClient } from "@/api/gatewayClient";
+import { GatewayError } from "@/api/gatewayClient";
 
 export interface UseVoiceRecorderOptions {
   runAuthenticated: <T>(operation: (client: GatewayClient) => Promise<T>) => Promise<T>;
@@ -55,8 +56,17 @@ export function useVoiceRecorder({
           artifact.artifact_id,
         ));
         onTranscription(transcript);
-      } catch {
-        showFeedback(t("chat.transcriptionFailed"), "error");
+      } catch (caught) {
+        // capability_denied (HTTP 403) means the Node has no transcription
+        // MCP tool mapped — guide to Node Console instead of a generic retry.
+        if (
+          caught instanceof GatewayError &&
+          (caught.status === 403 || caught.code === "capability_denied" || caught.code === "forbidden")
+        ) {
+          showFeedback(t("chat.transcriptionUnavailable"), "warning");
+        } else {
+          showFeedback(t("chat.transcriptionFailed"), "error");
+        }
       } finally {
         await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
         setTranscribing(false);

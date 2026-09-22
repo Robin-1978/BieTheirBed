@@ -13,7 +13,7 @@ import {
   type TaskReminder,
   type TaskReminderCategory,
 } from "@/reminders/taskReminders";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection } from "@/state/GatewayProvider";
 import {
   configureTaskNotifications,
   loadNativePushRegistration,
@@ -25,6 +25,7 @@ import {
 import { useI18n } from "@/i18n";
 import {
   acknowledgeHubNotification,
+  getHubNotificationCounts,
   listHubNotifications,
   registerPushToken,
   unregisterPushToken,
@@ -51,7 +52,7 @@ type TaskReminderState = {
 const Context = createContext<TaskReminderState | null>(null);
 
 export function TaskReminderProvider({ children }: PropsWithChildren) {
-  const { status } = useGateway();
+  const { status } = useConnection();
   const { locale } = useI18n();
   const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [activeReminder, setActiveReminder] = useState<TaskReminder | null>(null);
@@ -153,6 +154,16 @@ export function TaskReminderProvider({ children }: PropsWithChildren) {
     if (status !== "ready") return;
     if (reconcileRef.current) return reconcileRef.current;
     const operation = (async () => {
+      // Fast path: nothing new since last poll — skip the page walk.
+      try {
+        const counts = await getHubNotificationCounts();
+        if (counts.latestCursor <= inboxCursorRef.current) {
+          setLastSyncedAt(Date.now());
+          return;
+        }
+      } catch {
+        // Fall through to the full reconcile below.
+      }
       let cursor = inboxCursorRef.current;
       for (let page = 0; page < 10; page += 1) {
         const result = await listHubNotifications(cursor);

@@ -17,7 +17,7 @@ import {
   type WorkspaceDeployment,
 } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet } from "@/state/GatewayProvider";
 import { updateNodeDirectGatewayUrl } from "@/security/deviceIdentity";
 import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
@@ -27,7 +27,7 @@ import { presentHubNodeName } from "@/presentation/nodePresentation";
 
 export default function WorkspaceNodesScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
-  const gateway = useGateway();
+  const gateway = useFleet();
   const { t, locale } = useI18n();
   const [nodes, setNodes] = useState<HubNode[]>([]);
   const [deployments, setDeployments] = useState<WorkspaceDeployment[]>([]);

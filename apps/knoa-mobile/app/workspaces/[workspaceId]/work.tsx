@@ -9,15 +9,16 @@ import { WorkspaceCacheBanner } from "@/components/WorkspaceCacheBanner";
 import { projectionWorkStatus } from "@/components/workProjectionPresentation";
 import { listHubNodes, listWorkspaceWork, type HubNode, type WorkspaceWorkProjection } from "@/hub/hubClient";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
-import { loadWorkspaceCache, mergeWorkspaceCache, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
+import { useFleet, useSession } from "@/state/GatewayProvider";
+import { loadWorkspaceCache, maxWorkUpdatedAt, mergeWorkspaceCache, mergeWorkItems, type WorkspaceCacheSnapshot } from "@/storage/workspaceCache";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { userFacingError } from "@/ui/userFacingError";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
 
 export default function WorkspaceWorkScreen() {
   const params = useLocalSearchParams<{ workspaceId: string; workspaceName?: string }>();
-  const gateway = useGateway();
+  const gateway = useFleet();
+  const { openConversation } = useSession();
   const { t } = useI18n();
   const [items, setItems] = useState<WorkspaceWorkProjection[]>([]);
   const [nodes, setNodes] = useState<HubNode[]>([]);
@@ -39,7 +40,15 @@ export default function WorkspaceWorkScreen() {
     setRefreshing(true);
     setLoadError("");
     try {
-      const [work, directory] = await Promise.all([listWorkspaceWork(), listHubNodes()]);
+      // 增量优先：静默刷新且有缓存时只拉更新部分并合并；服务端删除
+      // 不产生增量事件，所以首次加载与手动刷新走全量以收敛删除。
+      const cachedWork = cacheSnapshot?.work ?? [];
+      const incremental = !showLoading && cachedWork.length > 0;
+      const [workResult, directory] = await Promise.all([
+        listWorkspaceWork("", "", incremental ? maxWorkUpdatedAt(cachedWork) : 0),
+        listHubNodes(),
+      ]);
+      const work = incremental ? mergeWorkItems(cachedWork, workResult.items) : workResult.items;
       setItems(work);
       setNodes(directory);
       await mergeWorkspaceCache(params.workspaceId, { work, nodes: directory });
@@ -49,7 +58,7 @@ export default function WorkspaceWorkScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [params.workspaceId, t]);
+  }, [cacheSnapshot?.work, params.workspaceId, t]);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -78,7 +87,7 @@ export default function WorkspaceWorkScreen() {
         nodeId: item.node_id,
       };
       if (item.entity_kind === "conversation") {
-        void gateway.openConversation(item.entity_id).catch((caught) => {
+        void openConversation(item.entity_id).catch((caught) => {
           setActionError(userFacingError(caught, t("work.connectFailed")));
         });
         router.push({ pathname: "/(tabs)", params: routeParams });
@@ -149,7 +158,7 @@ const styles = StyleSheet.create({
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
   card: { padding: spacing.large, gap: spacing.small, borderRadius: radii.large, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, ...shadows.card },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
-  itemTitle: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  itemTitle: { color: colors.ink, ...typography.subheading, fontWeight: "700" },
   summary: { color: colors.ink, lineHeight: 20 },
   approval: { color: colors.warning, ...typography.small, fontWeight: "700" },
   online: { color: colors.accent, ...typography.small, fontWeight: "700" },

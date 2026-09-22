@@ -6,12 +6,12 @@ import { AppPressable } from "@/components/AppPressable";
 import { NodeHeaderTitle } from "@/components/NodeHeader";
 import { useI18n } from "@/i18n";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet } from "@/state/GatewayProvider";
 import { colors } from "@/theme";
 
 export default function TabsLayout() {
   const { t } = useI18n();
-  const gateway = useGateway();
+  const gateway = useFleet();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const { unreadCountForNode } = useTaskReminders();
 

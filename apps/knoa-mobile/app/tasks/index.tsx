@@ -18,7 +18,7 @@ import { DesktopGlanceModal } from "@/components/DesktopGlanceModal";
 import { TaskBentoCard } from "@/components/TaskBentoCard";
 import { currentTaskSections } from "@/components/taskListPresentation";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { useTaskReminders } from "@/state/TaskReminderProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { loadOfflineTasks, removeOfflineTask, type QueuedTask } from "@/storage/offlineTaskQueue";
@@ -28,17 +28,19 @@ type Filter = "current" | TaskDefinitionState;
 type TaskSection = { key: string; title: string; data: Task[] };
 
 export default function TasksScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { status } = useConnection();
+  const { availableUpdate, nodeId } = useFleet();
   const { reminders, unreadIndexForNode, markAllRead, lastSyncedAt, syncNow } = useTaskReminders();
   const { t } = useI18n();
 
-  const currentNodeUnread = unreadIndexForNode(gateway.nodeId);
+  const currentNodeUnread = unreadIndexForNode(nodeId);
   const unreadTaskIds = currentNodeUnread.taskIds;
 
   const unreadReminders = useMemo(() => reminders.filter((r) => !r.read), [reminders]);
   const otherNodeReminders = useMemo(
-    () => unreadReminders.filter((r) => Boolean(r.nodeId && r.nodeId !== gateway.nodeId)),
-    [gateway.nodeId, unreadReminders],
+    () => unreadReminders.filter((r) => Boolean(r.nodeId && r.nodeId !== nodeId)),
+    [nodeId, unreadReminders],
   );
 
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -51,7 +53,7 @@ export default function TasksScreen() {
   const [activeGlance, setActiveGlance] = useState<DesktopGlanceRecord | null>(null);
   const tasksRef = useRef<Task[]>([]);
   tasksRef.current = tasks;
-  const taskCacheScope = gateway.nodeId || "unselected";
+  const taskCacheScope = nodeId || "unselected";
   const [queued, setQueued] = useState<QueuedTask[]>([]);
   const latestRefreshEvent = useRef(gateway.latestEvent?.feed_event_id ?? 0);
 
@@ -94,16 +96,16 @@ export default function TasksScreen() {
   }, [taskCacheScope]);
 
   useEffect(() => {
-    if (gateway.status !== "ready") return;
+    if (status !== "ready") return;
     void refresh();
-  }, [gateway.status, refresh]);
+  }, [status, refresh]);
 
   useEffect(() => {
     void loadOfflineTasks().then(setQueued);
   }, []);
 
   const flushQueued = useCallback(async () => {
-    if (!gateway.client || gateway.status !== "ready") return;
+    if (!gateway.client || status !== "ready") return;
     for (const item of queued) {
       try {
         await gateway.runAuthenticated((client) => client.createTask({
@@ -121,11 +123,11 @@ export default function TasksScreen() {
     }
     setQueued(await loadOfflineTasks());
     await refresh();
-  }, [gateway.client, gateway.runAuthenticated, gateway.status, queued, refresh]);
+  }, [gateway.client, gateway.runAuthenticated, status, queued, refresh]);
 
   useEffect(() => {
-    if (gateway.status === "ready" && queued.length) void flushQueued();
-  }, [flushQueued, gateway.status, queued.length]);
+    if (status === "ready" && queued.length) void flushQueued();
+  }, [flushQueued, status, queued.length]);
 
   useEffect(() => {
     if (!gateway.latestEvent || gateway.latestEvent.feed_event_id <= latestRefreshEvent.current) return;
@@ -135,7 +137,7 @@ export default function TasksScreen() {
   }, [gateway.latestEvent, refresh]);
 
   useEffect(() => {
-    if (!gateway.client || gateway.status !== "ready") return;
+    if (!gateway.client || status !== "ready") return;
     const runningTasks = tasks.filter((t) => t.latest_execution_state === "running");
     if (!runningTasks.length) return;
 
@@ -150,7 +152,7 @@ export default function TasksScreen() {
         .catch(() => {});
     }
     return () => { active = false; };
-  }, [gateway.client, gateway.runAuthenticated, gateway.status, tasks]);
+  }, [gateway.client, gateway.runAuthenticated, status, tasks]);
 
   async function handleExecuteNow(taskId: string) {
     if (!gateway.client || runningTaskId) return;
@@ -224,11 +226,11 @@ export default function TasksScreen() {
   return (
     <View style={styles.container}>
       {/* 顶部版本与离线队列横条 */}
-        {gateway.availableUpdate ? (
+        {availableUpdate ? (
           <AppPressable style={styles.updateBanner} onPress={() => router.push("/update")}>
             <View style={styles.flex}>
               <Text style={styles.updateTitle}>
-                {t("tasks.updateAvailable", { version: gateway.availableUpdate.version_name })}
+                {t("tasks.updateAvailable", { version: availableUpdate.version_name })}
               </Text>
               <Text style={styles.updateDetail}>{t("tasks.updateResume")}</Text>
             </View>
@@ -262,7 +264,7 @@ export default function TasksScreen() {
             <AppPressable
               accessibilityRole="button"
               accessibilityLabel={t("reminders.markAllRead")}
-              onPress={() => void markAllRead(gateway.nodeId)}
+              onPress={() => void markAllRead(nodeId)}
               style={styles.markAllReadButton}
             >
               <AppIcon name="check" color={colors.accent} size={14} />

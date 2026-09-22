@@ -67,6 +67,28 @@ export async function mergeWorkspaceCache(workspaceId: string, patch: WorkspaceC
   file.write(JSON.stringify(next));
 }
 
+export function mergeWorkItems(
+  cached: WorkspaceWorkProjection[],
+  fresh: WorkspaceWorkProjection[],
+): WorkspaceWorkProjection[] {
+  const byId = new Map<string, WorkspaceWorkProjection>();
+  for (const item of cached) byId.set(item.entity_id, item);
+  for (const item of fresh) byId.set(item.entity_id, item);
+  return [...byId.values()]
+    .sort((left, right) => right.source_updated_at - left.source_updated_at || (right.entity_id < left.entity_id ? -1 : 1))
+    .slice(0, MAX_WORK_ITEMS);
+}
+
+export function maxWorkUpdatedAt(items: WorkspaceWorkProjection[]): number {
+  let latest = 0;
+  for (const item of items) {
+    if (typeof item.source_updated_at === "number" && item.source_updated_at > latest) {
+      latest = item.source_updated_at;
+    }
+  }
+  return latest;
+}
+
 export function clearWorkspaceCache(workspaceId: string): void {
   if (!workspaceId) return;
   const file = cacheFile(scopedCacheKey(workspaceId));

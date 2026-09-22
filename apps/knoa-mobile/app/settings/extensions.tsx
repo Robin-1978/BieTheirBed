@@ -6,12 +6,12 @@ import { AppPressable } from "@/components/AppPressable";
 import type { CapabilityCatalogEntry, CapabilityInstallPlan, CapabilityInstallation, ExtensionImportResult, ManagedConfig } from "@/api/models";
 import type { DingTalkChannelStatus } from "@/api/gatewayClient";
 import { useI18n } from "@/i18n";
-import { useGateway } from "@/state/GatewayProvider";
+import { useSession } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { BUSINESS_CONNECTIONS, connectionDescriptor, type BusinessConnectionKind } from "@/models/connectionWizard";
 
 export default function ExtensionCenterScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
   const { t } = useI18n();
   const scrollRef = useRef<ScrollView>(null);
   const installPlanY = useRef(0);
@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
   capabilityItem: { gap: spacing.medium, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, paddingTop: spacing.medium },
   flex: { flex: 1 },
   smallButton: { paddingHorizontal: spacing.medium, paddingVertical: spacing.small, borderRadius: radii.small, backgroundColor: colors.background },
-  itemTitle: { color: colors.ink, fontWeight: "800" },
+  itemTitle: { color: colors.ink, fontWeight: "700" },
   enabled: { color: colors.accent, ...typography.small, fontWeight: "700" },
   disabled: { color: colors.muted, ...typography.small, fontWeight: "700" },
 });

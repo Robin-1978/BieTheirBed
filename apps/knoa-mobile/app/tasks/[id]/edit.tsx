@@ -13,7 +13,7 @@ import type { MCPResourceCatalogItem, Task, TaskLaunchPolicy } from "@/api/model
 import { immediatePolicy, isLaunchPolicyValid, TaskLaunchEditor } from "@/components/TaskLaunchEditor";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { FormScreen } from "@/components/FormScreen";
-import { useGateway } from "@/state/GatewayProvider";
+import { useSession } from "@/state/GatewayProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { useI18n } from "@/i18n";
 import { AppPressable } from "@/components/AppPressable";
@@ -21,7 +21,7 @@ import { AppPressable } from "@/components/AppPressable";
 export default function EditTaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const taskId = String(id ?? "");
-  const gateway = useGateway();
+  const gateway = useSession();
   const { t } = useI18n();
   const [task, setTask] = useState<Task | null>(null);
   const [title, setTitle] = useState("");

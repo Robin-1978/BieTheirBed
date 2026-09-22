@@ -37,7 +37,7 @@ import {
   workspaceModelIdentity,
   workspaceModelSupportsVision,
 } from "@/models/workspaceModelConsumption";
-import { useGateway } from "@/state/GatewayProvider";
+import { useFleet, useSession } from "@/state/GatewayProvider";
 import { useI18n, type MessageKey } from "@/i18n";
 import { colors, radii, shadows, spacing, typography } from "@/theme";
 import { presentHubNodeName } from "@/presentation/nodePresentation";
@@ -60,7 +60,8 @@ const emptyEditor = (): Editor => ({
 });
 
 export default function ModelsScreen() {
-  const gateway = useGateway();
+  const gateway = useSession();
+  const { nodeId } = useFleet();
   const { t } = useI18n();
   const [document, setDocument] = useState<ManagedConfig | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceResourceState | null>(null);
@@ -98,14 +99,14 @@ export default function ModelsScreen() {
   useEffect(() => { void load(); }, [load]);
 
   const nodeName = useMemo(
-    () => presentHubNodeName(nodes.find((node) => node.node_id === gateway.nodeId), t("common.unnamedComputer")),
-    [gateway.nodeId, nodes, t],
+    () => presentHubNodeName(nodes.find((node) => node.node_id === nodeId), t("common.unnamedComputer")),
+    [nodeId, nodes, t],
   );
 
   const availableRemoteModels = useMemo<AvailableWorkspaceModel[]>(() => {
-    if (!document || !workspace || !gateway.nodeId) return [];
-    return availableWorkspaceModels(document, workspace, nodes, gateway.nodeId);
-  }, [document, gateway.nodeId, nodes, workspace]);
+    if (!document || !workspace || !nodeId) return [];
+    return availableWorkspaceModels(document, workspace, nodes, nodeId);
+  }, [document, nodeId, nodes, workspace]);
 
   function beginCreate() {
     const suffix = Crypto.randomUUID().replaceAll("-", "").slice(0, 10);
@@ -232,7 +233,7 @@ export default function ModelsScreen() {
   }
 
   async function saveSharing(enabled: boolean) {
-    if (!document || !workspace || !gateway.nodeId || !sharingAlias) return;
+    if (!document || !workspace || !nodeId || !sharingAlias) return;
     setWorking("share");
     setMessage("");
     try {
@@ -344,9 +345,12 @@ export default function ModelsScreen() {
         }) : null}
 
         {!editor && !sharingAlias ? (
-          <AppPressable style={styles.primary} onPress={beginCreate}>
-            <AppIcon name="plus" color={colors.onAccent} size={20} /><Text style={styles.primaryText}>{t("settings.models.addModel")}</Text>
-          </AppPressable>
+          <View style={styles.addChoice}>
+            <Text style={styles.meta}>{t("settings.models.addModelSimpleHint")}</Text>
+            <AppPressable style={styles.addAdvanced} onPress={beginCreate}>
+              <AppIcon name="plus" color={colors.accent} size={18} /><Text style={styles.secondaryText}>{t("settings.models.addModelAdvanced")}</Text>
+            </AppPressable>
+          </View>
         ) : null}
 
         {editor ? <ModelEditor editor={editor} setEditor={setEditor} working={Boolean(working)} onSave={saveModel} onCancel={() => setEditor(null)} /> : null}
@@ -354,7 +358,7 @@ export default function ModelsScreen() {
           <ShareEditor
             alias={sharingAlias}
             shared={Boolean(deploymentForModel(document, sharingAlias)?.[1].share_enabled)}
-            nodes={nodes.filter((node) => node.node_id !== gateway.nodeId)}
+            nodes={nodes.filter((node) => node.node_id !== nodeId)}
             allowedNodeIds={allowedNodeIds}
             setAllowedNodeIds={setAllowedNodeIds}
             concurrency={concurrency}
@@ -379,6 +383,9 @@ function ModelEditor({ editor, setEditor, working, onSave, onCancel }: { editor:
   return (
     <View style={styles.editor}>
       <Text style={styles.title}>{editor.originalAlias ? t("settings.models.editModel") : t("settings.models.addModel")}</Text>
+      {!editor.originalAlias ? (
+        <Text style={styles.meta}>{t("settings.models.consoleHint")}</Text>
+      ) : null}
       <Text style={styles.label}>{t("settings.models.connectionType")}</Text>
       <View style={styles.choices}>{(["llamacpp", "openai_compatible", "openai", "anthropic"] as ModelDriver[]).map((driver) => <AppPressable key={driver} style={[styles.choice, editor.driver === driver && styles.choiceSelected]} onPress={() => setEditor({ ...editor, driver })}><Text style={editor.driver === driver ? styles.choiceTextSelected : styles.choiceText}>{driverLabel(driver, t)}</Text></AppPressable>)}</View>
       <Field label={t("settings.models.modelName")} value={editor.modelId} onChange={(modelId) => setEditor({ ...editor, modelId })} placeholder={t("settings.models.modelNamePlaceholder")} />
@@ -443,18 +450,20 @@ const styles = StyleSheet.create({
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
   title: { color: colors.ink, fontSize: 20, fontWeight: "800" },
   sectionHeader: { gap: spacing.xsmall, paddingHorizontal: 2, paddingTop: spacing.xsmall },
-  sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
+  sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
   hint: { color: colors.muted, ...typography.caption, lineHeight: 19 },
   flex: { flex: 1, minWidth: 0 },
   card: { padding: spacing.medium, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, ...shadows.card },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.medium },
   modelIcon: { width: 44, height: 44, borderRadius: radii.medium, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted },
   modelIconShared: { backgroundColor: colors.accentSoft },
-  cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "800" },
+  cardTitle: { color: colors.ink, fontSize: 16, fontWeight: "700" },
   meta: { color: colors.muted, ...typography.small, lineHeight: 18 },
   badge: { color: colors.accent, backgroundColor: colors.accentSoft, borderRadius: radii.pill, paddingHorizontal: spacing.small, paddingVertical: spacing.xsmall, ...typography.tiny, fontWeight: "700" },
   healthy: { color: colors.accent, ...typography.small, fontWeight: "700" },
   actions: { flexDirection: "row", gap: spacing.small },
+  addChoice: { gap: spacing.small },
+  addAdvanced: { minHeight: 44, flexDirection: "row", gap: 6, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.accent, alignItems: "center", justifyContent: "center" },
   primary: { minHeight: 48, flexDirection: "row", gap: spacing.small, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   primarySmall: { flex: 1, minHeight: 46, borderRadius: radii.medium, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   primaryText: { color: colors.onAccent, fontWeight: "700" },

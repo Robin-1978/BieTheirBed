@@ -246,7 +246,7 @@ function Choice<T extends ThemeMode | LanguageMode>({
 const styles = StyleSheet.create({
   container: { padding: spacing.large, gap: spacing.large, paddingBottom: 48 },
   card: { padding: spacing.large, gap: spacing.medium, borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line , ...shadows.card },
-  title: { color: colors.ink, ...typography.subheading, fontWeight: "800" },
+  title: { color: colors.ink, ...typography.subheading, fontWeight: "700" },
   detail: { color: colors.muted, ...typography.caption, lineHeight: 19 },
   choices: { gap: spacing.small, marginTop: 2 },
   choice: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: spacing.medium, paddingHorizontal: spacing.medium, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line },

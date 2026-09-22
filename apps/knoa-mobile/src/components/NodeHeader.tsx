@@ -7,35 +7,37 @@ import { AppPressable } from "@/components/AppPressable";
 import { DesktopGlanceModal } from "@/components/DesktopGlanceModal";
 import type { DesktopGlanceRecord } from "@/api/models";
 import { transportCompactLabelKey } from "@/api/transportPresentation";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { colors, radii, shadows, spacing } from "@/theme";
 import { useI18n } from "@/i18n";
 import { presentNodeName } from "@/presentation/nodePresentation";
 import { loadCapabilityCache, type CapabilityCache } from "@/storage/capabilityCache";
 
 export function NodeHeaderTitle() {
-  const gateway = useGateway();
+  const fleet = useFleet();
+  const connection = useConnection();
+  const session = useSession();
   const { t } = useI18n();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const [switcherOpen, setSwitcherOpen] = useState(false);
 
   const workspaceId = stringParam(params.workspaceId);
   const workspaceName = stringParam(params.workspaceName) || t("nav.workspace");
-  const currentNodeId = gateway.nodeId || stringParam(params.nodeId);
-  const currentNode = gateway.nodes.find((item) => item.nodeId === currentNodeId);
+  const currentNodeId = fleet.nodeId || stringParam(params.nodeId);
+  const currentNode = fleet.nodes.find((item) => item.nodeId === currentNodeId);
   // The client can remain usable during a background reconnect.  Relay/P2P
   // diagnostics are updated from the authenticated request path, so treat a
   // live client with an active Relay as online instead of showing a stale
   // "connecting" capsule.
-  const isOnline = gateway.status === "ready"
-    || gateway.relayState === "ready"
-    || gateway.relayState === "active"
-    || gateway.p2pState === "ready"
-    || gateway.p2pState === "active"
-    || gateway.lanState === "found";
-  const isConnecting = !isOnline && (gateway.status === "booting" || gateway.status === "selecting");
+  const isOnline = connection.status === "ready"
+    || connection.relayState === "ready"
+    || connection.relayState === "active"
+    || connection.p2pState === "ready"
+    || connection.p2pState === "active"
+    || connection.lanState === "found";
+  const isConnecting = !isOnline && (connection.status === "booting" || connection.status === "selecting");
   const statusLabel = isOnline
-    ? `${t("nodeHeader.online")} · ${t(transportCompactLabelKey(gateway.transportMode))}`
+    ? `${t("nodeHeader.online")} · ${t(transportCompactLabelKey(connection.transportMode))}`
     : isConnecting
       ? t("nodeHeader.connecting")
       : t("nodes.offline");
@@ -52,12 +54,12 @@ export function NodeHeaderTitle() {
   const [glanceRefreshing, setGlanceRefreshing] = useState(false);
 
   const handleOpenLiveGlance = () => {
-    if (!gateway.client) return;
+    if (!session.client) return;
     setSwitcherOpen(false);
     setTimeout(() => {
       setGlanceRefreshing(true);
       setGlanceModalVisible(true);
-      void gateway
+      void session
         .runAuthenticated((client) => client.getLiveDesktopGlance())
         .then((record) => {
           if (record) setGlanceRecord(record);
@@ -69,10 +71,10 @@ export function NodeHeaderTitle() {
   };
 
   const handleRefreshLiveGlance = async () => {
-    if (!gateway.client || glanceRefreshing) return;
+    if (!session.client || glanceRefreshing) return;
     setGlanceRefreshing(true);
     try {
-      const record = await gateway.runAuthenticated((client) => client.getLiveDesktopGlance());
+      const record = await session.runAuthenticated((client) => client.getLiveDesktopGlance());
       if (record) setGlanceRecord(record);
     } finally {
       setGlanceRefreshing(false);
@@ -88,7 +90,7 @@ export function NodeHeaderTitle() {
     return () => { active = false; };
   }, [currentNodeId, switcherOpen]);
 
-  const otherNodes = gateway.nodes.filter((item) => item.nodeId !== currentNodeId);
+  const otherNodes = fleet.nodes.filter((item) => item.nodeId !== currentNodeId);
 
   const handleSwitchNode = async (targetNodeId: string) => {
     setSwitcherOpen(false);
@@ -97,7 +99,7 @@ export function NodeHeaderTitle() {
     } catch {
       // ignore route param update failures if layout is unmounted
     }
-    await gateway.switchNode(targetNodeId);
+    await fleet.switchNode(targetNodeId);
   };
 
   const handleOpenNodeDetails = () => {
@@ -322,12 +324,12 @@ export function NodeHeaderTitle() {
 }
 
 export function NodeHeaderBack() {
-  const gateway = useGateway();
+  const { nodeId: fleetNodeId } = useFleet();
   const { t } = useI18n();
   const params = useLocalSearchParams<{ workspaceId?: string; workspaceName?: string; nodeId?: string }>();
   const workspaceId = stringParam(params.workspaceId);
   const workspaceName = stringParam(params.workspaceName);
-  const nodeId = gateway.nodeId || stringParam(params.nodeId);
+  const nodeId = fleetNodeId || stringParam(params.nodeId);
   return (
     <AppPressable
       accessibilityRole="button"

@@ -11,7 +11,7 @@ import {
 } from "@/hub/hubClient";
 import { loadNavigationPreference } from "@/navigation/navigationPreference";
 import { listNodeBindings } from "@/security/deviceIdentity";
-import { useGateway } from "@/state/GatewayProvider";
+import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { useI18n } from "@/i18n";
 import { colors, radii, spacing, typography } from "@/theme";
 
@@ -19,7 +19,9 @@ type RestoreStage = "connect" | "session" | "nodes";
 const STAGE_ORDER: RestoreStage[] = ["connect", "session", "nodes"];
 
 export default function Index() {
-  const gateway = useGateway();
+  const { error: gatewayError } = useSession();
+  const { reconnect, status } = useConnection();
+  const { nodeId, switchNode } = useFleet();
   const { t } = useI18n();
   const started = useRef(false);
   const rotation = useRef(new Animated.Value(0)).current;
@@ -47,19 +49,19 @@ export default function Index() {
   }, [breath, reduceMotion, rotation]);
 
   useEffect(() => {
-    if (gateway.status === "booting" || started.current) return;
+    if (status === "booting" || started.current) return;
     started.current = true;
-    void restoreLanding(gateway, setStage)
+    void restoreLanding({ nodeId, switchNode }, setStage)
       .then((reason) => { if (reason) setFailReason(reason); })
       .catch(() => router.replace("/account"));
-  }, [gateway]);
+  }, [nodeId, switchNode]);
 
-  const failed = gateway.status === "error";
+  const failed = status === "error";
   const retry = () => {
     started.current = false;
     setFailReason("");
     setStage("connect");
-    void gateway.reconnect();
+    void reconnect();
   };
 
   return (
@@ -77,7 +79,7 @@ export default function Index() {
       <Text style={styles.title}>{failed ? t("splash.unavailable") : t("splash.waking")}</Text>
       {failed ? (
         <Text style={styles.detail}>
-          {failReason || gateway.error || t("splash.connectionProblem")}
+          {failReason || gatewayError || t("splash.connectionProblem")}
         </Text>
       ) : (
         <View style={styles.stageRow} accessibilityLiveRegion="polite">
@@ -105,7 +107,7 @@ export default function Index() {
 }
 
 async function restoreLanding(
-  gateway: ReturnType<typeof useGateway>,
+  gateway: { nodeId: string; switchNode(nodeId: string): Promise<void> },
   reportStage: (stage: RestoreStage) => void,
 ): Promise<string> {
   reportStage("connect");
