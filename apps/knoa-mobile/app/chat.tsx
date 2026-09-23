@@ -549,6 +549,15 @@ export default function ChatScreen() {
     }
   }
 
+  // A running turn older than this is treated as orphaned (its stream
+  // died, e.g. on a relay drop). Waiting approvals are never stale —
+  // the user must decide those.
+  const STALE_RUNNING_MS = 10 * 60 * 1000;
+  const staleRunningTurn = activeTurn && activeTurn.state === "running"
+    && Date.now() - activeTurn.created_at * 1000 > STALE_RUNNING_MS
+    ? activeTurn
+    : null;
+
   async function send() {
     if (!session.client || !canSend) return;
     setFeedback(null);
@@ -589,30 +598,34 @@ export default function ChatScreen() {
       createdAt: Date.now(),
     };
 
-    // While a server turn is still open (running or waiting approval),
-    // park the message locally instead of failing against it. At most one.
-    if (activeTurn) {
-      if (queuedTurn) {
-        showFeedback(t("chat.queueFullHint"), "warning");
-        return;
+    // Orphaned running turns are best-effort cancelled and the message
+    // goes direct. A visible failure with retry beats a wedged composer.
+    if (staleRunningTurn) {
+      try {
+        const cancelled = await session.runAuthenticated(
+          (client) => client.cancelChatTurn(staleRunningTurn.turn_id),
+        );
+        setTurns((current) => mergeConversationTurns(current, [cancelled]));
+      } catch {
+        // Fall through and try sending anyway.
       }
-      setQueuedTurn(outgoing);
-      setText("");
-      setAttachments([]);
-      setFeedback(null);
-      followLatest.current = true;
-      setShowJumpToLatest(false);
-      scrollIntent.current = "instant";
-      showFeedback(t("chat.queuedHint"), "info");
-      return;
     }
 
+    // While a live server turn is still open, park the message locally
+    // instead of failing against it. At most one: a newer message
+    // replaces the parked one. The composer always clears on send.
     setText("");
     setAttachments([]);
     setFeedback(null);
     followLatest.current = true;
     setShowJumpToLatest(false);
     scrollIntent.current = "instant";
+    if (activeTurn && !staleRunningTurn) {
+      const replaced = Boolean(queuedTurn);
+      setQueuedTurn(outgoing);
+      showFeedback(t(replaced ? "chat.queuedReplacedHint" : "chat.queuedHint"), "info");
+      return;
+    }
 
     void submitPendingTurn(outgoing);
   }
@@ -623,12 +636,15 @@ export default function ChatScreen() {
   const submitRef = useRef(submitPendingTurn);
   submitRef.current = submitPendingTurn;
   const activeTurnId = activeTurn?.turn_id ?? "";
+  const staleRunningId = staleRunningTurn?.turn_id ?? "";
   useEffect(() => {
-    if (activeTurnId || pendingTurn || !queuedTurn) return;
+    if (pendingTurn || !queuedTurn) return;
+    // Live turn still open (and not orphaned): keep parking.
+    if (activeTurnId && activeTurnId !== staleRunningId) return;
     const next = queuedTurn;
     setQueuedTurn(null);
     void submitRef.current({ ...next, state: "sending", error: "" });
-  }, [activeTurnId, pendingTurn, queuedTurn]);
+  }, [activeTurnId, staleRunningId, pendingTurn, queuedTurn]);
 
   const handleSelectPrompt = useCallback((prompt: string, autoSend = false) => {
     const transportOnline = connection.status === "ready"
@@ -976,8 +992,8 @@ export default function ChatScreen() {
                   onCopy={copyMessage}
                   onRetry={(pending) => {
                     if (pending.localId === queuedTurn?.localId) {
-                      if (activeTurn || pendingTurn) {
-                        showFeedback(t("chat.queueFullHint"), "warning");
+                      if (activeTurn && activeTurn.turn_id !== staleRunningTurn?.turn_id) {
+                        showFeedback(t("chat.queuedHint"), "info");
                         return;
                       }
                       setQueuedTurn(null);
