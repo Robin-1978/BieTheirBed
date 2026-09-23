@@ -125,6 +125,8 @@ export const chat = {
   "chat.stopFailed": "The response could not be stopped. Try again.",
   "chat.retryFailed": "This response cannot be retried right now. You can edit and resend it instead.",
   "chat.editedToComposer": "The message is back in the composer. Edit it and send again.",
+  "chat.queuedHint": "The previous turn is still open. Your message is queued and will send automatically.",
+  "chat.queueFullHint": "One message is already queued. Wait for it to send first.",
   "chat.removeAttachment": "Remove {name}",
   "turn.failure.imageUnsupported": "The current agent model does not support image input. Configure a vision-capable model and send again.",
   "turn.failure.visionUnavailable": "This Node has no available image-understanding model. Select a vision-capable model in Node Console.",

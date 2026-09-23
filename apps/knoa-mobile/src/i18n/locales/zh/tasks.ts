@@ -74,6 +74,7 @@ export const tasks = {
   "tasks.bentoGlance": "桌面微缩视窗",
   "tasks.bentoPipeline": "执行流水线",
   "tasks.bentoReview": "去裁决",
+  "tasks.voidTask": "作废",
   "tasks.bentoArtifacts": "查看成果",
   "tasks.bentoRerun": "再次运行",
   "tasks.steerTitle": "即时插话纠偏",

@@ -12,6 +12,7 @@ import {
 
 import type { DesktopGlanceRecord, Task, TaskDefinitionState, TaskState } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
+import { ApprovalInboxCard } from "@/components/ApprovalInboxCard";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { DesktopGlanceModal } from "@/components/DesktopGlanceModal";
@@ -189,6 +190,23 @@ export default function TasksScreen() {
     }
   }
 
+  async function handleVoidTask(task: Task) {
+    if (!gateway.client) return;
+    try {
+      const state = task.latest_execution_state;
+      if (
+        task.latest_execution_id
+        && (state === "queued" || state === "running" || state === "paused" || state === "waiting_approval")
+      ) {
+        await gateway.runAuthenticated((client) => client.taskExecutionCommand(task.latest_execution_id, "cancel"));
+      }
+      await gateway.runAuthenticated((client) => client.taskDefinitionCommand(task.task_id, "archive"));
+      await refresh();
+    } catch {
+      void refresh();
+    }
+  }
+
   async function handleSteerTask(taskId: string, instruction: string) {
     if (!gateway.client || !instruction.trim()) return;
     await gateway.runAuthenticated((client) =>
@@ -214,6 +232,12 @@ export default function TasksScreen() {
   const visibleTasks = useMemo(
     () => tasks.filter((task) => filter === "current" ? task.state !== "archived" : task.state === filter),
     [filter, tasks],
+  );
+
+  const needsActionTasks = useMemo(
+    () => tasks.filter((task) => task.state !== "archived"
+      && (task.pending_approval_count > 0 || task.latest_execution_state === "waiting_approval")),
+    [tasks],
   );
 
   const sections = useMemo<TaskSection[]>(() => filter === "current"
@@ -327,6 +351,34 @@ export default function TasksScreen() {
           keyExtractor={(task) => task.task_id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} />}
           contentContainerStyle={styles.list}
+          ListHeaderComponent={
+            filter === "current" && needsActionTasks.length ? (
+              <View style={styles.inbox}>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>{t("tasks.section.needs_action")}</Text>
+                  <View style={styles.countBadge}>
+                    <Text style={styles.countBadgeText}>{needsActionTasks.length}</Text>
+                  </View>
+                </View>
+                {needsActionTasks.map((task) => {
+                  const state = task.latest_execution_state;
+                  const voidable = state === "queued" || state === "running"
+                    || state === "paused" || state === "waiting_approval";
+                  return (
+                    <ApprovalInboxCard
+                      key={task.task_id}
+                      task={task}
+                      ready={status === "ready"}
+                      runAuthenticated={gateway.runAuthenticated}
+                      onResolved={() => void refresh()}
+                      onOpenExecution={(executionId) => router.push(`/task-executions/${executionId}`)}
+                      onVoid={voidable ? handleVoidTask : undefined}
+                    />
+                  );
+                })}
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             !loading && !error ? (
               <AsyncStateView state="empty" title={t("tasks.emptyTitle")} message={t("tasks.emptyBody")} />
@@ -529,6 +581,10 @@ const styles = StyleSheet.create({
     gap: spacing.small,
     paddingHorizontal: spacing.large,
     paddingVertical: spacing.small,
+  },
+  inbox: {
+    gap: spacing.medium,
+    paddingBottom: spacing.medium,
   },
   syncRow: {
     flexDirection: "row",

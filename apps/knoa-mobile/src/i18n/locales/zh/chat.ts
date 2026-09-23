@@ -125,6 +125,8 @@ export const chat = {
   "chat.stopFailed": "暂时无法停止这次回复，请重试",
   "chat.retryFailed": "这次回复暂时无法重试，你也可以编辑后重新发送",
   "chat.editedToComposer": "已放回输入框，修改后可以重新发送",
+  "chat.queuedHint": "上一轮还没结束，消息已排队，完成后自动发送",
+  "chat.queueFullHint": "已有一条排队中的消息，先等它发出去",
   "chat.removeAttachment": "移除 {name}",
   "turn.failure.imageUnsupported": "当前 Agent 的模型不支持图片输入。请配置支持图片的模型后重新发送。",
   "turn.failure.visionUnavailable": "Node 尚未配置可用的图片理解模型。请在 Node Console 选择一个支持图片的模型。",
