@@ -113,6 +113,7 @@ export default function ChatScreen() {
   }>();
 
   const [pendingTurn, setPendingTurn] = useState<PendingChatTurn | null>(null);
+  const [queuedTurn, setQueuedTurn] = useState<PendingChatTurn | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   const [text, setText] = useState("");
@@ -367,6 +368,15 @@ export default function ChatScreen() {
             showTimestamp: false,
           }]
         : []),
+      ...(queuedTurn
+        ? [{
+            kind: "pending" as const,
+            key: queuedTurn.localId,
+            pending: queuedTurn,
+            timestampMs: queuedTurn.createdAt,
+            showTimestamp: false,
+          }]
+        : []),
     ];
     let previousMs: number | null = null;
     return base.map((item): ChatListItem => {
@@ -376,7 +386,7 @@ export default function ChatScreen() {
         ? { kind: "turn", key: item.key, turn: item.turn, timestampMs: item.timestampMs, showTimestamp }
         : { kind: "pending", key: item.key, pending: item.pending, timestampMs: item.timestampMs, showTimestamp };
     });
-  }, [pendingTurn, turns]);
+  }, [pendingTurn, queuedTurn, turns]);
 
   async function submitPendingTurn(pending: PendingChatTurn) {
     if (!session.client && !transportOnline) return;
@@ -483,14 +493,7 @@ export default function ChatScreen() {
     const localId = `local-${Date.now()}`;
     const requestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    setText("");
-    setAttachments([]);
-    setFeedback(null);
-    followLatest.current = true;
-    setShowJumpToLatest(false);
-    scrollIntent.current = "instant";
-
-    void submitPendingTurn({
+    const outgoing: PendingChatTurn = {
       localId,
       requestId,
       userInput,
@@ -498,8 +501,48 @@ export default function ChatScreen() {
       state: "sending",
       error: "",
       createdAt: Date.now(),
-    });
+    };
+
+    // While a server turn is still open (running or waiting approval),
+    // park the message locally instead of failing against it. At most one.
+    if (activeTurn) {
+      if (queuedTurn) {
+        showFeedback(t("chat.queueFullHint"), "warning");
+        return;
+      }
+      setQueuedTurn(outgoing);
+      setText("");
+      setAttachments([]);
+      setFeedback(null);
+      followLatest.current = true;
+      setShowJumpToLatest(false);
+      scrollIntent.current = "instant";
+      showFeedback(t("chat.queuedHint"), "info");
+      return;
+    }
+
+    setText("");
+    setAttachments([]);
+    setFeedback(null);
+    followLatest.current = true;
+    setShowJumpToLatest(false);
+    scrollIntent.current = "instant";
+
+    void submitPendingTurn(outgoing);
   }
+
+  // Auto-send the parked message once the server turn closes. submitRef
+  // avoids re-subscribing the effect on every render (submitPendingTurn
+  // is a plain function). All read values are in deps.
+  const submitRef = useRef(submitPendingTurn);
+  submitRef.current = submitPendingTurn;
+  const activeTurnId = activeTurn?.turn_id ?? "";
+  useEffect(() => {
+    if (activeTurnId || pendingTurn || !queuedTurn) return;
+    const next = queuedTurn;
+    setQueuedTurn(null);
+    void submitRef.current({ ...next, state: "sending", error: "" });
+  }, [activeTurnId, pendingTurn, queuedTurn]);
 
   const handleSelectPrompt = useCallback((prompt: string, autoSend = false) => {
     const transportOnline = connection.status === "ready"
@@ -839,16 +882,26 @@ export default function ChatScreen() {
               ) : (
                 <PendingTurnItem
                   pending={item.pending}
-                  queued={Boolean(activeTurn)}
+                  queued={Boolean(activeTurn) || item.pending.localId === queuedTurn?.localId}
                   showTimestamp={item.showTimestamp}
                   timestampMs={item.timestampMs}
                   locale={locale}
                   onCopy={copyMessage}
-                  onRetry={(pending) => void submitPendingTurn(pending)}
+                  onRetry={(pending) => {
+                    if (pending.localId === queuedTurn?.localId) {
+                      if (activeTurn || pendingTurn) {
+                        showFeedback(t("chat.queueFullHint"), "warning");
+                        return;
+                      }
+                      setQueuedTurn(null);
+                    }
+                    void submitPendingTurn(pending);
+                  }}
                   onEdit={(pending) => {
                     setText(pending.userInput);
                     setAttachments(pending.attachments.filter((att) => !att.uploaded));
-                    setPendingTurn(null);
+                    if (pending.localId === queuedTurn?.localId) setQueuedTurn(null);
+                    else setPendingTurn(null);
                     showFeedback(t("chat.editedToComposer"), "info");
                   }}
                 />

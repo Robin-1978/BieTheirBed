@@ -74,6 +74,7 @@ export const tasks = {
   "tasks.bentoGlance": "Desktop Glance",
   "tasks.bentoPipeline": "Execution Pipeline",
   "tasks.bentoReview": "Review",
+  "tasks.voidTask": "Void",
   "tasks.bentoArtifacts": "Artifacts",
   "tasks.bentoRerun": "Re-run",
   "tasks.steerTitle": "Live Task Steering",

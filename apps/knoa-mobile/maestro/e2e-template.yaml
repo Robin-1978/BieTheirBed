@@ -30,6 +30,9 @@ appId: dev.knoa.mobile
     visible: __IDENTITY__
     timeout: "60000"
 - takeScreenshot: e2e-account
+- extendedWaitUntil:
+    visible: __WORKSPACE_NAME__
+    timeout: "30000"
 - tapOn: __WORKSPACE_NAME__
 - tapOn: "Pair New Computer"
 - extendedWaitUntil:
@@ -56,3 +59,8 @@ appId: dev.knoa.mobile
     visible: __CHAT_TEXT__
     timeout: "60000"
 - takeScreenshot: e2e-chat-sent
+- tapOn: "Tasks"
+- extendedWaitUntil:
+    visible: "Company Linux"
+    timeout: "30000"
+- takeScreenshot: e2e-tasks
