@@ -71,8 +71,14 @@ export function TaskBentoCard({
               {t("tasks.bentoRunning")}
             </Text>
           </View>
-        ) : category === "completed" ? (
-          <View style={styles.completedHeaderRow}>
+        ) : category === "paused" ? (
+          <View style={[styles.pillBadge, styles.pillBadgeMuted]}>
+            <AppIcon name="pause" color={colors.muted} size={13} />
+            <Text style={[styles.pillText, styles.pillTextMuted]}>
+              {t("tasks.state.paused")}
+            </Text>
+          </View>
+        ) : category === "completed" ? (          <View style={styles.completedHeaderRow}>
             <View style={[styles.pillBadge, styles.pillBadgeSuccess]}>
               <AppIcon name="check" color={colors.accent} size={13} />
               <Text style={[styles.pillText, styles.pillTextSuccess]}>
