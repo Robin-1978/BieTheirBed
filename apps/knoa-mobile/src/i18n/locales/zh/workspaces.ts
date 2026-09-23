@@ -7,7 +7,7 @@ export const workspaces = {
   "assets.kindImage": "图片",
   "assets.kindFile": "文件",
   "pair.title": "连接小诺",
-  "pair.lead": "在 Node Console（127.0.0.1:9531）点击「生成 App 配对二维码」，然后用手机扫描。",
+  "pair.lead": "在电脑端小诺控制台点击「生成 App 配对二维码」，然后用手机扫描。",
   "pair.expiryHint": "二维码短时有效且只能使用一次；过期后请在 Node Console 重新生成。",
   "pair.deviceName": "设备名称",
   "pair.defaultDevice": "我的手机",

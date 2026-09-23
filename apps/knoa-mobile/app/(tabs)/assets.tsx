@@ -50,7 +50,6 @@ export default function UnifiedAssetsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<ArtifactKindFilter>("all");
-  const [continuing, setContinuing] = useState("");
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [previewFile, setPreviewFile] = useState<ResolvedArtifactFile | null>(null);
 
@@ -163,27 +162,21 @@ export default function UnifiedAssetsScreen() {
     }
   }
 
-  async function continueFromArtifact(item: (typeof artifacts)[number]) {
-    if (continuing) return;
-    setContinuing(item.artifact_id);
-    try {
-      const resolved = await resolveArtifact(item);
-      if (!resolved) return;
-      router.push({
-        pathname: "/(tabs)",
-        params: {
-          ...params,
-          capturedUri: resolved.uri,
-          capturedName: resolved.name,
-          capturedMediaType: resolved.mediaType,
-          prefill: t("artifacts.continuePrefill", { name: item.name }),
-        },
-      });
-    } catch {
-      setError(t("artifacts.loadFailed"));
-    } finally {
-      setContinuing("");
-    }
+  function continueFromArtifact(item: (typeof artifacts)[number]) {
+    // Pass the artifact by id: the chat turn references it directly instead
+    // of downloading + re-uploading a duplicate (which also died with the
+    // process). The composer downloads a local preview lazily for images.
+    router.push({
+      pathname: "/(tabs)",
+      params: {
+        ...params,
+        capturedArtifactId: item.artifact_id,
+        capturedSessionHandle: item.session_handle || gateway.sessionHandle,
+        capturedName: item.name,
+        capturedMediaType: item.media_type,
+        prefill: t("artifacts.continuePrefill", { name: item.name }),
+      },
+    });
   }
 
   const totalSavedHours = useMemo(() => calculateTotalSavedHours(tasks), [tasks]);
@@ -459,8 +452,7 @@ export default function UnifiedAssetsScreen() {
                 </AppPressable>
                 <AppPressable
                   style={styles.secondaryAction}
-                  disabled={continuing === artifact.artifact_id}
-                  onPress={() => void continueFromArtifact(artifact)}
+                  onPress={() => continueFromArtifact(artifact)}
                 >
                   <Text style={styles.secondaryActionText}>{t("artifacts.continue")}</Text>
                 </AppPressable>

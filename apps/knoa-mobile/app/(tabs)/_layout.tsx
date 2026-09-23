@@ -85,13 +85,15 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="assets"
+        name="space"
         options={{
-          title: t("tabs.assets"),
-          tabBarLabel: t("tabs.assets"),
-          tabBarIcon: ({ color, size }) => <AppIcon name="file" color={color} size={size ?? 22} />,
+          title: t("tabs.space"),
+          tabBarLabel: t("tabs.space"),
+          tabBarIcon: ({ color, size }) => <AppIcon name="folder" color={color} size={size ?? 22} />,
         }}
       />
+      {/* Legacy route kept reachable for deep links/redirects, hidden from the bar. */}
+      <Tabs.Screen name="assets" options={{ href: null }} />
       <Tabs.Screen
         name="settings"
         options={{

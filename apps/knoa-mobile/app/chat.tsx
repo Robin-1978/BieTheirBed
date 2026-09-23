@@ -53,6 +53,7 @@ import { presentNodeName } from "@/presentation/nodePresentation";
 import { calculateTotalSavedHours } from "@/components/trophyPresentation";
 import { loadCapabilityCache, type CapabilityCache } from "@/storage/capabilityCache";
 import {
+  assistantArtifactItems,
   resolveAssistantArtifactFile,
   type AssistantArtifactItem,
   type ResolvedArtifactFile,
@@ -109,6 +110,8 @@ export default function ChatScreen() {
     capturedUri?: string;
     capturedName?: string;
     capturedMediaType?: string;
+    capturedArtifactId?: string;
+    capturedSessionHandle?: string;
     prefill?: string;
   }>();
 
@@ -325,6 +328,75 @@ export default function ChatScreen() {
       return [...current, { uri: capturedUri, name: filename, mediaType }];
     });
   }, [params.capturedUri, params.capturedName, params.capturedMediaType]);
+
+  // Artifact-id continuation from the Space page: the turn references the
+  // original artifact (no download + re-upload duplicate). Images lazily
+  // fetch a local thumbnail for the composer preview only.
+  const capturedArtifactId = params.capturedArtifactId?.trim() ?? "";
+  const capturedArtifactSession = params.capturedSessionHandle?.trim() ?? "";
+  const capturedArtifactName = params.capturedName?.trim() ?? "";
+  const capturedArtifactMediaType = params.capturedMediaType?.trim() ?? "";
+  const currentSessionHandle = session.sessionHandle;
+  const sessionReady = Boolean(session.client);
+  useEffect(() => {
+    if (!capturedArtifactId || !sessionReady) return;
+    const mediaType = capturedArtifactMediaType || "application/octet-stream";
+    const name = capturedArtifactName || capturedArtifactId;
+    let cancelled = false;
+    setAttachments((current) => {
+      if (current.some((item) => item.uploaded?.artifact_id === capturedArtifactId)) return current;
+      return [...current, {
+        uri: `artifact:${capturedArtifactId}`,
+        name,
+        mediaType,
+        status: "uploaded" as const,
+        uploaded: { artifact_id: capturedArtifactId, caption: name },
+      }];
+    });
+    if (!mediaType.startsWith("image/")) return;
+    void (async () => {
+      try {
+        const ownerHandle = capturedArtifactSession || currentSessionHandle;
+        if (!ownerHandle) return;
+        const items = assistantArtifactItems([{
+          artifact_id: capturedArtifactId,
+          name,
+          media_type: mediaType,
+        }]);
+        const target = items[0];
+        if (!target) return;
+        const resolved = await resolveAssistantArtifactFile(
+          target,
+          {
+            cachedUri: (fileName) => {
+              const file = new File(Paths.document, `artifact-${fileName}`);
+              return file.exists ? file.uri : null;
+            },
+            download: (artifactId) => session.runAuthenticated(
+              (client) => client.downloadArtifact(ownerHandle, artifactId),
+            ),
+            write: (fileName, bytes) => {
+              const file = new File(Paths.document, `artifact-${fileName}`);
+              file.create({ overwrite: true, intermediates: true });
+              file.write(bytes);
+              return file.uri;
+            },
+          },
+        );
+        if (cancelled) return;
+        setAttachments((current) => current.map((item) =>
+          item.uploaded?.artifact_id === capturedArtifactId ? { ...item, uri: resolved.uri } : item,
+        ));
+      } catch {
+        // Thumbnail stays a placeholder; the turn still references the id.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [
+    capturedArtifactId, capturedArtifactSession, capturedArtifactName,
+    capturedArtifactMediaType, currentSessionHandle, sessionReady,
+    session.runAuthenticated,
+  ]);
 
   const activeTurn = useMemo(
     () => turns.find((turn) => !TERMINAL_STATES.has(turn.state)),

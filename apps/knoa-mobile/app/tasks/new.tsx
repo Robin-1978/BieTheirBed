@@ -227,7 +227,6 @@ export default function NewTaskScreen() {
     if (!goal.trim()) items.push(t("taskNew.blockerGoal"));
     if (!selectedNodeId) items.push(t("taskNew.blockerNode"));
     else if (switchingNode) items.push(t("taskNew.blockerSwitching"));
-    else if (selectedNodeId !== nodeId) items.push(t("taskNew.blockerNodeMismatch"));
     if (requiredUpdate) items.push(t("taskNew.blockerUpdate"));
     if (goal.trim() && !isLaunchPolicyValid(launchPolicy)) items.push(t("taskNew.blockerPolicy"));
     return items;
@@ -243,6 +242,18 @@ export default function NewTaskScreen() {
     setSaving(true);
     setError("");
     try {
+      // Node invisibility: switch silently on create instead of blocking.
+      if (selectedNodeId && selectedNodeId !== nodeId) {
+        setSwitchingNode(true);
+        try {
+          await switchNode(selectedNodeId);
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : t("taskNew.nodeSwitchFailed"));
+          return;
+        } finally {
+          setSwitchingNode(false);
+        }
+      }
       if (notifyCompleted || notifyFailed || notifyApproval) {
         void requestTaskNotificationPermission();
       }
@@ -554,7 +565,7 @@ export default function NewTaskScreen() {
         <AppPressable
           accessibilityRole="button"
           accessibilityLabel={launchPolicy.kind === "immediate" ? t("taskNew.createAndStart") : t("taskNew.create")}
-          disabled={!goal.trim() || saving || switchingNode || !selectedNodeId || selectedNodeId !== nodeId || Boolean(requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
+          disabled={!goal.trim() || saving || switchingNode || !selectedNodeId || Boolean(requiredUpdate) || !isLaunchPolicyValid(launchPolicy)}
           onPress={() => void create()}
           style={[styles.primary, (!goal.trim() || saving || requiredUpdate || !isLaunchPolicyValid(launchPolicy)) && styles.disabled]}
         >

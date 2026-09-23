@@ -29,7 +29,7 @@ import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 const EMPTY_DRAFT: MemoryDraft = { key: "", value: "", category: "preference", importance: "core" };
 
-export default function MemoriesScreen() {
+export default function MemoriesScreen({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const gateway = useSession();
   const { status } = useConnection();
@@ -157,6 +157,7 @@ export default function MemoriesScreen() {
 
   return (
     <View style={styles.container}>
+      {embedded ? null : (
       <Stack.Screen
         options={{
           title: t("memories.title"),
@@ -186,6 +187,7 @@ export default function MemoriesScreen() {
           ),
         }}
       />
+      )}
 
       {/* 说明横幅 */}
       <View style={styles.heroBanner}>
