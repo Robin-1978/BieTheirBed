@@ -31,6 +31,23 @@ if [[ "${#DEVICES[@]}" -ne 1 ]]; then echo "Expected one device, found ${#DEVICE
 SERIAL="${DEVICES[0]}"
 export ANDROID_SERIAL="$SERIAL"
 
+# Emulator DNS rots over long runs (unknown host). Reboot once if broken.
+if ! "$ADB" -s "$SERIAL" shell "ping -c1 -W4 knoa.tinydotdot.com" 2>/dev/null | grep -q "bytes from"; then
+  echo "==> Emulator DNS broken, rebooting"
+  "$ADB" -s "$SERIAL" reboot
+  sleep 120
+  "$ADB" -s "$SERIAL" wait-for-device
+  for _ in $(seq 1 30); do
+    if [[ "$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then break; fi
+    sleep 10
+  done
+  if ! "$ADB" -s "$SERIAL" shell "ping -c1 -W4 knoa.tinydotdot.com" 2>/dev/null | grep -q "bytes from"; then
+    echo "Emulator DNS still broken after reboot; aborting" >&2
+    exit 1
+  fi
+  echo "==> Emulator DNS recovered"
+fi
+
 # E2E runs in English locale: Gboard Pinyin transliterates adb-injected
 # ASCII (JSON grants) into Chinese. Restore zh-CN afterwards.
 "$ADB" -s "$SERIAL" root >/dev/null 2>&1 || true

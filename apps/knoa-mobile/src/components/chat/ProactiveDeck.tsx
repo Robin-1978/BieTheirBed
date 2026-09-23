@@ -7,6 +7,12 @@ import { AppIcon } from "../AppIcon";
 import { AppPressable } from "../AppPressable";
 import { DECK_ACTIONS, type ActionItem } from "./proactiveDeckModel";
 
+export interface DeckMonitor {
+  taskId: string;
+  title: string;
+  detail: string;
+}
+
 export interface ProactiveDeckProps {
   computerName?: string;
   toolCount?: number;
@@ -14,8 +20,10 @@ export interface ProactiveDeckProps {
   isOnline?: boolean;
   savedHours?: number;
   completedTasksCount?: number;
+  monitors?: DeckMonitor[];
   onSelectPrompt: (prompt: string, autoSend?: boolean) => void;
-  onLaunchTask: (title: string, goal: string) => void;
+  onLaunchTask: (title: string, goal: string, schedulePreset?: "daily") => void;
+  onOpenMonitor?: (taskId: string) => void;
   onPressGlance?: () => void;
 }
 
@@ -26,8 +34,10 @@ export const ProactiveDeck = memo(function ProactiveDeck({
   isOnline = true,
   savedHours,
   completedTasksCount,
+  monitors = [],
   onSelectPrompt,
   onLaunchTask,
+  onOpenMonitor,
   onPressGlance,
 }: ProactiveDeckProps) {
   const { t } = useI18n();
@@ -192,6 +202,56 @@ export const ProactiveDeck = memo(function ProactiveDeck({
         </View>
       ) : null}
 
+      {/* 正在盯着：已有的定时/事件任务，点进详情 */}
+      {monitors.length ? (
+        <View style={styles.actionsGrid}>
+          <Text style={[styles.faqSectionTitle, { color: colors.muted, ...typography.caption }]}>
+            {t("chat.deckWatching")}
+          </Text>
+          {monitors.map((monitor) => (
+            <AppPressable
+              key={monitor.taskId}
+              style={[
+                styles.actionCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.accent,
+                  borderRadius: radii.medium,
+                  padding: spacing.medium,
+                  ...shadows.card,
+                },
+              ]}
+              onPress={() => onOpenMonitor?.(monitor.taskId)}
+            >
+              <View style={styles.cardHeader}>
+                <View
+                  style={[
+                    styles.iconWrap,
+                    {
+                      backgroundColor: colors.accentSoft,
+                      borderRadius: radii.small,
+                    },
+                  ]}
+                >
+                  <AppIcon name="timer" color={colors.accent} size={18} />
+                </View>
+                <View style={styles.cardTextWrap}>
+                  <Text style={[styles.cardTitle, { color: colors.ink, ...typography.body }]} numberOfLines={1}>
+                    {monitor.title}
+                  </Text>
+                  <Text
+                    style={[styles.cardDesc, { color: colors.muted, ...typography.small }]}
+                    numberOfLines={2}
+                  >
+                    {monitor.detail}
+                  </Text>
+                </View>
+              </View>
+            </AppPressable>
+          ))}
+        </View>
+      ) : null}
+
       {/* Bento 行动卡片流 */}
       <View style={styles.actionsGrid}>
         {DECK_ACTIONS.map((item) => (
@@ -264,6 +324,20 @@ export const ProactiveDeck = memo(function ProactiveDeck({
                   {t("chat.deckDirectTask")}
                 </Text>
               </AppPressable>
+              {item.schedulePreset === "daily" ? (
+                <AppPressable
+                  style={[
+                    styles.quickActionBtn,
+                    { backgroundColor: colors.surfaceMuted, borderRadius: radii.small },
+                  ]}
+                  onPress={() => onLaunchTask(item.taskTitle, item.prompt, "daily")}
+                >
+                  <AppIcon name="timer" color={colors.ink} size={12} />
+                  <Text style={[styles.quickActionText, { color: colors.ink, ...typography.tiny }]}>
+                    {t("chat.deckWatchDaily")}
+                  </Text>
+                </AppPressable>
+              ) : null}
             </View>
           </View>
         ))}

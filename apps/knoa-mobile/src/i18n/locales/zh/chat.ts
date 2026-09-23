@@ -22,6 +22,8 @@ export const chat = {
   "chat.deckActionBriefingDesc": "联网搜集技术与热点要闻并生成精美排版简报",
   "chat.deckDirectChat": "即时执行",
   "chat.deckDirectTask": "派发后台任务",
+  "chat.deckWatching": "正在帮你盯着",
+  "chat.deckWatchDaily": "每天盯",
   "chat.deckFaqTitle": "您也可以直接说：",
   "chat.exampleGitLab": "分析最新失败的 GitLab Pipeline",
   "chat.exampleJira": "查看分配给我的 Jira 工单",

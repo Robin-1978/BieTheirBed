@@ -7,6 +7,8 @@ export interface ActionItem {
   descKey: "chat.deckActionCleanDesc" | "chat.deckActionHealthDesc" | "chat.deckActionGitDesc" | "chat.deckActionBriefingDesc";
   prompt: string;
   taskTitle: string;
+  /** Recurring preset offered as "watch for me". Absent = one-shot only. */
+  schedulePreset?: "daily";
 }
 
 export const DECK_ACTIONS: ActionItem[] = [
@@ -25,6 +27,7 @@ export const DECK_ACTIONS: ActionItem[] = [
     descKey: "chat.deckActionHealthDesc",
     prompt: "请检查本机系统健康状态，包括磁盘剩余空间、CPU使用率、内存占用以及是否有异常服务",
     taskTitle: "电脑系统健康与磁盘巡检",
+    schedulePreset: "daily",
   },
   {
     key: "git",
@@ -41,5 +44,6 @@ export const DECK_ACTIONS: ActionItem[] = [
     descKey: "chat.deckActionBriefingDesc",
     prompt: "请搜集今日 AI、前沿科技与行业热点要闻，整理并排版成一份结构化的晨间早报",
     taskTitle: "今日前沿技术与热点早报",
+    schedulePreset: "daily",
   },
 ];

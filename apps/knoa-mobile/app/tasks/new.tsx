@@ -55,6 +55,7 @@ export default function NewTaskScreen() {
     workspaceId?: string;
     workspaceName?: string;
     nodeId?: string;
+    recurring?: string;
   }>();
   const [title, setTitle] = useState(stringParam(params.title));
   const [goal, setGoal] = useState(stringParam(params.goal));
@@ -182,6 +183,19 @@ export default function NewTaskScreen() {
     // 场景入口自带目标描述时保留它，只借模板的结构（标题/预检说明）。
     if (!paramGoal) setGoal(t(requested.goalKey));
   }, [params.agentId, params.goal, params.template, params.title, t]);
+
+  // "Watch for me" entry from the chat deck: preset a daily interval.
+  // Notification switches already default to on, closing the push loop.
+  useEffect(() => {
+    if (stringParam(params.recurring) === "daily") {
+      setLaunchPolicy({
+        ...immediatePolicy(),
+        kind: "scheduled",
+        schedule_type: "interval",
+        interval_seconds: 86400,
+      });
+    }
+  }, [params.recurring]);
 
   useEffect(() => {
     if (nodeId) setSelectedNodeId(nodeId);
