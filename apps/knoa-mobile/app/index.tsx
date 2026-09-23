@@ -54,7 +54,7 @@ export default function Index() {
     void restoreLanding({ nodeId, switchNode }, setStage)
       .then((reason) => { if (reason) setFailReason(reason); })
       .catch(() => router.replace("/account"));
-  }, [nodeId, switchNode]);
+  }, [nodeId, status, switchNode]);
 
   const failed = status === "error";
   const retry = () => {
