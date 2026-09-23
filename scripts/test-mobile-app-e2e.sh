@@ -150,7 +150,6 @@ print(n)
     status=1
   fi
 else
-else
   status=$?
   "$ADB" -s "$SERIAL" logcat -d -v brief AndroidRuntime:E ReactNativeJS:E '*:S' \
     > "$OUT_DIR/e2e-logcat.txt" || true
