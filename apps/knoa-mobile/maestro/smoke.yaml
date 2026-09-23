@@ -1,0 +1,17 @@
+appId: dev.knoa.mobile
+---
+# Layer 1 smoke: cold launch with no pairing. Must land on sign-in,
+# stay alive, and render the entry screens. Maestro fails the run
+# automatically on crash/ANR; screenshots are the visual evidence.
+- clearState
+- launchApp:
+    stopApp: true
+- assertVisible: "登录 Knoa"
+- takeScreenshot: launch-login
+# Self-hosted toggle flips the login form in place.
+- tapOn: "使用自建 Hub"
+- assertVisible: "登录自建 Hub"
+- takeScreenshot: login-selfhosted
+- tapOn: "使用 Knoa Hosted Hub"
+- assertVisible: "登录 Knoa"
+- takeScreenshot: smoke-done
