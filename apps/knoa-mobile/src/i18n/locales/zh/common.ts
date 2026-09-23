@@ -21,6 +21,7 @@ export const common = {
   "tabs.chat": "会话",
   "tabs.tasks": "任务",
   "tabs.assets": "资产",
+  "tabs.space": "空间",
   "tabs.settings": "设置",
   "tabs.agent": "小诺",
   "nav.taskDetails": "任务详情",

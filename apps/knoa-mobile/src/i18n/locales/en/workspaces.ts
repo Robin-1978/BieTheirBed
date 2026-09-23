@@ -7,7 +7,7 @@ export const workspaces = {
   "assets.kindImage": "Images",
   "assets.kindFile": "Files",
   "pair.title": "Connect to Knoa",
-  "pair.lead": "In Node Console (127.0.0.1:9531), tap Generate App pairing QR, then scan it with this phone.",
+  "pair.lead": "On your computer's Knoa console, tap Generate App pairing QR, then scan it with this phone.",
   "pair.expiryHint": "The code is short-lived and single-use. Generate a new one in Node Console if it expires.",
   "pair.deviceName": "Device name",
   "pair.defaultDevice": "My phone",

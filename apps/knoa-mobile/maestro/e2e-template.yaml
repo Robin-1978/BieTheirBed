@@ -64,3 +64,9 @@ appId: dev.knoa.mobile
     visible: "Company Linux"
     timeout: "30000"
 - takeScreenshot: e2e-tasks
+- tapOn: "Space"
+- tapOn: "Memory Bank"
+- extendedWaitUntil:
+    visible: "Search key, content, or category…"
+    timeout: "30000"
+- takeScreenshot: e2e-space-memories

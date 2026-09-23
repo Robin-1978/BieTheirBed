@@ -21,6 +21,7 @@ export const common = {
   "tabs.chat": "Chat",
   "tabs.tasks": "Tasks",
   "tabs.assets": "Assets",
+  "tabs.space": "Space",
   "tabs.settings": "Settings",
   "tabs.agent": "Agent",
   "nav.taskDetails": "Task Details",
