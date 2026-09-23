@@ -7,6 +7,7 @@ export type AppIconName =
   | "alert"
   | "archive"
   | "arrow-down"
+  | "bell"
   | "camera"
   | "chat"
   | "check"
@@ -52,6 +53,7 @@ const glyphs: Record<AppIconName, React.ComponentProps<typeof Ionicons>["name"]>
   alert: "alert-circle-outline",
   archive: "archive-outline",
   "arrow-down": "arrow-down",
+  bell: "notifications-outline",
   camera: "camera-outline",
   chat: "chatbubble-ellipses-outline",
   check: "checkmark",

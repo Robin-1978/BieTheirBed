@@ -74,6 +74,13 @@ export default function TabsLayout() {
           headerRight: () => (
             <View style={styles.headerRightGroup}>
               <AppPressable
+                accessibilityLabel={t("notifications.title")}
+                onPress={() => router.push({ pathname: "/notifications" })}
+                style={styles.headerButton}
+              >
+                <AppIcon name="bell" color={colors.ink} size={21} />
+              </AppPressable>
+              <AppPressable
                 accessibilityLabel={t("nav.newTask")}
                 onPress={() => router.push({ pathname: "/tasks/new", params: nodeParams })}
                 style={styles.headerButton}

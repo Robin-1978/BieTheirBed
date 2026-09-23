@@ -64,6 +64,12 @@ appId: dev.knoa.mobile
     visible: "Company Linux"
     timeout: "30000"
 - takeScreenshot: e2e-tasks
+- tapOn: "Notifications"
+- extendedWaitUntil:
+    visible: "Notifications"
+    timeout: "30000"
+- takeScreenshot: e2e-notifications
+- back
 - tapOn: "Space"
 - tapOn: "Memory Bank"
 - extendedWaitUntil:
