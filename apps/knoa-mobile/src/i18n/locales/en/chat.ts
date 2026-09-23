@@ -22,6 +22,8 @@ export const chat = {
   "chat.deckActionBriefingDesc": "Collect tech news and format structured brief",
   "chat.deckDirectChat": "Run in Chat",
   "chat.deckDirectTask": "Launch Task",
+  "chat.deckWatching": "Watching for you",
+  "chat.deckWatchDaily": "Watch daily",
   "chat.deckFaqTitle": "Or quickly ask:",
   "chat.exampleGitLab": "Analyze the latest failed GitLab pipeline",
   "chat.exampleJira": "Show Jira issues assigned to me",

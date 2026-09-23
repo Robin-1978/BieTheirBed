@@ -166,6 +166,7 @@ export default function ChatScreen() {
   } = useLiveGlance({ hasClient: Boolean(session.client), runAuthenticated });
   const [savedHours, setSavedHours] = useState(0);
   const [completedTasksCount, setCompletedTasksCount] = useState(0);
+  const [monitors, setMonitors] = useState<Array<{ taskId: string; title: string; detail: string }>>([]);
 
   useEffect(() => {
     if (connection.status !== "ready") return;
@@ -178,6 +179,19 @@ export default function ChatScreen() {
         setSavedHours(calculateTotalSavedHours(taskList));
         setCompletedTasksCount(
           taskList.filter((item) => item.latest_execution_state === "completed" || item.state === "archived").length
+        );
+        setMonitors(
+          taskList
+            .filter((item) => item.state === "active"
+              && (item.launch_policy.schedule_type === "interval"
+                || item.launch_policy.schedule_type === "cron"
+                || item.launch_policy.kind === "event"))
+            .slice(0, 5)
+            .map((item) => ({
+              taskId: item.task_id,
+              title: item.title,
+              detail: item.latest_execution_summary || item.goal,
+            })),
         );
       })
       .catch(() => {});
@@ -653,7 +667,7 @@ export default function ChatScreen() {
     }
   }, [session.client, fleet.requiredUpdate, connection.status, connection.relayState, connection.p2pState, connection.lanState, pendingTurn, showFeedback, t, validatingInput]);
 
-  const handleLaunchTask = useCallback((title: string, goal: string) => {
+  const handleLaunchTask = useCallback((title: string, goal: string, schedulePreset?: "daily") => {
     const targetNodeId = fleet.nodeId || stringParam(params.nodeId);
     router.push({
       pathname: "/tasks/new",
@@ -662,6 +676,7 @@ export default function ChatScreen() {
         ...(targetNodeId ? { nodeId: targetNodeId } : {}),
         title,
         goal,
+        ...(schedulePreset ? { recurring: schedulePreset } : {}),
       },
     });
   }, [fleet.nodeId, params]);
@@ -989,6 +1004,8 @@ export default function ChatScreen() {
                 completedTasksCount={completedTasksCount}
                 onSelectPrompt={handleSelectPrompt}
                 onLaunchTask={handleLaunchTask}
+                monitors={monitors}
+                onOpenMonitor={(taskId) => router.push({ pathname: "/tasks/[id]", params: { id: taskId } })}
                 onPressGlance={handleOpenLiveGlance}
               />
             }
