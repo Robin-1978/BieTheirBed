@@ -132,6 +132,24 @@ echo "==> Maestro E2E flow (identity=$IDENTITY)"
 status=0
 if "$MAESTRO" test "$FLOW"; then
   echo "OK: maestro E2E passed on $SERIAL"
+  # Server-side receipt: the turn must exist in the node database, not
+  # just echo locally. This is the gate that matters.
+  TURNS="$(CHAT_TEXT="$CHAT_TEXT" python3 -c "
+import os, sqlite3, time
+db = sqlite3.connect('/home/robin/.knoa/data/assistant.db')
+n = db.execute(
+  'SELECT COUNT(*) FROM conversation_turns WHERE user_input = ? AND created_at > ?',
+  (os.environ['CHAT_TEXT'], time.time() - 900),
+).fetchone()[0]
+print(n)
+")"
+  if [[ "$TURNS" -ge 1 ]]; then
+    echo "OK: server received the chat turn ($TURNS match)"
+  else
+    echo "E2E FAILED: chat turn never reached the node" >&2
+    status=1
+  fi
+else
 else
   status=$?
   "$ADB" -s "$SERIAL" logcat -d -v brief AndroidRuntime:E ReactNativeJS:E '*:S' \

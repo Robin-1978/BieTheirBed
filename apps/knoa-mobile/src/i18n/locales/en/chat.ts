@@ -128,6 +128,7 @@ export const chat = {
   "chat.retryFailed": "This response cannot be retried right now. You can edit and resend it instead.",
   "chat.editedToComposer": "The message is back in the composer. Edit it and send again.",
   "chat.queuedHint": "The previous turn is still open. Your message is queued and will send automatically.",
+  "chat.queuedReplacedHint": "Replaced the previously queued message.",
   "chat.queueFullHint": "One message is already queued. Wait for it to send first.",
   "chat.removeAttachment": "Remove {name}",
   "turn.failure.imageUnsupported": "The current agent model does not support image input. Configure a vision-capable model and send again.",
