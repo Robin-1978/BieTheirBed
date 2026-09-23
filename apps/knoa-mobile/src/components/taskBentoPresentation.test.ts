@@ -66,9 +66,17 @@ describe("taskBentoPresentation", () => {
     expect(taskBentoCategory(taskCompleted)).toBe("completed");
   });
 
-  it("classifies idle task without execution or in paused state without running", () => {
+  it("classifies idle task without execution", () => {
     const taskIdle = makeTask({ pending_approval_count: 0, latest_execution_state: null });
     expect(taskBentoCategory(taskIdle)).toBe("idle");
+  });
+
+  it("classifies paused execution or paused definition as paused", () => {
+    const taskExecPaused = makeTask({ pending_approval_count: 0, latest_execution_state: "paused" });
+    expect(taskBentoCategory(taskExecPaused)).toBe("paused");
+
+    const taskDefPaused = makeTask({ pending_approval_count: 0, latest_execution_state: null, state: "paused" });
+    expect(taskBentoCategory(taskDefPaused)).toBe("paused");
   });
 
   it("estimates saved minutes accurately for completed and multi-run tasks", () => {

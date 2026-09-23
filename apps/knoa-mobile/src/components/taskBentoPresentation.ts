@@ -1,6 +1,6 @@
 import type { Task, TaskState } from "@/api/models";
 
-export type BentoCategory = "needs_action" | "running" | "completed" | "idle";
+export type BentoCategory = "needs_action" | "running" | "paused" | "completed" | "idle";
 
 export interface DesktopGlanceRecord {
   taskId: string;
@@ -20,6 +20,9 @@ export function taskBentoCategory(task: Task): BentoCategory {
   }
   if (task.latest_execution_state === "running" || task.latest_execution_state === "queued") {
     return "running";
+  }
+  if (task.latest_execution_state === "paused" || task.state === "paused") {
+    return "paused";
   }
   if (task.latest_execution_state === "completed") {
     return "completed";
