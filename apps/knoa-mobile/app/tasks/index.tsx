@@ -274,7 +274,12 @@ export default function TasksScreen() {
           <View style={styles.unreadNoticeBanner}>
             <View style={styles.unreadNoticeLeft}>
               <AppIcon name="alert" color={colors.accent} size={16} />
-              <View style={styles.unreadNoticeTextWrap}>
+              <AppPressable
+                accessibilityRole="button"
+                accessibilityLabel={t("notifications.viewAll")}
+                onPress={() => router.push("/notifications")}
+                style={styles.unreadNoticeTextWrap}
+              >
                 <Text style={styles.unreadNoticeTitle}>
                   {t("reminders.summary", { count: currentNodeUnread.count })}
                 </Text>
@@ -283,7 +288,7 @@ export default function TasksScreen() {
                     {t("reminders.otherDevices", { count: otherNodeReminders.length })}
                   </Text>
                 ) : null}
-              </View>
+              </AppPressable>
             </View>
             <AppPressable
               accessibilityRole="button"
