@@ -1,0 +1,58 @@
+appId: dev.knoa.mobile
+---
+# Layer 2/3 E2E: register a throwaway hosted account, pair the local node,
+# send one chat message. Rendered from e2e-template.yaml by
+# scripts/test-mobile-app-e2e.sh, which injects fresh single-use grants
+# (setup TTL 3600s, pairing TTL 900s). Placeholders are __UPPER_SNAKE__.
+- clearState
+- launchApp:
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Sign in to Knoa"
+    timeout: "30000"
+- takeScreenshot: e2e-login
+- tapOn: "Create account"
+- tapOn: "Or paste the Hub one-time credential"
+- inputText: __SETUP_JSON__
+- hideKeyboard
+- tapOn: "Login identity"
+- inputText: __IDENTITY__
+- hideKeyboard
+- tapOn: "Display name"
+- inputText: __DEVICE_NAME__
+- hideKeyboard
+- scroll
+- tapOn: "Password (at least 12 characters)"
+- inputText: __PASSWORD__
+- hideKeyboard
+- tapOn: "Create and sign in"
+- extendedWaitUntil:
+    visible: __IDENTITY__
+    timeout: "60000"
+- takeScreenshot: e2e-account
+- tapOn: __WORKSPACE_NAME__
+- tapOn: "Pair New Computer"
+- extendedWaitUntil:
+    visible: "Connect to Knoa"
+    timeout: "60000"
+- takeScreenshot: e2e-pair
+- tapOn: "Device name"
+- inputText: __DEVICE_NAME__
+- hideKeyboard
+- tapOn: "Other connection methods"
+- tapOn: '{"version":"v1", ...}'
+- inputText: __PAIRING_JSON__
+- hideKeyboard
+- tapOn: "Connect securely"
+- extendedWaitUntil:
+    visible: "Message Knoa…"
+    timeout: "90000"
+- takeScreenshot: e2e-paired-chat
+- tapOn: "Message Knoa…"
+- inputText: __CHAT_TEXT__
+- hideKeyboard
+- tapOn: "Send"
+- extendedWaitUntil:
+    visible: __CHAT_TEXT__
+    timeout: "60000"
+- takeScreenshot: e2e-chat-sent

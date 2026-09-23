@@ -153,6 +153,7 @@ export default function AccountLoginScreen() {
               placeholder={t("login.setupPlaceholder")}
               placeholderTextColor={colors.muted}
               autoCapitalize="none"
+              autoCorrect={false}
               multiline
               style={[styles.input, styles.payload]}
             />
