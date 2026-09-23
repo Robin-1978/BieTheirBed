@@ -424,14 +424,13 @@ export default function ChatScreen() {
     || connection.lanState === "found";
   const sending = pendingTurn?.state === "sending";
   const hasComposerContent = Boolean(text.trim() || attachments.length);
-  // 与顶部状态胶囊（NodeHeader 的 isOnline）保持同一语义：任一传输就绪即视为
-  // 可发送。 Relay/P2P 诊断回调先于 status=ready 到达，之前这里单独卡
-  // session.client 会让胶囊显示"在线·P2P"而发送键仍是禁用；发送时
-  // runAuthenticated 会顺带完成认证恢复。
+  // 发送门只看本地就绪（有内容、非发送中、非校验中、无强制更新），不问
+  // session.client / transportOnline：后两者是长连接建连状态，P2P/Relay
+  // 建连转圈时它们永远不就绪，但 token 直调（轮询/列表/turn）是通的。
+  // 真离线时 submit 会抛可见错误 + 重试键，绝不静默装死。
   const canSend = Boolean(
     !pendingTurn
       && !validatingInput
-      && (session.client || transportOnline)
       && !fleet.requiredUpdate
       && hasComposerContent,
   );
@@ -475,7 +474,8 @@ export default function ChatScreen() {
   }, [pendingTurn, queuedTurn, turns]);
 
   async function submitPendingTurn(pending: PendingChatTurn) {
-    if (!session.client && !transportOnline) return;
+    // runAuthenticated 在无 client 时走 token 恢复直调；真离线抛错，
+    // 调用方呈现失败态 + 重试。这里不再前置拦截。
     setPendingTurn({ ...pending, state: "sending", error: "" });
     setFeedback(null);
 
@@ -559,7 +559,7 @@ export default function ChatScreen() {
     : null;
 
   async function send() {
-    if (!session.client || !canSend) return;
+    if (!canSend) return;
     setFeedback(null);
     if (attachments.some((item) => item.mediaType.startsWith("image/"))) {
       setValidatingInput(true);
@@ -647,16 +647,9 @@ export default function ChatScreen() {
   }, [activeTurnId, staleRunningId, pendingTurn, queuedTurn]);
 
   const handleSelectPrompt = useCallback((prompt: string, autoSend = false) => {
-    const transportOnline = connection.status === "ready"
-      || connection.relayState === "ready"
-      || connection.relayState === "active"
-      || connection.p2pState === "ready"
-      || connection.p2pState === "active"
-      || connection.lanState === "found";
     const canAutoSend = Boolean(
       !pendingTurn
         && !validatingInput
-        && (session.client || transportOnline)
         && !fleet.requiredUpdate,
     );
     if (autoSend && canAutoSend) {
