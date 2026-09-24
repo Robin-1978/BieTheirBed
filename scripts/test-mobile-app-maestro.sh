@@ -55,3 +55,11 @@ else
   echo "Maestro smoke FAILED; logcat saved to $OUT_DIR/smoke-logcat.txt" >&2
   exit $status
 fi
+echo "==> Maestro dark-mode flow"
+if "$MAESTRO" test "$MOBILE/maestro/dark.yaml"; then
+  echo "OK: maestro dark flow passed on $SERIAL"
+else
+  status=$?
+  echo "Maestro dark flow FAILED" >&2
+  exit $status
+fi

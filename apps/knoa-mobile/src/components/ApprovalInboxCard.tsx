@@ -3,7 +3,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import type { GatewayClient } from "@/api/gatewayClient";
 import type { Task, TaskApproval, TaskExecution } from "@/api/models";
-import { ApprovalRequestDetails } from "@/components/ApprovalRequestDetails";
+import { ApprovalCard } from "@/components/ApprovalCard";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n } from "@/i18n";
 import { colors, radii, spacing, typography } from "@/theme";
@@ -31,7 +31,7 @@ export function ApprovalInboxCard({ task, ready, runAuthenticated, onResolved, o
   const { t } = useI18n();
   const [execution, setExecution] = useState<TaskExecution | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [resolvingId, setResolvingId] = useState("");
+  const [resolving, setResolving] = useState<{ id: string; approved: boolean } | null>(null);
 
   const executionId = task.latest_execution_id;
 
@@ -53,8 +53,8 @@ export function ApprovalInboxCard({ task, ready, runAuthenticated, onResolved, o
   const pending = (execution?.approvals ?? []).filter((item) => item.state === "pending");
 
   async function resolve(approval: TaskApproval, approved: boolean) {
-    if (resolvingId) return;
-    setResolvingId(approval.approval_id);
+    if (resolving) return;
+    setResolving({ id: approval.approval_id, approved });
     try {
       await runAuthenticated((client) => client.resolveApproval(approval.approval_id, approved));
       setExecution((current) => current ? {
@@ -67,7 +67,7 @@ export function ApprovalInboxCard({ task, ready, runAuthenticated, onResolved, o
     } catch {
       setLoadError(true);
     } finally {
-      setResolvingId("");
+      setResolving(null);
     }
   }
 
@@ -95,35 +95,15 @@ export function ApprovalInboxCard({ task, ready, runAuthenticated, onResolved, o
         </AppPressable>
       ) : null}
       {pending.map((approval, index) => (
-        <View key={approval.approval_id} style={styles.approval}>
-          {pending.length > 1 ? <Text style={styles.count}>{index + 1}/{pending.length}</Text> : null}
-          <ApprovalRequestDetails
-            toolName={approval.tool_name}
-            arguments={approval.arguments}
-            display={approval.display}
-          />
-          {approval.reason ? <Text style={styles.reason}>{approval.reason}</Text> : null}
-          <View style={styles.actions}>
-            <AppPressable
-              style={[styles.button, styles.deny]}
-              disabled={Boolean(resolvingId)}
-              onPress={() => void resolve(approval, false)}
-            >
-              {resolvingId === approval.approval_id
-                ? <ActivityIndicator size="small" color={colors.danger} />
-                : <Text style={styles.denyText}>{t("execution.denyAction")}</Text>}
-            </AppPressable>
-            <AppPressable
-              style={[styles.button, styles.allow]}
-              disabled={Boolean(resolvingId)}
-              onPress={() => void resolve(approval, true)}
-            >
-              {resolvingId === approval.approval_id
-                ? <ActivityIndicator size="small" color={colors.onAccent} />
-                : <Text style={styles.allowText}>{t("execution.allowAction")}</Text>}
-            </AppPressable>
-          </View>
-        </View>
+        <ApprovalCard
+          key={approval.approval_id}
+          approval={approval}
+          countLabel={pending.length > 1 ? `${index + 1}/${pending.length}` : undefined}
+          resolvingId={resolving?.id}
+          resolvingApproved={resolving?.approved ?? null}
+          onApprove={(item) => void resolve(item, true)}
+          onDeny={(item) => void resolve(item, false)}
+        />
       ))}
     </View>
   );

@@ -1,0 +1,13 @@
+appId: dev.knoa.mobile
+---
+# Dark-mode visual evidence for the login entry. Runs standalone so the
+# main smoke flow keeps its light-mode assertions.
+- launchApp:
+    stopApp: true
+- toggleDarkMode
+- extendedWaitUntil:
+    visible: "登录 Knoa"
+    timeout: "45000"
+- takeScreenshot: dark-login
+- assertVisible: "登录 Knoa"
+- toggleDarkMode
