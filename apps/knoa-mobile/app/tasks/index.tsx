@@ -9,12 +9,14 @@ import {
   Text,
   View,
 } from "react-native";
+import { Swipeable } from "react-native-gesture-handler";
 
 import type { DesktopGlanceRecord, Task, TaskDefinitionState, TaskState } from "@/api/models";
 import { AppIcon } from "@/components/AppIcon";
 import { ApprovalInboxCard } from "@/components/ApprovalInboxCard";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
+import { EmptyState, SkeletonList } from "@/components/ListStates";
 import { DesktopGlanceModal } from "@/components/DesktopGlanceModal";
 import { TaskBentoCard } from "@/components/TaskBentoCard";
 import { currentTaskSections } from "@/components/taskListPresentation";
@@ -49,6 +51,7 @@ export default function TasksScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [syncFailed, setSyncFailed] = useState(false);
   const [runningTaskId, setRunningTaskId] = useState("");
   const [glanceMap, setGlanceMap] = useState<Record<string, DesktopGlanceRecord>>({});
   const [activeGlance, setActiveGlance] = useState<DesktopGlanceRecord | null>(null);
@@ -75,10 +78,13 @@ export default function TasksScreen() {
       }));
       setTasks(result.tasks);
       setError("");
+      setSyncFailed(false);
       void storeTaskCache(taskCacheScope, result.tasks);
     } catch {
       if (!tasksRef.current.length) {
         setError(t("tasks.loadFailed"));
+      } else {
+        setSyncFailed(true);
       }
     } finally {
       setRefreshing(false);
@@ -207,6 +213,24 @@ export default function TasksScreen() {
     }
   }
 
+  async function resolveFirstPending(task: Task, approved: boolean) {
+    if (!gateway.client || !task.latest_execution_id) return;
+    try {
+      const snapshot = await gateway.runAuthenticated(
+        (client) => client.getTaskExecution(task.latest_execution_id),
+      );
+      const pendingApproval = snapshot.approvals.find((item) => item.state === "pending");
+      if (pendingApproval) {
+        await gateway.runAuthenticated(
+          (client) => client.resolveApproval(pendingApproval.approval_id, approved),
+        );
+      }
+      await refresh();
+    } catch {
+      void refresh();
+    }
+  }
+
   async function handleSteerTask(taskId: string, instruction: string) {
     if (!gateway.client || !instruction.trim()) return;
     await gateway.runAuthenticated((client) =>
@@ -266,6 +290,13 @@ export default function TasksScreen() {
           <AppPressable style={styles.offlineBanner} onPress={() => void flushQueued()}>
             <Text style={styles.offlineTitle}>{t("tasks.offlineQueued", { count: queued.length })}</Text>
             <Text style={styles.offlineDetail}>{t("tasks.offlineQueuedDetail")}</Text>
+          </AppPressable>
+        ) : null}
+
+        {syncFailed && tasks.length > 0 ? (
+          <AppPressable style={styles.staleBanner} onPress={() => void refresh()}>
+            <Text style={styles.staleTitle}>{t("tasks.staleData")}</Text>
+            <Text style={styles.staleDetail}>{t("tasks.staleDataDetail")}</Text>
           </AppPressable>
         ) : null}
 
@@ -341,7 +372,7 @@ export default function TasksScreen() {
           })}
         </View>
 
-        {loading ? <AsyncStateView state="loading" /> : null}
+        {loading ? <SkeletonList rows={3} /> : null}
         {error ? (
           <AsyncStateView
             state="error"
@@ -370,15 +401,29 @@ export default function TasksScreen() {
                   const voidable = state === "queued" || state === "running"
                     || state === "paused" || state === "waiting_approval";
                   return (
-                    <ApprovalInboxCard
+                    <Swipeable
                       key={task.task_id}
-                      task={task}
-                      ready={status === "ready"}
-                      runAuthenticated={gateway.runAuthenticated}
-                      onResolved={() => void refresh()}
-                      onOpenExecution={(executionId) => router.push(`/task-executions/${executionId}`)}
-                      onVoid={voidable ? handleVoidTask : undefined}
-                    />
+                      renderLeftActions={() => (
+                        <View style={styles.swipeAllow}>
+                          <Text style={styles.swipeText}>{t("execution.allowAction")}</Text>
+                        </View>
+                      )}
+                      renderRightActions={() => (
+                        <View style={styles.swipeDeny}>
+                          <Text style={styles.swipeText}>{t("execution.denyAction")}</Text>
+                        </View>
+                      )}
+                      onSwipeableOpen={(direction) => void resolveFirstPending(task, direction === "left")}
+                    >
+                      <ApprovalInboxCard
+                        task={task}
+                        ready={status === "ready"}
+                        runAuthenticated={gateway.runAuthenticated}
+                        onResolved={() => void refresh()}
+                        onOpenExecution={(executionId) => router.push(`/task-executions/${executionId}`)}
+                        onVoid={voidable ? handleVoidTask : undefined}
+                      />
+                    </Swipeable>
                   );
                 })}
               </View>
@@ -386,7 +431,13 @@ export default function TasksScreen() {
           }
           ListEmptyComponent={
             !loading && !error ? (
-              <AsyncStateView state="empty" title={t("tasks.emptyTitle")} message={t("tasks.emptyBody")} />
+              <EmptyState
+                icon="tasks"
+                title={t("tasks.emptyTitle")}
+                message={t("tasks.emptyBody")}
+                actionLabel={t("tasks.emptyAction")}
+                onAction={() => router.push(nodeId ? { pathname: "/tasks/new", params: { nodeId } } : "/tasks/new")}
+              />
             ) : null
           }
           renderSectionHeader={({ section }) => (
@@ -530,6 +581,16 @@ const styles = StyleSheet.create({
   },
   offlineTitle: { color: colors.ink, fontWeight: "700" },
   offlineDetail: { color: colors.muted, fontSize: 12 },
+  staleBanner: {
+    marginHorizontal: spacing.large,
+    marginTop: spacing.small,
+    padding: spacing.medium,
+    borderRadius: radii.medium,
+    backgroundColor: colors.warningSoft,
+    gap: spacing.xsmall,
+  },
+  staleTitle: { color: colors.ink, fontWeight: "700" },
+  staleDetail: { color: colors.muted, fontSize: 12 },
   unreadNoticeBanner: {
     marginHorizontal: spacing.large,
     marginTop: spacing.small,
@@ -591,6 +652,24 @@ const styles = StyleSheet.create({
     gap: spacing.medium,
     paddingBottom: spacing.medium,
   },
+  swipeAllow: {
+    flex: 1,
+    backgroundColor: colors.accent,
+    borderRadius: radii.large,
+    justifyContent: "center",
+    paddingHorizontal: spacing.large,
+    marginBottom: spacing.medium,
+  },
+  swipeDeny: {
+    flex: 1,
+    backgroundColor: colors.danger,
+    borderRadius: radii.large,
+    justifyContent: "center",
+    alignItems: "flex-end",
+    paddingHorizontal: spacing.large,
+    marginBottom: spacing.medium,
+  },
+  swipeText: { color: colors.onAccent, fontWeight: "700" },
   syncRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -12,6 +12,7 @@ import {
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
+import { EmptyState, SkeletonList } from "@/components/ListStates";
 import {
   acknowledgeHubNotification,
   listHubNotifications,
@@ -147,12 +148,12 @@ export default function NotificationsScreen() {
           ),
         }}
       />
-      {loading ? <AsyncStateView state="loading" /> : null}
+      {loading ? <SkeletonList rows={4} /> : null}
       {!loading && loadError && !items.length ? (
         <AsyncStateView state="error" retryLabel={t("tasks.reload")} onRetry={() => void load()} />
       ) : null}
       {!loading && !loadError && !items.length ? (
-        <AsyncStateView state="empty" title={t("notifications.emptyTitle")} />
+        <EmptyState icon="bell" title={t("notifications.emptyTitle")} />
       ) : null}
       <FlatList
         data={items}

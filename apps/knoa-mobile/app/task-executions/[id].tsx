@@ -23,7 +23,7 @@ import { AppPressable } from "@/components/AppPressable";
 import { AsyncStateView } from "@/components/AsyncStateView";
 import { AppIcon } from "@/components/AppIcon";
 import { AppMarkdown } from "@/components/AppMarkdown";
-import { ApprovalRequestDetails } from "@/components/ApprovalRequestDetails";
+import { ApprovalCard } from "@/components/ApprovalCard";
 import { ArtifactViewer } from "@/components/ArtifactViewer";
 import { InteractionCard } from "@/components/InteractionCard";
 import { WorkResultSummary } from "@/components/WorkResultSummary";
@@ -300,23 +300,14 @@ export default function TaskExecutionDetailScreen() {
 
       {approvals.map((approval, index) => (
         <View key={approval.approval_id} style={styles.approval}>
-          {approvals.length > 1 ? <Text style={styles.approvalCount}>{index + 1}/{approvals.length}</Text> : null}
-          <ApprovalRequestDetails toolName={approval.tool_name} arguments={approval.arguments} display={approval.display} />
-          <View style={styles.row}>
-            <Action
-              label={t("execution.denyAction")}
-              onPress={() => void resolveApproval(approval, false)}
-              disabled={Boolean(working || resolvingApproval)}
-              busy={resolvingApproval?.id === approval.approval_id && resolvingApproval.approved === false}
-            />
-            <Action
-              label={t("execution.allowAction")}
-              primary
-              onPress={() => void resolveApproval(approval, true)}
-              disabled={Boolean(working || resolvingApproval)}
-              busy={resolvingApproval?.id === approval.approval_id && resolvingApproval.approved === true}
-            />
-          </View>
+          <ApprovalCard
+            approval={approval}
+            countLabel={approvals.length > 1 ? `${index + 1}/${approvals.length}` : undefined}
+            resolvingId={working || resolvingApproval ? (resolvingApproval?.id ?? "busy") : undefined}
+            resolvingApproved={resolvingApproval?.approved ?? null}
+            onApprove={(item) => void resolveApproval(item, true)}
+            onDeny={(item) => void resolveApproval(item, false)}
+          />
         </View>
       ))}
 
