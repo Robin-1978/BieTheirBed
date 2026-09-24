@@ -10,6 +10,11 @@ import {
   type HostedWorkspace,
 } from "@/hub/hubClient";
 import { loadNavigationPreference } from "@/navigation/navigationPreference";
+import {
+  recordBootFailure,
+  recordBootSuccess,
+  shouldEnterSafeMode,
+} from "@/navigation/bootFailureTracker";
 import { listNodeBindings } from "@/security/deviceIdentity";
 import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
 import { useI18n } from "@/i18n";
@@ -29,6 +34,7 @@ export default function Index() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [stage, setStage] = useState<RestoreStage>("connect");
   const [failReason, setFailReason] = useState("");
+  const [safeMode, setSafeMode] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -51,14 +57,31 @@ export default function Index() {
   useEffect(() => {
     if (status === "booting" || started.current) return;
     started.current = true;
-    void restoreLanding({ nodeId, switchNode }, setStage)
-      .then((reason) => { if (reason) setFailReason(reason); })
-      .catch(() => router.replace("/account"));
+    void shouldEnterSafeMode().then((locked) => {
+      if (locked) {
+        setSafeMode(true);
+        return;
+      }
+      void restoreLanding({ nodeId, switchNode }, setStage)
+        .then((reason) => {
+          if (reason) {
+            setFailReason(reason);
+            void recordBootFailure();
+          } else {
+            void recordBootSuccess();
+          }
+        })
+        .catch(() => {
+          void recordBootFailure();
+          router.replace("/account");
+        });
+    });
   }, [nodeId, status, switchNode]);
 
   const failed = status === "error";
   const retry = () => {
     started.current = false;
+    setSafeMode(false);
     setFailReason("");
     setStage("connect");
     void reconnect();
@@ -76,12 +99,26 @@ export default function Index() {
       </View>
       <Text style={styles.brand}>小诺</Text>
       <Text style={styles.eyebrow}>KNOA · KNOW-YOU AGENT</Text>
-      <Text style={styles.title}>{failed ? t("splash.unavailable") : t("splash.waking")}</Text>
-      {failed ? (
+      <Text style={styles.title}>
+        {safeMode ? t("splash.safeTitle") : failed ? t("splash.unavailable") : t("splash.waking")}
+      </Text>
+      {safeMode ? (
+        <>
+          <Text style={styles.detail}>{t("splash.safeDetail")}</Text>
+          <AppPressable onPress={() => router.push("/update")} style={styles.retry}>
+            <Text style={styles.retryText}>{t("splash.safeCheckUpdate")}</Text>
+          </AppPressable>
+          <AppPressable onPress={retry} style={styles.safeSecondary}>
+            <Text style={styles.safeSecondaryText}>{t("common.reconnect")}</Text>
+          </AppPressable>
+        </>
+      ) : null}
+      {!safeMode && failed ? (
         <Text style={styles.detail}>
           {failReason || gatewayError || t("splash.connectionProblem")}
         </Text>
-      ) : (
+      ) : null}
+      {!safeMode && !failed ? (
         <View style={styles.stageRow} accessibilityLiveRegion="polite">
           {STAGE_ORDER.map((item) => {
             const active = item === stage;
@@ -96,8 +133,8 @@ export default function Index() {
             );
           })}
         </View>
-      )}
-      {failed ? (
+      ) : null}
+      {!safeMode && failed ? (
         <AppPressable onPress={retry} style={styles.retry}>
           <Text style={styles.retryText}>{t("common.reconnect")}</Text>
         </AppPressable>
@@ -199,4 +236,6 @@ const styles = StyleSheet.create({
   stageTextActive: { color: colors.ink },
   retry: { paddingHorizontal: spacing.xlarge, paddingVertical: spacing.medium, borderRadius: radii.medium, backgroundColor: colors.accent, marginTop: spacing.small },
   retryText: { color: colors.onAccent, fontWeight: "700" },
+  safeSecondary: { paddingHorizontal: spacing.xlarge, paddingVertical: spacing.small, borderRadius: radii.medium, borderWidth: 1, borderColor: colors.line, marginTop: spacing.xsmall },
+  safeSecondaryText: { color: colors.ink, fontWeight: "700" },
 });

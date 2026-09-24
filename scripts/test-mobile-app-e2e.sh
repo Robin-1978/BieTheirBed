@@ -31,21 +31,28 @@ if [[ "${#DEVICES[@]}" -ne 1 ]]; then echo "Expected one device, found ${#DEVICE
 SERIAL="${DEVICES[0]}"
 export ANDROID_SERIAL="$SERIAL"
 
-# Emulator DNS rots over long runs (unknown host). Reboot once if broken.
-if ! "$ADB" -s "$SERIAL" shell "ping -c1 -W4 knoa.tinydotdot.com" 2>/dev/null | grep -q "bytes from"; then
-  echo "==> Emulator DNS broken, rebooting"
-  "$ADB" -s "$SERIAL" reboot
-  sleep 120
+# Emulator virtual network rots over long runs (no default route; guest
+# reboot cannot fix it, only a fresh emulator process can).
+if ! "$ADB" -s "$SERIAL" shell "ping -c1 -W4 223.5.5.5" 2>/dev/null | grep -q "bytes from"; then
+  echo "==> Emulator network dead, cold-booting a fresh emulator process"
+  "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+  sleep 10
+  export ANDROID_AVD_HOME=/disk/dev/avds
+  ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL=5 "$ANDROID_HOME/emulator/emulator" \
+    -avd knoa-arm -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect \
+    -memory 4096 -port 5560 -dns-server 223.5.5.5,114.114.114.114 \
+    > /tmp/opencode/emulator-e2e-boot.log 2>&1 &
+  sleep 100
   "$ADB" -s "$SERIAL" wait-for-device
   for _ in $(seq 1 30); do
     if [[ "$("$ADB" -s "$SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then break; fi
     sleep 10
   done
   if ! "$ADB" -s "$SERIAL" shell "ping -c1 -W4 knoa.tinydotdot.com" 2>/dev/null | grep -q "bytes from"; then
-    echo "Emulator DNS still broken after reboot; aborting" >&2
+    echo "Emulator network still broken after fresh boot; aborting" >&2
     exit 1
   fi
-  echo "==> Emulator DNS recovered"
+  echo "==> Emulator network recovered"
 fi
 
 # E2E runs in English locale: Gboard Pinyin transliterates adb-injected
