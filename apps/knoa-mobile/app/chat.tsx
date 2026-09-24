@@ -68,6 +68,7 @@ import { useLiveGlance } from "@/hooks/useLiveGlance";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { useI18n } from "@/i18n";
 import { useConnection, useFleet, useSession } from "@/state/GatewayProvider";
+import { useTaskReminders } from "@/state/TaskReminderProvider";
 import {
   loadConversationCache,
   storeConversationCache,
@@ -78,7 +79,7 @@ import {
   removeConversationDraft,
   storeConversationDraft,
 } from "@/security/conversationDrafts";
-import { colors, radii, shadows, spacing } from "@/theme";
+import { colors, radii, shadows, spacing, typography } from "@/theme";
 
 const SCROLL_OFFSET_THRESHOLD = 80;
 
@@ -166,6 +167,12 @@ export default function ChatScreen() {
   } = useLiveGlance({ hasClient: Boolean(session.client), runAuthenticated });
   const [savedHours, setSavedHours] = useState(0);
   const [completedTasksCount, setCompletedTasksCount] = useState(0);
+  const [runningTasksCount, setRunningTasksCount] = useState(0);
+  const { reminders } = useTaskReminders();
+  const pendingApprovalsCount = useMemo(
+    () => reminders.filter((item) => !item.read && item.category === "approval").length,
+    [reminders],
+  );
   const [monitors, setMonitors] = useState<Array<{ taskId: string; title: string; detail: string }>>([]);
 
   useEffect(() => {
@@ -179,6 +186,9 @@ export default function ChatScreen() {
         setSavedHours(calculateTotalSavedHours(taskList));
         setCompletedTasksCount(
           taskList.filter((item) => item.latest_execution_state === "completed" || item.state === "archived").length
+        );
+        setRunningTasksCount(
+          taskList.filter((item) => item.latest_execution_state === "running" || item.latest_execution_state === "queued").length
         );
         setMonitors(
           taskList
@@ -917,6 +927,21 @@ export default function ChatScreen() {
 
         <ChatFeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} />
 
+        <AppPressable
+          accessibilityRole="button"
+          accessibilityLabel={t("chat.statusStrip")}
+          onPress={() => router.push(transportOnline ? "/tasks" : "/settings/node")}
+          style={styles.statusStrip}
+        >
+          <View style={[styles.statusDot, transportOnline ? styles.statusDotOnline : styles.statusDotOffline]} />
+          <Text style={styles.statusText} numberOfLines={1}>
+            {transportOnline ? t("chat.statusOnline") : t("chat.statusOffline")}
+            {runningTasksCount > 0 ? t("chat.statusRunning", { count: runningTasksCount }) : ""}
+            {pendingApprovalsCount > 0 ? t("chat.statusApprovals", { count: pendingApprovalsCount }) : ""}
+          </Text>
+          <AppIcon name="chevron-right" color={colors.muted} size={14} />
+        </AppPressable>
+
         <View style={styles.listArea}>
           <FlatList
             ref={listRef}
@@ -1160,6 +1185,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.line,
   },
+  statusStrip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xsmall,
+    paddingHorizontal: spacing.large,
+    paddingVertical: spacing.xsmall,
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.line,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusDotOnline: { backgroundColor: colors.success },
+  statusDotOffline: { backgroundColor: colors.danger },
+  statusText: { ...typography.caption, color: colors.muted, flex: 1 },
   agentButton: {
     flexDirection: "row",
     alignItems: "center",
