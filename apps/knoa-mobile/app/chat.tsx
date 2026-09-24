@@ -927,20 +927,29 @@ export default function ChatScreen() {
 
         <ChatFeedbackBanner feedback={feedback} onDismiss={() => setFeedback(null)} />
 
-        <AppPressable
-          accessibilityRole="button"
-          accessibilityLabel={t("chat.statusStrip")}
-          onPress={() => router.push(transportOnline ? "/tasks" : "/settings/node")}
-          style={styles.statusStrip}
-        >
-          <View style={[styles.statusDot, transportOnline ? styles.statusDotOnline : styles.statusDotOffline]} />
-          <Text style={styles.statusText} numberOfLines={1}>
-            {transportOnline ? t("chat.statusOnline") : t("chat.statusOffline")}
-            {runningTasksCount > 0 ? t("chat.statusRunning", { count: runningTasksCount }) : ""}
-            {pendingApprovalsCount > 0 ? t("chat.statusApprovals", { count: pendingApprovalsCount }) : ""}
-          </Text>
-          <AppIcon name="chevron-right" color={colors.muted} size={14} />
-        </AppPressable>
+        {(() => {
+          const parts = [
+            runningTasksCount > 0 ? t("chat.statusRunning", { count: runningTasksCount }) : "",
+            pendingApprovalsCount > 0 ? t("chat.statusApprovals", { count: pendingApprovalsCount }) : "",
+          ].filter(Boolean);
+          // Quiet + online: the NodeHeader capsule already says online.
+          // The strip only speaks up when there is work, approvals, or outage.
+          if (transportOnline && parts.length === 0) return null;
+          return (
+            <AppPressable
+              accessibilityRole="button"
+              accessibilityLabel={t("chat.statusStrip")}
+              onPress={() => router.push(transportOnline ? "/tasks" : "/settings/node")}
+              style={styles.statusStrip}
+            >
+              <View style={[styles.statusDot, transportOnline ? styles.statusDotOnline : styles.statusDotOffline]} />
+              <Text style={styles.statusText} numberOfLines={1}>
+                {transportOnline ? parts.join(" · ") : t("chat.statusOffline")}
+              </Text>
+              <AppIcon name="chevron-right" color={colors.muted} size={14} />
+            </AppPressable>
+          );
+        })()}
 
         <View style={styles.listArea}>
           <FlatList
