@@ -1,6 +1,8 @@
 import * as Location from "expo-location";
 import * as SecureStore from "expo-secure-store";
 
+import { getNativeFix } from "./nativeLocation";
+
 const LOCATION_PREFERENCE = "knoa.location.preference.v1";
 
 export type LocationPrecision = "city" | "block" | "precise";
@@ -61,20 +63,34 @@ export async function resolveDeviceLocation(): Promise<string> {
           ? Location.LocationAccuracy.Balanced
           : Location.LocationAccuracy.High;
     const fixTimeoutMs = preference.precision === "precise" ? 20000 : FIX_TIMEOUT_MS;
-    let position: Location.LocationObject | null = null;
+    let fix: { latitude: number; longitude: number; accuracy: number | null } | null = null;
     try {
       const cached = await withTimeout(Location.getLastKnownPositionAsync(), 2000);
-      if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) position = cached;
+      if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) fix = cached.coords;
     } catch {
-      position = null;
+      fix = null;
     }
-    if (!position) {
-      position = await withTimeout(
-        Location.getCurrentPositionAsync({ accuracy: wantedAccuracy }),
-        fixTimeoutMs,
-      );
+    if (!fix) {
+      try {
+        const live = await withTimeout(
+          Location.getCurrentPositionAsync({ accuracy: wantedAccuracy }),
+          fixTimeoutMs,
+        );
+        fix = live.coords;
+      } catch {
+        fix = null;
+      }
     }
-    const { latitude, longitude, accuracy } = position.coords;
+    if (!fix) {
+      // GMS-less ROMs (e.g. Honor MagicOS China builds) have no fused
+      // provider: fall back to the platform LocationManager network fix.
+      const native = await getNativeFix();
+      if (native && Date.now() - native.timestamp < 5 * 60 * 1000) {
+        fix = { latitude: native.latitude, longitude: native.longitude, accuracy: native.accuracy };
+      }
+    }
+    if (!fix) return "";
+    const { latitude, longitude, accuracy } = fix;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return "";
     const placemarks = await withTimeout(
       Location.reverseGeocodeAsync({ latitude, longitude }),

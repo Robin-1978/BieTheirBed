@@ -114,6 +114,7 @@ export const chat = {
   "chat.sessionReplaced": "原会话已不可用，已切换到新会话",
   "chat.syncUnavailable": "暂时无法同步最新消息，已显示手机中的会话记录",
   "chat.attachmentUploadFailed": "有附件没有上传成功",
+  "chat.locationMissing": "没取到手机定位，这次按记住的地址回答",
   "chat.sessionSyncPending": "消息已发出，但会话列表暂时没有同步",
   "chat.attachmentOnly": "请看一下这些内容",
   "chat.attachmentUploaded": "附件已上传，可以继续发送",

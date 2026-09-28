@@ -114,6 +114,7 @@ export const chat = {
   "chat.sessionReplaced": "The previous conversation is unavailable. A new conversation is ready.",
   "chat.syncUnavailable": "The latest messages could not be synced. Showing the copy stored on this phone.",
   "chat.attachmentUploadFailed": "One or more attachments were not uploaded",
+  "chat.locationMissing": "Could not get a phone fix; answering with the remembered address",
   "chat.sessionSyncPending": "The message was sent, but conversation history has not synced yet.",
   "chat.attachmentOnly": "Please review these attachments",
   "chat.attachmentUploaded": "Attachment uploaded. You can send the message now.",

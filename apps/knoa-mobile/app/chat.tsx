@@ -60,7 +60,7 @@ import {
 } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { GatewayError, type GatewayClient } from "@/api/gatewayClient";
-import { resolveDeviceLocation } from "@/location/deviceLocation";
+import { resolveDeviceLocation, loadLocationPreference } from "@/location/deviceLocation";
 import { agentImageSupport } from "@/media/agentImageSupport";
 import { shouldResetConversation } from "@/state/conversationTransition";
 import { useChatTurns } from "@/hooks/useChatTurns";
@@ -536,6 +536,9 @@ export default function ChatScreen() {
       }
 
       const deviceLocation = await resolveDeviceLocation();
+      if (!deviceLocation && (await loadLocationPreference()).enabled) {
+        showFeedback(t("chat.locationMissing"), "warning");
+      }
       const accepted = await session.runAuthenticated((client) => client.createChatTurn({
         clientRequestId: pending.requestId,
         sessionHandle,

@@ -22,6 +22,13 @@ vi.mock("expo-location", () => ({
   reverseGeocodeAsync: vi.fn(async () => expoLocation.places),
 }));
 
+const rn = vi.hoisted(() => ({ os: "ios", modules: {} as Record<string, unknown> }));
+
+vi.mock("react-native", () => ({
+  NativeModules: rn.modules,
+  Platform: { get OS() { return rn.os; } },
+}));
+
 import {
   loadLocationPreference,
   resolveDeviceLocation,
@@ -33,6 +40,8 @@ beforeEach(() => {
   expoLocation.permission = "granted";
   expoLocation.position = { coords: { latitude: 39.9042, longitude: 116.4074, accuracy: 25 } };
   expoLocation.places = [{ city: "北京市", district: "朝阳区", street: "建国路", name: "88号" }];
+  rn.os = "ios";
+  for (const key of Object.keys(rn.modules)) delete rn.modules[key];
 });
 
 describe("device location", () => {
@@ -63,5 +72,25 @@ describe("device location", () => {
     await saveLocationPreference({ enabled: true, precision: "block" });
     expoLocation.permission = "denied";
     await expect(resolveDeviceLocation()).resolves.toBe("");
+  });
+
+  it("falls back to the GMS-independent native fix on android", async () => {
+    const Location = await import("expo-location");
+    vi.mocked(Location.getCurrentPositionAsync).mockRejectedValueOnce(new Error("fused unavailable"));
+    vi.mocked(Location.reverseGeocodeAsync).mockResolvedValueOnce([]);
+    rn.os = "android";
+    rn.modules.KnoaLocation = {
+      getFix: async () => ({
+        latitude: 39.9042,
+        longitude: 116.4074,
+        accuracy: 150,
+        provider: "network",
+        timestamp: Date.now(),
+      }),
+    };
+    await saveLocationPreference({ enabled: true, precision: "precise" });
+    await expect(resolveDeviceLocation()).resolves.toBe(
+      "未知位置 (39.9042,116.4074 ±150m)",
+    );
   });
 });
