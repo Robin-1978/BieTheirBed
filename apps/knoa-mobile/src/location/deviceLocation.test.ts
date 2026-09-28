@@ -17,6 +17,7 @@ vi.mock("expo-location", () => ({
   LocationAccuracy: { Low: 1, Balanced: 3, High: 6 },
   getForegroundPermissionsAsync: vi.fn(async () => ({ status: expoLocation.permission, canAskAgain: true })),
   requestForegroundPermissionsAsync: vi.fn(async () => ({ status: expoLocation.permission })),
+  getLastKnownPositionAsync: vi.fn(async () => null),
   getCurrentPositionAsync: vi.fn(async () => expoLocation.position),
   reverseGeocodeAsync: vi.fn(async () => expoLocation.places),
 }));

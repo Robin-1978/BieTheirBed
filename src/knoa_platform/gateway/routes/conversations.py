@@ -136,6 +136,11 @@ class ConversationRoutes:
             return parsed
         try:
             parsed.require_content()
+            logger.info(
+                "ChatTurn device_location present=%s chars=%d",
+                bool(parsed.device_location.strip()),
+                len(parsed.device_location),
+            )
             turn = await self._core.create_chat_turn(
                 authenticated.device.principal_id,
                 session_handle,

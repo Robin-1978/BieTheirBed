@@ -51,17 +51,29 @@ export async function resolveDeviceLocation(): Promise<string> {
       granted = requested.status === "granted";
     }
     if (!granted) return "";
-    const position = await withTimeout(
-      Location.getCurrentPositionAsync({
-        accuracy:
-          preference.precision === "city"
-            ? Location.LocationAccuracy.Low
-            : preference.precision === "block"
-              ? Location.LocationAccuracy.Balanced
-              : Location.LocationAccuracy.High,
-      }),
-      FIX_TIMEOUT_MS,
-    );
+    // Indoor first fixes often exceed a few seconds: prefer the cached fix
+    // when it is fresh, otherwise wait longer for a real GPS fix instead of
+    // silently sending nothing.
+    const wantedAccuracy =
+      preference.precision === "city"
+        ? Location.LocationAccuracy.Low
+        : preference.precision === "block"
+          ? Location.LocationAccuracy.Balanced
+          : Location.LocationAccuracy.High;
+    const fixTimeoutMs = preference.precision === "precise" ? 20000 : FIX_TIMEOUT_MS;
+    let position: Location.LocationObject | null = null;
+    try {
+      const cached = await withTimeout(Location.getLastKnownPositionAsync(), 2000);
+      if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) position = cached;
+    } catch {
+      position = null;
+    }
+    if (!position) {
+      position = await withTimeout(
+        Location.getCurrentPositionAsync({ accuracy: wantedAccuracy }),
+        fixTimeoutMs,
+      );
+    }
     const { latitude, longitude, accuracy } = position.coords;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return "";
     const placemarks = await withTimeout(
