@@ -1254,6 +1254,11 @@ class MCPServerProvider(ExtensionProvider):
             raise RuntimeError("MCP provider is not running")
         return self._client
 
+    @property
+    def is_running(self) -> bool:
+        """Whether the MCP subprocess client is currently started."""
+        return self._client is not None
+
     def resource_capabilities(self) -> MCPResourceCapabilities:
         return self._require_client().resource_capabilities()
 

@@ -486,3 +486,52 @@ async def test_legacy_server_routes_do_not_activate_event_delivery() -> None:
     assert [(item.server_id, item.uri) for item in bridge.catalog()] == [
         ("jira", event)
     ]
+
+
+class _LazyProvider(_Provider):
+    """Mimics a real MCPServerProvider that starts on demand."""
+
+    def __init__(self, resources, *, fail_start: bool = False) -> None:
+        super().__init__(resources)
+        self._running = False
+        self.start_calls = 0
+        self._fail_start = fail_start
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    async def start(self):
+        self.start_calls += 1
+        if self._fail_start:
+            raise RuntimeError("boom")
+        self._running = True
+        return ()
+
+
+@pytest.mark.asyncio
+async def test_reconcile_starts_stopped_provider_on_demand() -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _LazyProvider((_resource(event),))
+    provider.snapshots[event] = _snapshot(event, "hello")
+    bridge = MCPResourceTaskBridge((provider,), _Tasks(()), _Sessions(), _Triggers())
+
+    await bridge.reconcile_once()
+
+    assert provider.start_calls == 1
+    assert [(item.server_id, item.uri) for item in bridge.catalog()] == [
+        ("jira", event)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_failed_start_backs_off_and_does_not_raise() -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _LazyProvider((_resource(event),), fail_start=True)
+    bridge = MCPResourceTaskBridge((provider,), _Tasks(()), _Sessions(), _Triggers())
+
+    await bridge.reconcile_once()
+    await bridge.reconcile_once()
+
+    assert provider.start_calls == 1
+    assert bridge.catalog() == ()

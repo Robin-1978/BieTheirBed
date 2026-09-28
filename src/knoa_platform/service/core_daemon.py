@@ -25,6 +25,15 @@ logger = logging.getLogger(__name__)
 
 
 def _prepare_private_file(path: Path) -> None:
+    # A previous run (rotation, crash, foreign umask) may leave our own
+    # files group/world-readable. Repair the mode before the strict
+    # owner-only validation instead of refusing to start at all.
+    # Symlinks and foreign-owned files still fail closed in validation.
+    try:
+        if path.exists() and not path.is_symlink() and path.stat().st_uid == os.geteuid():
+            path.chmod(0o600)
+    except OSError:
+        pass
     prepare_private_file(path, label="Knoa service file")
 
 

@@ -139,3 +139,16 @@ async def test_core_daemon_owns_host_pid_and_cleanup_lifecycle(
     assert interactions.stopped
     assert capability_mcp_host.stopped
     assert not pid.exists()
+
+
+def test_prepare_private_file_repairs_group_readable_own_file(tmp_path) -> None:
+    from knoa_platform.service.core_daemon import _prepare_private_file
+
+    path = tmp_path / "service.log"
+    path.write_text("old logs", encoding="utf-8")
+    path.chmod(0o664)
+
+    _prepare_private_file(path)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert path.read_text(encoding="utf-8") == "old logs"

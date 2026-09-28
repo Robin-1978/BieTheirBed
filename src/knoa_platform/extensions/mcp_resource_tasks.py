@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -263,6 +264,9 @@ class MCPResourceTaskBridge:
         self._interval = reconciliation_interval
         self._wake = asyncio.Event()
         self._worker: asyncio.Task[None] | None = None
+        # Last start-failure epoch per server: failing providers back off
+        # instead of spamming one exception per reconciliation round.
+        self._start_failures: dict[str, float] = {}
 
     def add_route(
         self,
@@ -431,6 +435,35 @@ class MCPResourceTaskBridge:
     ) -> None:
         if self._providers.get(server_id) is not provider:
             return
+        # The bridge historically assumed providers were started elsewhere
+        # (agent runs), so at idle it only ever logged "not running".
+        # Start on demand here so resource subscriptions actually work.
+        # getattr keeps duck-typed providers working (they are assumed
+        # running, as before).
+        if not getattr(provider, "is_running", True):
+            last_failure = self._start_failures.get(server_id, 0.0)
+            if time.monotonic() - last_failure < 600.0:
+                return
+            try:
+                await provider.start()
+            except Exception as exc:  # noqa: BLE001 - back off, keep reconciling others
+                first_failure = server_id not in self._start_failures
+                self._start_failures[server_id] = time.monotonic()
+                if first_failure:
+                    logger.warning(
+                        "MCP server failed to start, backing off: %s (%s)",
+                        server_id,
+                        exc,
+                    )
+                else:
+                    logger.debug(
+                        "MCP server still failing to start: %s (%s)",
+                        server_id,
+                        exc,
+                    )
+                return
+            self._start_failures.pop(server_id, None)
+            logger.info("MCP server started on demand: %s", server_id)
         capabilities = provider.resource_capabilities()
         if not capabilities.available:
             logger.warning("MCP server does not expose Resources: %s", server_id)
