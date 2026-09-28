@@ -53,6 +53,7 @@ from knoa_platform.conversation.repository import (
     ConversationSessionConflictError,
 )
 from knoa_platform.interactions import HumanInteractionService, ScopedInteractionPort
+from knoa_platform.location.reverse import enrich_device_location
 from knoa_platform.tasks.identity import task_tool_step_id
 from knoa_platform.tools.base import ToolPolicy
 
@@ -529,8 +530,11 @@ class ConversationService:
                 cancellation=asyncio.Event(),
                 revision=turn.revision,
             )
+            enriched_location = await asyncio.to_thread(
+                enrich_device_location, device_location.strip()[:500]
+            )
             execution = asyncio.create_task(
-                self._execute(turn, device_location=device_location.strip()[:500])
+                self._execute(turn, device_location=enriched_location)
             )
             self._executions[turn.turn_id] = execution
             execution.add_done_callback(

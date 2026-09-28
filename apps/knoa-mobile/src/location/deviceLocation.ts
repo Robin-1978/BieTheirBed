@@ -16,6 +16,43 @@ const fallback: LocationPreference = { enabled: false, precision: "block" };
 
 const MAX_DEVICE_LOCATION_CHARS = 500;
 const FIX_TIMEOUT_MS = 8000;
+/** Total budget for the whole snapshot: send latency matters more than precision. */
+const TOTAL_BUDGET_MS = 8000;
+const REVERSE_GEOCODE_BUDGET_MS = 4000;
+
+type Coords = { latitude: number; longitude: number; accuracy: number | null };
+
+/** First successful coords win; nulls keep waiting until budget or exhaustion. */
+function firstCoords(sources: Array<Promise<Coords | null>>, budgetMs: number): Promise<Coords | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    let pending = sources.length;
+    if (pending === 0) {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!done) {
+        done = true;
+        resolve(null);
+      }
+    }, budgetMs);
+    sources.forEach((source) => {
+      source.then((coords) => {
+        if (done) return;
+        if (coords) {
+          done = true;
+          clearTimeout(timer);
+          resolve(coords);
+        } else if (--pending === 0) {
+          done = true;
+          clearTimeout(timer);
+          resolve(null);
+        }
+      });
+    });
+  });
+}
 
 export async function loadLocationPreference(): Promise<LocationPreference> {
   const raw = await SecureStore.getItemAsync(LOCATION_PREFERENCE);
@@ -63,38 +100,42 @@ export async function resolveDeviceLocation(): Promise<string> {
           ? Location.LocationAccuracy.Balanced
           : Location.LocationAccuracy.High;
     const fixTimeoutMs = preference.precision === "precise" ? 20000 : FIX_TIMEOUT_MS;
-    let fix: { latitude: number; longitude: number; accuracy: number | null } | null = null;
-    try {
-      const cached = await withTimeout(Location.getLastKnownPositionAsync(), 2000);
-      if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) fix = cached.coords;
-    } catch {
-      fix = null;
-    }
-    if (!fix) {
+    const expoCached: Promise<Coords | null> = (async () => {
+      try {
+        const cached = await withTimeout(Location.getLastKnownPositionAsync(), 2000);
+        if (cached && Date.now() - cached.timestamp < 5 * 60 * 1000) return cached.coords;
+      } catch {
+        // Fall through to the other sources.
+      }
+      return null;
+    })();
+    const expoLive: Promise<Coords | null> = (async () => {
       try {
         const live = await withTimeout(
           Location.getCurrentPositionAsync({ accuracy: wantedAccuracy }),
           fixTimeoutMs,
         );
-        fix = live.coords;
+        return live.coords;
       } catch {
-        fix = null;
+        return null;
       }
-    }
-    if (!fix) {
+    })();
+    const native: Promise<Coords | null> = (async () => {
       // GMS-less ROMs (e.g. Honor MagicOS China builds) have no fused
-      // provider: fall back to the platform LocationManager network fix.
-      const native = await getNativeFix();
-      if (native && Date.now() - native.timestamp < 5 * 60 * 1000) {
-        fix = { latitude: native.latitude, longitude: native.longitude, accuracy: native.accuracy };
+      // provider: the platform LocationManager network fix is usually first.
+      const fix = await getNativeFix();
+      if (fix && Date.now() - fix.timestamp < 5 * 60 * 1000) {
+        return { latitude: fix.latitude, longitude: fix.longitude, accuracy: fix.accuracy };
       }
-    }
+      return null;
+    })();
+    const fix = await firstCoords([expoCached, native, expoLive], TOTAL_BUDGET_MS);
     if (!fix) return "";
     const { latitude, longitude, accuracy } = fix;
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return "";
     const placemarks = await withTimeout(
       Location.reverseGeocodeAsync({ latitude, longitude }),
-      FIX_TIMEOUT_MS,
+      REVERSE_GEOCODE_BUDGET_MS,
     ).catch(() => [] as Location.LocationGeocodedAddress[]);
     const [place] = placemarks;
     const city = compact([place?.city, place?.district]);

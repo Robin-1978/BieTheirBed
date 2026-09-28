@@ -61,6 +61,7 @@ import {
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { GatewayError, type GatewayClient } from "@/api/gatewayClient";
 import { resolveDeviceLocation, loadLocationPreference } from "@/location/deviceLocation";
+import { getCachedLocationText } from "@/location/locationCache";
 import { agentImageSupport } from "@/media/agentImageSupport";
 import { shouldResetConversation } from "@/state/conversationTransition";
 import { useChatTurns } from "@/hooks/useChatTurns";
@@ -535,7 +536,9 @@ export default function ChatScreen() {
         return;
       }
 
-      const deviceLocation = await resolveDeviceLocation();
+      // Send path never blocks on GPS: it reads the background-warmed
+      // cache (App open warms it, foreground + interval refresh it).
+      const deviceLocation = await getCachedLocationText();
       if (!deviceLocation && (await loadLocationPreference()).enabled) {
         showFeedback(t("chat.locationMissing"), "warning");
       }

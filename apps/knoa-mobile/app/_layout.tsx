@@ -7,6 +7,7 @@ import { HeaderActions } from "@/components/HeaderActions";
 import { NodeHeaderBack, NodeHeaderTitle } from "@/components/NodeHeader";
 import { TaskReminderBanner } from "@/components/TaskReminderBanner";
 import { I18nProvider, useI18n } from "@/i18n";
+import { useLocationCache } from "@/location/useLocationCache";
 import { GatewayProvider } from "@/state/GatewayProvider";
 import { TaskReminderProvider } from "@/state/TaskReminderProvider";
 import { ThemeProvider, useThemePreference } from "@/state/ThemeProvider";
@@ -34,6 +35,7 @@ export default function RootLayout() {
 function AppNavigator() {
   const { resolved: scheme } = useThemePreference();
   const { t } = useI18n();
+  useLocationCache();
   return (
     <>
         <StatusBar style={scheme === "dark" ? "light" : "dark"} />
