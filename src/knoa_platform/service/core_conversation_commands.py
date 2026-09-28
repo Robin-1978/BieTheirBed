@@ -149,6 +149,7 @@ class ConversationCommandHandler:
                 ),
                 tools_enabled=request.tools_enabled,
                 agent_id=request.agent_id,
+                device_location=request.device_location,
             )
             await send(ChatTurnAcceptedMessage(
                 request_id=request.request_id,

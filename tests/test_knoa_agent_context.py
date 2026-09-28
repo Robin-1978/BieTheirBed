@@ -179,3 +179,28 @@ def test_context_engine_prefix_immutability_across_iterations_in_same_turn() -> 
     assert prep2.messages[: len(prep1.messages)] == prep1.messages
 
 
+def test_runtime_context_renders_device_location_with_realtime_hint() -> None:
+    engine = ContextEngine(context_window=4096, completion_reserve=512)
+    context = RuntimeTurnContext(
+        core_memory=("user_location: 上海",),
+        device_location="北京市朝阳区建国路88号",
+    )
+    runtime_text = engine.render_runtime_context(context, timestamp="2026-09-28 10:30 Monday")
+    assert "<device_location>" in runtime_text
+    assert "北京市朝阳区建国路88号" in runtime_text
+    assert "user_location: 上海" in runtime_text
+    # Realtime position must stay volatile: after memory, before current time.
+    assert runtime_text.index("<device_location>") > runtime_text.index("<user_memory>")
+    assert runtime_text.index("</device_location>") < runtime_text.index("<current_time>")
+
+
+def test_runtime_context_omits_device_location_when_empty() -> None:
+    engine = ContextEngine(context_window=4096, completion_reserve=512)
+    runtime_text = engine.render_runtime_context(
+        RuntimeTurnContext(core_memory=("user_location: 上海",)),
+        timestamp="2026-09-28 10:30 Monday",
+    )
+    assert "<device_location>" not in runtime_text
+
+
+

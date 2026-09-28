@@ -72,6 +72,7 @@ class ExecuteAgentTurn:
     agent_id: str | None = None
     invocation_kind: str = "user"
     caller_id: str = ""
+    device_location: str = ""
     parent_policy: ResolvedInvocationPolicy | None = None
     resolved_policy: ResolvedInvocationPolicy | None = None
     confirmation: ConfirmationPort | None = None
@@ -302,6 +303,10 @@ class AgentExecutionService:
                         if self._context_provider is not None
                         else RuntimeTurnContext()
                     )
+                    if request.device_location.strip():
+                        turn_context = turn_context.model_copy(update={
+                            "device_location": request.device_location.strip()[:500],
+                        })
                     turn = await runtime.start_turn(
                         RuntimeTurnRequest(
                             session=session,

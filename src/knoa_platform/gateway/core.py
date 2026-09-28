@@ -106,6 +106,7 @@ class GatewayCoreClient(Protocol):
         client_request_id: str,
         tools_enabled: bool = True,
         agent_id: str | None = None,
+        device_location: str = "",
     ) -> ChatTurnSnapshot: ...
 
     async def get_chat_turn(self, turn_id: str) -> ChatTurnSnapshot: ...
@@ -421,6 +422,7 @@ class GatewayCoreBridge:
         client_request_id: str,
         tools_enabled: bool,
         agent_id: str | None = None,
+        device_location: str = "",
     ) -> ChatTurnSnapshot:
         return await (await self._client_for(principal_id)).create_chat_turn(
             session_handle,
@@ -429,6 +431,7 @@ class GatewayCoreBridge:
             client_request_id=client_request_id,
             tools_enabled=tools_enabled,
             agent_id=agent_id,
+            device_location=device_location,
         )
 
     async def get_chat_turn(

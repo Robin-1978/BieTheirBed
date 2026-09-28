@@ -1,0 +1,116 @@
+import * as Location from "expo-location";
+import * as SecureStore from "expo-secure-store";
+
+const LOCATION_PREFERENCE = "knoa.location.preference.v1";
+
+export type LocationPrecision = "city" | "block" | "precise";
+
+export type LocationPreference = {
+  enabled: boolean;
+  precision: LocationPrecision;
+};
+
+const fallback: LocationPreference = { enabled: false, precision: "block" };
+
+const MAX_DEVICE_LOCATION_CHARS = 500;
+const FIX_TIMEOUT_MS = 8000;
+
+export async function loadLocationPreference(): Promise<LocationPreference> {
+  const raw = await SecureStore.getItemAsync(LOCATION_PREFERENCE);
+  if (!raw) return fallback;
+  try {
+    const value = JSON.parse(raw) as Partial<LocationPreference>;
+    return {
+      enabled: value.enabled === true,
+      precision:
+        value.precision === "city" || value.precision === "precise" ? value.precision : "block",
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function saveLocationPreference(next: LocationPreference): Promise<void> {
+  await SecureStore.setItemAsync(LOCATION_PREFERENCE, JSON.stringify(next));
+}
+
+/**
+ * Best-effort current-position snapshot for the message being sent.
+ * Returns "" when the switch is off, permission is denied, or any step
+ * fails — the server then falls back to remembered address/memory.
+ * Never throws.
+ */
+export async function resolveDeviceLocation(): Promise<string> {
+  try {
+    const preference = await loadLocationPreference();
+    if (!preference.enabled) return "";
+    const current = await Location.getForegroundPermissionsAsync();
+    let granted = current.status === "granted";
+    if (!granted && current.canAskAgain !== false) {
+      const requested = await Location.requestForegroundPermissionsAsync();
+      granted = requested.status === "granted";
+    }
+    if (!granted) return "";
+    const position = await withTimeout(
+      Location.getCurrentPositionAsync({
+        accuracy:
+          preference.precision === "city"
+            ? Location.LocationAccuracy.Low
+            : preference.precision === "block"
+              ? Location.LocationAccuracy.Balanced
+              : Location.LocationAccuracy.High,
+      }),
+      FIX_TIMEOUT_MS,
+    );
+    const { latitude, longitude, accuracy } = position.coords;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return "";
+    const placemarks = await withTimeout(
+      Location.reverseGeocodeAsync({ latitude, longitude }),
+      FIX_TIMEOUT_MS,
+    ).catch(() => [] as Location.LocationGeocodedAddress[]);
+    const [place] = placemarks;
+    const city = compact([place?.city, place?.district]);
+    const block = compact([place?.city, place?.district, place?.street, place?.name]);
+    const coords =
+      `(${latitude.toFixed(4)},${longitude.toFixed(4)}` +
+      (typeof accuracy === "number" && Number.isFinite(accuracy) ? ` ±${Math.round(accuracy)}m` : "") +
+      ")";
+    let text = "";
+    if (preference.precision === "city") {
+      text = city || block || coords;
+    } else if (preference.precision === "block") {
+      text = block || city || coords;
+    } else {
+      text = `${block || city || "未知位置"} ${coords}`;
+    }
+    return text.trim().slice(0, MAX_DEVICE_LOCATION_CHARS);
+  } catch {
+    return "";
+  }
+}
+
+function compact(parts: Array<string | null | undefined>): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of parts) {
+    const text = (part ?? "").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out.join("");
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("location_timeout")), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}

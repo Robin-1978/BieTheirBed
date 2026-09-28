@@ -11426,6 +11426,12 @@
             ],
             "default": null,
             "title": "Agent Id"
+          },
+          "device_location": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Device Location",
+            "type": "string"
           }
         },
         "required": [

@@ -1,4 +1,5 @@
 import * as Application from "expo-application";
+import * as Location from "expo-location";
 import { router } from "expo-router";
 import { useEffect, useState, type ReactNode } from "react";
 import { Alert, Linking, ScrollView, Share, StyleSheet, Text, View } from "react-native";
@@ -6,6 +7,7 @@ import { Alert, Linking, ScrollView, Share, StyleSheet, Text, View } from "react
 import { AppIcon } from "@/components/AppIcon";
 import { AppPressable } from "@/components/AppPressable";
 import { useI18n, type LanguageMode } from "@/i18n";
+import { loadLocationPreference, saveLocationPreference, type LocationPrecision } from "@/location/deviceLocation";
 import { useThemePreference, type ThemeMode } from "@/state/ThemeProvider";
 import { colors, radii, spacing, shadows, typography } from "@/theme";
 import { hasTaskNotificationPermission, requestTaskNotificationPermission, sendTestTaskNotification } from "@/notifications/taskNotifications";
@@ -28,6 +30,9 @@ export default function AppSettingsScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationWorking, setNotificationWorking] = useState(false);
   const [notificationTesting, setNotificationTesting] = useState(false);
+  const [locationEnabled, setLocationEnabled] = useState(false);
+  const [locationPrecision, setLocationPrecision] = useState<LocationPrecision>("block");
+  const [locationWorking, setLocationWorking] = useState(false);
   const [cache, setCache] = useState<AppCacheSummary>(() => emptyAppCacheSummary());
   const [cacheWorking, setCacheWorking] = useState(false);
   const [diagnosticRevision, setDiagnosticRevision] = useState(0);
@@ -35,6 +40,10 @@ export default function AppSettingsScreen() {
   useEffect(() => {
     void hasTaskNotificationPermission().then(setNotificationsEnabled);
     void appCacheSummary().then(setCache);
+    void loadLocationPreference().then((preference) => {
+      setLocationEnabled(preference.enabled);
+      setLocationPrecision(preference.precision);
+    });
   }, []);
 
   async function enableNotifications() {
@@ -51,6 +60,35 @@ export default function AppSettingsScreen() {
     );
     setNotificationTesting(false);
     Alert.alert(i18n.t(delivered ? "settings.notificationsTestSent" : "settings.notificationsTestFailed"));
+  }
+
+  async function enableLocation() {
+    setLocationWorking(true);
+    try {
+      const current = await Location.getForegroundPermissionsAsync();
+      let granted = current.status === "granted";
+      if (!granted && current.canAskAgain !== false) {
+        granted = (await Location.requestForegroundPermissionsAsync()).status === "granted";
+      }
+      if (!granted) {
+        Alert.alert(i18n.t("settings.locationDenied"));
+        return;
+      }
+      await saveLocationPreference({ enabled: true, precision: locationPrecision });
+      setLocationEnabled(true);
+    } finally {
+      setLocationWorking(false);
+    }
+  }
+
+  async function disableLocation() {
+    await saveLocationPreference({ enabled: false, precision: locationPrecision });
+    setLocationEnabled(false);
+  }
+
+  async function changeLocationPrecision(next: LocationPrecision) {
+    setLocationPrecision(next);
+    await saveLocationPreference({ enabled: locationEnabled, precision: next });
   }
 
   function confirmClearCache(kind: CacheKind) {
@@ -117,6 +155,36 @@ export default function AppSettingsScreen() {
             </AppPressable>
           </View>
         ) : null}
+      </Section>
+
+      <Section title={i18n.t("settings.location")} detail={i18n.t("settings.locationHint")}>
+        <Text style={locationEnabled ? styles.enabled : styles.disabled}>
+          {locationEnabled ? i18n.t("settings.locationEnabled") : i18n.t("settings.locationDisabled")}
+        </Text>
+        {locationEnabled ? (
+          <View accessibilityRole="radiogroup" style={styles.choices}>
+            {(["city", "block", "precise"] as const).map((precision) => (
+              <Choice
+                key={precision}
+                label={i18n.t(`settings.locationPrecision.${precision}`)}
+                mode={precision}
+                selected={locationPrecision === precision}
+                onPress={changeLocationPrecision}
+              />
+            ))}
+          </View>
+        ) : null}
+        <View style={styles.notificationActions}>
+          {locationEnabled ? (
+            <AppPressable onPress={() => void disableLocation()} style={styles.settingsButton}>
+              <Text style={styles.settingsButtonText}>{i18n.t("settings.locationDisable")}</Text>
+            </AppPressable>
+          ) : (
+            <AppPressable disabled={locationWorking} onPress={() => void enableLocation()} style={styles.updateButton}>
+              <Text style={styles.updateText}>{locationWorking ? i18n.t("settings.locationWorking") : i18n.t("settings.locationEnable")}</Text>
+            </AppPressable>
+          )}
+        </View>
       </Section>
 
       <Section title={i18n.t("settings.transportDiagnostics")} detail={i18n.t("settings.transportDiagnosticsHint")}>
@@ -219,7 +287,7 @@ function Section({ title, detail, children }: { title: string; detail: string; c
   );
 }
 
-function Choice<T extends ThemeMode | LanguageMode>({
+function Choice<T extends string>({
   label,
   mode,
   selected,
@@ -228,7 +296,7 @@ function Choice<T extends ThemeMode | LanguageMode>({
   label: string;
   mode: T;
   selected: boolean;
-  onPress(mode: T): Promise<void>;
+  onPress(mode: T): Promise<void> | void;
 }) {
   return (
     <AppPressable

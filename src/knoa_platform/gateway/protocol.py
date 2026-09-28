@@ -212,6 +212,7 @@ class CreateChatTurnRequest(GatewayRequest):
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
     tools_enabled: bool = True
     agent_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    device_location: str = Field(default="", max_length=500)
 
     def require_content(self) -> None:
         if not self.input.strip() and not self.attachments:

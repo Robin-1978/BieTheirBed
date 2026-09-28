@@ -135,6 +135,7 @@ class RuntimeTurnContext(ContractModel):
     episodic_memory: tuple[
         Annotated[str, StringConstraints(max_length=4000)], ...
     ] = Field(default=(), max_length=3)
+    device_location: Annotated[str, StringConstraints(max_length=500)] = ""
     skill_instructions: Annotated[str, StringConstraints(max_length=200_000)] = ""
 
 

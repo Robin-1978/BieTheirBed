@@ -695,6 +695,7 @@ class CreateChatTurnRequest(CoreModel):
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
     tools_enabled: bool = True
     agent_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None = None
+    device_location: Annotated[str, StringConstraints(max_length=500)] = ""
 
     @model_validator(mode="after")
     def require_input_or_attachment(self) -> CreateChatTurnRequest:

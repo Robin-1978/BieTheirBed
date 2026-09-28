@@ -60,6 +60,7 @@ import {
 } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { GatewayError, type GatewayClient } from "@/api/gatewayClient";
+import { resolveDeviceLocation } from "@/location/deviceLocation";
 import { agentImageSupport } from "@/media/agentImageSupport";
 import { shouldResetConversation } from "@/state/conversationTransition";
 import { useChatTurns } from "@/hooks/useChatTurns";
@@ -534,12 +535,14 @@ export default function ChatScreen() {
         return;
       }
 
+      const deviceLocation = await resolveDeviceLocation();
       const accepted = await session.runAuthenticated((client) => client.createChatTurn({
         clientRequestId: pending.requestId,
         sessionHandle,
         text: pending.userInput,
         attachments: uploadedItems.flatMap((item) => item.uploaded ? [item.uploaded] : []),
         agentId: fleet.activeAgentId || fleet.selectedAgentId,
+        deviceLocation,
       }));
       setTurns((current) => mergeConversationTurns(current, [accepted]));
       setPendingTurn(null);

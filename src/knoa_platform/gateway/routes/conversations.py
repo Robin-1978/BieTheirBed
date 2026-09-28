@@ -144,6 +144,7 @@ class ConversationRoutes:
                 client_request_id=parsed.client_request_id,
                 tools_enabled=parsed.tools_enabled,
                 agent_id=parsed.agent_id,
+                device_location=parsed.device_location,
             )
         except ValueError:
             return JSONResponse({"error": "invalid_request"}, status_code=400)

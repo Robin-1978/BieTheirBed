@@ -580,6 +580,7 @@ export class GatewayClient {
     attachments?: ArtifactInput[];
     toolsEnabled?: boolean;
     agentId?: string;
+    deviceLocation?: string;
   }): Promise<ChatTurnSnapshot> {
     const path = `/v1/conversations/sessions/${encodeURIComponent(input.sessionHandle)}/turns`;
     const options = {
@@ -590,6 +591,7 @@ export class GatewayClient {
         attachments: input.attachments ?? [],
         tools_enabled: input.toolsEnabled ?? true,
         agent_id: input.agentId,
+        device_location: input.deviceLocation ?? "",
       },
     } as const;
     try {

@@ -2419,6 +2419,11 @@ export interface components {
              * @default null
              */
             agent_id: string | null;
+            /**
+             * Device Location
+             * @default
+             */
+            device_location: string;
         };
         /** CreateEvaluationCaseRequest */
         CreateEvaluationCaseRequest: {

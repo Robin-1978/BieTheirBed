@@ -3,7 +3,7 @@
     "name": "小诺",
     "slug": "knoa-mobile",
     "scheme": "knoa",
-    "version": "0.2.145",
+    "version": "0.2.146",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "../../assets/branding/xiaonuo-avatar-tech.png",
@@ -14,18 +14,21 @@
         "NSBonjourServices": [
           "_knoa-node._tcp."
         ],
-        "NSLocalNetworkUsageDescription": "允许小诺发现同一局域网内已配对的 Node，以优先建立局域网直连。"
+        "NSLocalNetworkUsageDescription": "允许小诺发现同一局域网内已配对的 Node，以优先建立局域网直连。",
+        "NSLocationWhenInUseUsageDescription": "允许小诺在你发送消息时附带当前位置，以便按你所在城市回答天气、附近等提问。关闭后则只用记住的地址。"
       }
     },
     "android": {
       "package": "dev.knoa.mobile",
-      "versionCode": 156,
+      "versionCode": 157,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "REQUEST_INSTALL_PACKAGES",
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
         "CHANGE_WIFI_MULTICAST_STATE",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
         "INTERNET"
       ],
       "adaptiveIcon": {
@@ -37,6 +40,12 @@
       "expo-router",
       "expo-secure-store",
       "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "允许小诺在你发送消息时附带当前位置，以便按你所在城市回答天气、附近等提问。"
+        }
+      ],
       "@config-plugins/react-native-webrtc",
       [
         "expo-media-library",

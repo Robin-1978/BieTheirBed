@@ -506,6 +506,7 @@ class ConversationService:
         attachments: tuple[ArtifactAttachment, ...] = (),
         tools_enabled: bool = True,
         agent_id: str | None = None,
+        device_location: str = "",
     ) -> ChatTurn:
         owned = await asyncio.to_thread(
             self._sessions.resolve,
@@ -528,7 +529,9 @@ class ConversationService:
                 cancellation=asyncio.Event(),
                 revision=turn.revision,
             )
-            execution = asyncio.create_task(self._execute(turn))
+            execution = asyncio.create_task(
+                self._execute(turn, device_location=device_location.strip()[:500])
+            )
             self._executions[turn.turn_id] = execution
             execution.add_done_callback(
                 lambda _task, turn_id=turn.turn_id: self._executions.pop(turn_id, None)
@@ -663,7 +666,7 @@ class ConversationService:
             await asyncio.gather(notify_task, return_exceptions=True)
         await self._notify(turn_id)
 
-    async def _execute(self, turn: ChatTurn) -> None:
+    async def _execute(self, turn: ChatTurn, *, device_location: str = "") -> None:
         live = self._live[turn.turn_id]
         scope = RuntimeScope(
             principal_id=turn.principal_id,
@@ -691,6 +694,7 @@ class ConversationService:
                         confirmation=self._approvals,
                         tool_commit=self._tool_commits,
                         interaction=self._interaction_port,
+                        device_location=device_location,
                     ),
                 ):
                     if isinstance(event, TurnFinished):

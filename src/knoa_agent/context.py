@@ -307,6 +307,14 @@ class ContextEngine:
             parts.append("<episodic_memory>")
             parts.extend(f"- {escape(item)}" for item in context.episodic_memory)
             parts.append("</episodic_memory>")
+        if context.device_location.strip():
+            parts.append(
+                "<device_location>"
+                f"{escape(context.device_location.strip())}"
+                " (realtime mobile position; prefer over remembered home"
+                " address for present-tense whereabouts queries)"
+                "</device_location>"
+            )
         if context.skill_instructions:
             parts.append(context.skill_instructions)
         ts = timestamp if timestamp is not None else time.strftime("%Y-%m-%d %H:%M %A")

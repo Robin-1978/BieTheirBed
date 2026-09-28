@@ -839,6 +839,7 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
         client_request_id: str,
         tools_enabled: bool = True,
         agent_id: str | None = None,
+        device_location: str = "",
     ) -> ChatTurnSnapshot:
         response = await self._request(
             CreateChatTurnRequest(
@@ -849,6 +850,7 @@ class CoreClient(CoreArtifactClientMixin, CoreAutomationClientMixin):
                 attachments=attachments,
                 tools_enabled=tools_enabled,
                 agent_id=agent_id,
+                device_location=device_location.strip()[:500],
             )
         )
         if not isinstance(response, ChatTurnAcceptedMessage):
