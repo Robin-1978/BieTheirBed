@@ -17,7 +17,7 @@ from knoa_platform.branding import ASSISTANT_NAME
 from knoa_platform.config import AppConfig, load_config
 from knoa_platform.database_maintenance import maintain_sqlite_database
 from knoa_platform.log_rotation import compressed_rotating_file_handler
-from knoa_platform.private_files import prepare_private_file
+from knoa_platform.private_files import IS_WINDOWS, prepare_private_file
 from knoa_platform.runtime import RuntimePaths, load_service_environment
 from knoa_platform.service.shutdown import wait_for_shutdown
 
@@ -30,7 +30,12 @@ def _prepare_private_file(path: Path) -> None:
     # owner-only validation instead of refusing to start at all.
     # Symlinks and foreign-owned files still fail closed in validation.
     try:
-        if path.exists() and not path.is_symlink() and path.stat().st_uid == os.geteuid():
+        if (
+            not IS_WINDOWS
+            and path.exists()
+            and not path.is_symlink()
+            and path.stat().st_uid == os.geteuid()
+        ):
             path.chmod(0o600)
     except OSError:
         pass
