@@ -98,6 +98,7 @@ export const chat = {
   "chat.thoughtCollapse": "收起思考过程",
   "chat.queued": "已排队，等待小诺处理…",
   "chat.sendFailed": "消息没有发出去",
+  "chat.sendRejectedVersion": "Node 拒绝了这条消息，可能是 Node 版本太旧，请升级 Node 后再试",
   "chat.messageCopied": "已复制到剪贴板",
   "chat.messageTimeYesterday": "昨天 {time}",
   "chat.reloadArtifact": "重新加载 {name}",

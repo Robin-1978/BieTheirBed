@@ -48,6 +48,7 @@ import {
   TERMINAL_STATES,
   TIMESTAMP_GROUP_MS,
   agentReasonLabel,
+  describeSendError,
 } from "@/components/chat";
 import { presentNodeName } from "@/presentation/nodePresentation";
 import { calculateTotalSavedHours } from "@/components/trophyPresentation";
@@ -488,7 +489,7 @@ export default function ChatScreen() {
   async function submitPendingTurn(pending: PendingChatTurn) {
     // runAuthenticated 在无 client 时走 token 恢复直调；真离线抛错，
     // 调用方呈现失败态 + 重试。这里不再前置拦截。
-    setPendingTurn({ ...pending, state: "sending", error: "" });
+    setPendingTurn({ ...pending, state: "sending", error: "", retryable: true });
     setFeedback(null);
 
     try {
@@ -532,6 +533,7 @@ export default function ChatScreen() {
           attachments: uploadedItems,
           state: "failed",
           error: t("chat.attachmentUploadFailed"),
+          retryable: true,
         });
         return;
       }
@@ -559,11 +561,13 @@ export default function ChatScreen() {
           showFeedback(t("chat.sessionSyncPending"), "warning");
         });
       }
-    } catch {
+    } catch (error) {
+      const described = describeSendError(error, t);
       setPendingTurn({
         ...pending,
         state: "failed",
-        error: t("chat.sendFailed"),
+        error: described.message,
+        retryable: described.retryable,
       });
     }
   }
@@ -614,6 +618,7 @@ export default function ChatScreen() {
       attachments: queuedAttachments,
       state: "sending",
       error: "",
+      retryable: true,
       createdAt: Date.now(),
     };
 
@@ -687,6 +692,7 @@ export default function ChatScreen() {
         attachments: [],
         state: "sending",
         error: "",
+        retryable: true,
         createdAt: Date.now(),
       });
     } else {

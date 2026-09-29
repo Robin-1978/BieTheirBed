@@ -98,6 +98,7 @@ export const chat = {
   "chat.thoughtCollapse": "Collapse thought process",
   "chat.queued": "Queued — waiting for Knoa…",
   "chat.sendFailed": "The message was not sent",
+  "chat.sendRejectedVersion": "The Node rejected this message, likely because it is outdated. Please update the Node and try again.",
   "chat.messageCopied": "Copied to clipboard",
   "chat.messageTimeYesterday": "Yesterday {time}",
   "chat.reloadArtifact": "Reload {name}",

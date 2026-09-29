@@ -74,9 +74,11 @@ export function PendingTurnItem({
         </View>
         {pending.state === "failed" ? (
           <View style={styles.turnActions}>
-            <AppPressable accessibilityRole="button" onPress={() => onRetry(pending)} style={styles.turnAction}>
-              <Text style={styles.turnActionText}>{t("chat.retry")}</Text>
-            </AppPressable>
+            {pending.retryable !== false ? (
+              <AppPressable accessibilityRole="button" onPress={() => onRetry(pending)} style={styles.turnAction}>
+                <Text style={styles.turnActionText}>{t("chat.retry")}</Text>
+              </AppPressable>
+            ) : null}
             <AppPressable accessibilityRole="button" onPress={() => onEdit(pending)} style={styles.turnAction}>
               <Text style={styles.turnActionText}>{t("taskDetail.edit")}</Text>
             </AppPressable>
