@@ -50,7 +50,7 @@ def extract_tempo_share_links(texts: list[str]) -> list[dict[str, str]]:
                     {
                         "share_id": share_id,
                         "sn": sn,
-                        "url": f"https://service.example.com/#/robot/shared-record-list/{share_id}/{sn}",
+        "url": f"https://service.example.com/#/robot/shared-record-list/{share_id}/{sn}",
                     }
                 )
     return results

@@ -1,4 +1,5 @@
 """Conversation application service invoking AgentRuntime without Task persistence."""
+
 from __future__ import annotations
 
 import asyncio
@@ -53,7 +54,6 @@ from knoa_platform.conversation.repository import (
     ConversationSessionConflictError,
 )
 from knoa_platform.interactions import HumanInteractionService, ScopedInteractionPort
-from knoa_platform.location.reverse import enrich_device_location
 from knoa_platform.tasks.identity import task_tool_step_id
 from knoa_platform.tools.base import ToolPolicy
 
@@ -99,7 +99,9 @@ class ConversationHub:
             self._subscriptions.setdefault(turn_id, set()).add(subscription)
         return subscription
 
-    async def unsubscribe(self, turn_id: str, subscription: _LatestSubscription) -> None:
+    async def unsubscribe(
+        self, turn_id: str, subscription: _LatestSubscription
+    ) -> None:
         async with self._lock:
             subscriptions = self._subscriptions.get(turn_id)
             if subscriptions is None:
@@ -199,9 +201,7 @@ class ConversationApprovalService:
                         "reason": reason,
                     },
                 )
-                review_task = asyncio.create_task(
-                    self._reviewer.review(review_request)
-                )
+                review_task = asyncio.create_task(self._reviewer.review(review_request))
                 done, _pending = await asyncio.wait(
                     {review_task, future},
                     return_when=asyncio.FIRST_COMPLETED,
@@ -400,7 +400,9 @@ class ConversationService:
         self._tool_commits = ConversationToolCommitService(repository)
         self._interactions = interactions
         self._interaction_port: ScopedInteractionPort | None = (
-            None if interactions is None else interactions.for_owner("conversation_turn")
+            None
+            if interactions is None
+            else interactions.for_owner("conversation_turn")
         )
 
     def configure_approval_review(
@@ -431,8 +433,12 @@ class ConversationService:
     async def compact_expired_details(self) -> int:
         return await asyncio.to_thread(self._repository.compact_expired_details)
 
-    async def get_session(self, principal_id: str, session_handle: str) -> ConversationSession:
-        return await asyncio.to_thread(self._repository.get_session, principal_id, session_handle)
+    async def get_session(
+        self, principal_id: str, session_handle: str
+    ) -> ConversationSession:
+        return await asyncio.to_thread(
+            self._repository.get_session, principal_id, session_handle
+        )
 
     async def list_sessions(
         self,
@@ -475,7 +481,9 @@ class ConversationService:
         return session
 
     async def delete_session(self, principal_id: str, session_handle: str) -> None:
-        scope = await asyncio.to_thread(self._sessions.resolve, principal_id, session_handle)
+        scope = await asyncio.to_thread(
+            self._sessions.resolve, principal_id, session_handle
+        )
         active_turns, _next_cursor = await asyncio.to_thread(
             self._repository.list_session,
             principal_id,
@@ -486,12 +494,16 @@ class ConversationService:
             raise ConversationSessionConflictError("Conversation has an active turn")
         await asyncio.to_thread(self._sessions.delete, scope)
 
-    async def retry_turn(self, principal_id: str, turn_id: str, *, client_request_id: str) -> ChatTurn:
+    async def retry_turn(
+        self, principal_id: str, turn_id: str, *, client_request_id: str
+    ) -> ChatTurn:
         previous = await self.get_turn(principal_id, turn_id)
         if previous.state not in {ChatTurnState.FAILED, ChatTurnState.CANCELLED}:
             raise ValueError("Only failed or cancelled ChatTurns can be retried")
         return await self.create_turn(
-            RuntimeScope(principal_id=principal_id, session_handle=previous.session_handle),
+            RuntimeScope(
+                principal_id=principal_id, session_handle=previous.session_handle
+            ),
             client_request_id=client_request_id,
             user_input=previous.user_input,
             attachments=previous.attachments,
@@ -530,12 +542,11 @@ class ConversationService:
                 cancellation=asyncio.Event(),
                 revision=turn.revision,
             )
-            enriched_location = await asyncio.to_thread(
-                enrich_device_location, device_location.strip()[:500]
-            )
-            execution = asyncio.create_task(
-                self._execute(turn, device_location=enriched_location)
-            )
+            # Legacy clients may still submit a cached location with every turn.
+            # Ignore it: current location is disclosed only through the just-in-time
+            # device_location tool interaction.
+            del device_location
+            execution = asyncio.create_task(self._execute(turn))
             self._executions[turn.turn_id] = execution
             execution.add_done_callback(
                 lambda _task, turn_id=turn.turn_id: self._executions.pop(turn_id, None)
@@ -652,7 +663,9 @@ class ConversationService:
 
     def _schedule_notify(self, turn_id: str) -> None:
         live = self._live.get(turn_id)
-        if live is None or (live.notify_task is not None and not live.notify_task.done()):
+        if live is None or (
+            live.notify_task is not None and not live.notify_task.done()
+        ):
             return
 
         async def publish_later() -> None:
@@ -670,7 +683,7 @@ class ConversationService:
             await asyncio.gather(notify_task, return_exceptions=True)
         await self._notify(turn_id)
 
-    async def _execute(self, turn: ChatTurn, *, device_location: str = "") -> None:
+    async def _execute(self, turn: ChatTurn) -> None:
         live = self._live[turn.turn_id]
         scope = RuntimeScope(
             principal_id=turn.principal_id,
@@ -698,7 +711,6 @@ class ConversationService:
                         confirmation=self._approvals,
                         tool_commit=self._tool_commits,
                         interaction=self._interaction_port,
-                        device_location=device_location,
                     ),
                 ):
                     if isinstance(event, TurnFinished):
@@ -782,7 +794,9 @@ class ConversationService:
                 final_output=live.final_output,
                 timeline=tuple(live.timeline),
                 artifacts=tuple(live.artifacts),
-                failure_code=("cancelled" if live.cancellation.is_set() else "runtime_failed"),
+                failure_code=(
+                    "cancelled" if live.cancellation.is_set() else "runtime_failed"
+                ),
                 revision=live.revision + 1,
                 finished=True,
             )

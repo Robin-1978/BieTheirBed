@@ -129,12 +129,12 @@ class RuntimeTurnContext(ContractModel):
     core_memory: tuple[Annotated[str, StringConstraints(max_length=2000)], ...] = Field(
         default=(), max_length=12
     )
-    relevant_memory: tuple[
-        Annotated[str, StringConstraints(max_length=2000)], ...
-    ] = Field(default=(), max_length=5)
-    episodic_memory: tuple[
-        Annotated[str, StringConstraints(max_length=4000)], ...
-    ] = Field(default=(), max_length=3)
+    relevant_memory: tuple[Annotated[str, StringConstraints(max_length=2000)], ...] = (
+        Field(default=(), max_length=5)
+    )
+    episodic_memory: tuple[Annotated[str, StringConstraints(max_length=4000)], ...] = (
+        Field(default=(), max_length=3)
+    )
     device_location: Annotated[str, StringConstraints(max_length=500)] = ""
     skill_instructions: Annotated[str, StringConstraints(max_length=200_000)] = ""
 
@@ -226,6 +226,7 @@ class InteractionRequested(_RuntimeEvent):
     kind: Literal[
         "user_input",
         "mcp_elicitation",
+        "device_location",
     ]
     display: dict[str, Any] = Field(default_factory=dict)
     resolution_schema: dict[str, Any] = Field(default_factory=dict)
@@ -357,7 +358,9 @@ class AgentRuntime(Protocol):
 
     async def start_turn(self, request: RuntimeTurnRequest) -> RuntimeTurn: ...
 
-    async def steer_turn(self, command: RuntimeSteerCommand) -> RuntimeCommandResult: ...
+    async def steer_turn(
+        self, command: RuntimeSteerCommand
+    ) -> RuntimeCommandResult: ...
 
     async def interrupt_turn(
         self, command: RuntimeInterruptCommand

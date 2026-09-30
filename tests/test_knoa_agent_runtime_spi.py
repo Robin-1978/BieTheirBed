@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from knoa_agent import ContextCheckpointRepository, KnoaAgentRuntime
+from knoa_agent import (
+    ContextCheckpointRepository,
+    DisabledToolSelector,
+    KnoaAgentRuntime,
+    ToolInventory,
+)
 from knoa_agent_contracts import (
     ArtifactPart,
     ArtifactReference,
@@ -504,6 +509,9 @@ async def test_tool_help_activates_deferred_mcp_tool_on_next_model_step(
         DeferredMcpConnector(),
         system_prompt="system",
         health_probe=healthy,
+        tool_inventory=ToolInventory(
+            semantic_selector=DisabledToolSelector(),
+        ),
     )
     session = await runtime.create_session(
         CreateRuntimeSession(operation_id="create-jira", binding_epoch=1)
@@ -1343,6 +1351,5 @@ async def test_knoa_runtime_tool_budget_exhaustion_triggers_final_synthesis_pass
     # The turn must be COMPLETED with final_output synthesized, NOT failed!
     assert finished.status == "completed"
     assert "最终综合对比报告" in finished.final_output
-
 
 

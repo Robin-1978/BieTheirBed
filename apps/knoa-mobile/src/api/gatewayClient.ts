@@ -578,10 +578,9 @@ export class GatewayClient {
     sessionHandle: string;
     text?: string;
     attachments?: ArtifactInput[];
-    toolsEnabled?: boolean;
-    agentId?: string;
-    deviceLocation?: string;
-  }): Promise<ChatTurnSnapshot> {
+ toolsEnabled?: boolean;
+ agentId?: string;
+ }): Promise<ChatTurnSnapshot> {
     const path = `/v1/conversations/sessions/${encodeURIComponent(input.sessionHandle)}/turns`;
     const options = {
       method: "POST",
@@ -589,10 +588,9 @@ export class GatewayClient {
         client_request_id: input.clientRequestId,
         input: input.text ?? "",
         attachments: input.attachments ?? [],
-        tools_enabled: input.toolsEnabled ?? true,
-        agent_id: input.agentId,
-        device_location: input.deviceLocation ?? "",
-      },
+ tools_enabled: input.toolsEnabled ?? true,
+ agent_id: input.agentId,
+ },
     } as const;
     try {
       const response = await this.json<{ turn: ChatTurnSnapshot }>(path, options);

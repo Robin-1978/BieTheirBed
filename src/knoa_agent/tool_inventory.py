@@ -7,7 +7,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from knoa_agent.tool_selector import SemanticSelection, default_tool_selector, tool_tags_for
+from knoa_agent.tool_selector import (
+    SemanticSelection,
+    default_tool_selector,
+    tool_tags_for,
+)
 
 _MODEL_SCHEMA_KEYS = frozenset(
     {
@@ -28,12 +32,38 @@ _MODEL_SCHEMA_KEYS = frozenset(
 
 CORE_TOOL_NAMES = frozenset(
     {
-        "attach_file", "clipboard", "create_task", "currency_convert", "edit_file",
-        "glob_files", "grep_search", "hotkey", "memory", "mcp_connect",
-        "mcp_disable", "mcp_inspect", "mouse", "notify", "press_key",
-        "read_artifact", "read_file", "run_command", "screen_look", "screenshot",
-        "sleep", "spawn_subagent", "await_subagent", "task_control", "tool_help",
-        "type_text", "ui_control", "weather", "web_fetch", "web_search", "window_control",
+        "attach_file",
+        "clipboard",
+        "create_task",
+        "currency_convert",
+        "device_location",
+        "edit_file",
+        "glob_files",
+        "grep_search",
+        "hotkey",
+        "memory",
+        "mcp_connect",
+        "mcp_disable",
+        "mcp_inspect",
+        "mouse",
+        "notify",
+        "press_key",
+        "read_artifact",
+        "read_file",
+        "run_command",
+        "screen_look",
+        "screenshot",
+        "sleep",
+        "spawn_subagent",
+        "await_subagent",
+        "task_control",
+        "tool_help",
+        "type_text",
+        "ui_control",
+        "weather",
+        "web_fetch",
+        "web_search",
+        "window_control",
         "write_file",
     }
 )
@@ -166,9 +196,7 @@ class ToolInventory:
             else:
                 return projected
         deferred = tuple(
-            self._model_signature(by_name[name])
-            for name in active
-            if name in by_name
+            self._model_signature(by_name[name]) for name in active if name in by_name
         )
         projected = (*stable, *deferred)
         projected_chars = sum(self._serialized_size(tool) for tool in projected)
@@ -192,7 +220,9 @@ class ToolInventory:
         """
 
         deferred = tuple(
-            tool for tool in snapshot.tools if self._deferred_predicate(str(tool["name"]))
+            tool
+            for tool in snapshot.tools
+            if self._deferred_predicate(str(tool["name"]))
         )
         if self._static_sessions.get(runtime_session_ref, False):
             tools = self.project(runtime_session_ref, snapshot)
@@ -201,7 +231,9 @@ class ToolInventory:
                 mode="static",
                 matched_names=(),
                 schema_hits=sum(
-                    1 for tool in tools if self._deferred_predicate(str(tool.get("name") or ""))
+                    1
+                    for tool in tools
+                    if self._deferred_predicate(str(tool.get("name") or ""))
                 ),
             )
         source_names = self._source_namespace_matches(query, deferred)
@@ -236,7 +268,8 @@ class ToolInventory:
             mode="+".join(modes),
             matched_names=tuple(sorted(recalled)),
             schema_hits=sum(
-                1 for tool in tools
+                1
+                for tool in tools
                 if self._deferred_predicate(str(tool.get("name") or ""))
             ),
         )
@@ -365,7 +398,9 @@ class ToolInventory:
     def _tokens(value: str) -> frozenset[str]:
         return frozenset(
             token
-            for token in re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]{2,}", value.casefold())
+            for token in re.findall(
+                r"[A-Za-z0-9]+|[\u4e00-\u9fff]{2,}", value.casefold()
+            )
             if len(token) >= 2
         )
 

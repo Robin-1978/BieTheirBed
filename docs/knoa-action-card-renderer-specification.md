@@ -123,7 +123,7 @@ def build_jira_investigation_card(issue_key: str, robot_sn: str, diff_patch: str
         )
         .add_key_value([
             {"key": "影响版本", "value": "v2.6.4-rc1", "style": "code"},
-            {"key": "代码责任人", "value": "robotdev@example.com", "style": "bold"},
+        {"key": "代码责任人", "value": "robotdev@example.com", "style": "bold"},
             {"key": "提交记录", "value": "4e6d92a: feat(pnc): add timeout check", "style": "muted"},
         ])
         .add_code_diff(

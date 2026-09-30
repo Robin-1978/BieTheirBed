@@ -1,4 +1,5 @@
 """System prompt and runtime context builders."""
+
 from __future__ import annotations
 
 import logging
@@ -45,6 +46,7 @@ You are {{ASSISTANT_IDENTITY}}, an advanced intelligent computer assistant and p
 2. Tool Discovery: If no visible tool matches a needed capability or parameters are unclear, call `tool_help`.
 3. Parallel Batching: Independent tools may be called together in parallel in one turn. If a tool call depends on the output of another, wait for the result before issuing the dependent call.
 4. Web Research Convergence & Early Exit: Prioritize `web_search` and `web_fetch`. 2 to 4 focused search and fetch steps are sufficient to capture primary facts. If a target is blocked or unavailable, stop chasing immediately and synthesize based on available facts.
+5. Current Location Privacy: Call `device_location` only when the current phone location is necessary to answer the user's present request. Do not request it when the user named a place, remembered location is sufficient, or “location/position” is used in a non-geographic sense. Request the least precise level that can answer the question, and skip address lookup when coordinates are sufficient.
 </tool_execution_rules>
 
 <truthfulness_and_error_handling>
@@ -87,12 +89,14 @@ def build_system_prompt(
     parts = [_load_system_template()]
 
     if tools_description:
-        parts.extend([
-            "",
-            "<available_tools>",
-            tools_description,
-            "</available_tools>",
-        ])
+        parts.extend(
+            [
+                "",
+                "<available_tools>",
+                tools_description,
+                "</available_tools>",
+            ]
+        )
 
     if extra_instructions:
         parts.extend(["", extra_instructions])

@@ -64,7 +64,7 @@ def test_action_card_builder_full_suite() -> None:
         .add_key_value(
             [
                 KeyValueItem(key="工单号", value="TESTISSUE-125380"),
-                {"key": "责任人", "value": "robotdev@example.com", "style": "bold"},
+        {"key": "责任人", "value": "robotdev@example.com", "style": "bold"},
                 {"key": "上位机固件", "value": "v2.6.4-rc1", "style": "code"},
             ]
         )

@@ -1128,7 +1128,7 @@ async def test_enhanced_jira_tools_end_to_end(tmp_path: Path) -> None:
                         "summary": "机器在梯控避障时偶发急停",
                         "description": (
                             "现场日志见 oss://gs-public-shared/logs/2026/bag.tar.gz "
-                            "请看 https://service.example.com/#/robot/shared-record-list/706ef3d2-1234-5678-abcd-ef0123456789/TBPR123456"
+        "请看 https://service.example.com/#/robot/shared-record-list/706ef3d2-1234-5678-abcd-ef0123456789/TBPR123456"
                         ),
                         "status": {"name": "In Progress"},
                         "priority": {"name": "High"},
@@ -1269,6 +1269,5 @@ def test_local_log_analyzer_with_git_blame_and_snippet(tmp_path: Path) -> None:
     assert ctx["blame"] is not None
     assert ctx["blame"]["author"] == "Robot Dev"
     assert "add motor feedback timeout check" in ctx["blame"]["summary"]
-
 
 

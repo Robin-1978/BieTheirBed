@@ -69,7 +69,9 @@ export const ChatTurnItem = memo(function ChatTurnItem({
     [rawResponse]
   );
   const approval = turn.approvals.find((item) => item.state === "pending") ?? null;
-  const interaction = turn.interactions?.find((item) => item.state === "pending") ?? null;
+ const interaction = turn.interactions?.find(
+ (item) => item.state === "pending" && item.kind !== "device_location",
+ ) ?? null;
   const artifactItems = useMemo(() => assistantArtifactItems(turn.artifacts), [turn.artifacts]);
   const timestampLabel = formatMessageTimestamp(timestampMs, locale, t("chat.messageTimeYesterday"));
 

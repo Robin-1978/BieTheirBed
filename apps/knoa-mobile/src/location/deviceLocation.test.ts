@@ -36,6 +36,7 @@ import {
 } from "./deviceLocation";
 
 beforeEach(() => {
+ vi.clearAllMocks();
   secure.cache.clear();
   expoLocation.permission = "granted";
   expoLocation.position = { coords: { latitude: 39.9042, longitude: 116.4074, accuracy: 25 } };
@@ -47,31 +48,72 @@ beforeEach(() => {
 describe("device location", () => {
   it("stays off by default and resolves to empty", async () => {
     await expect(loadLocationPreference()).resolves.toEqual({ enabled: false, precision: "block" });
-    await expect(resolveDeviceLocation()).resolves.toBe("");
+ await expect(resolveDeviceLocation()).resolves.toBeNull();
   });
 
   it("formats a block-level address without coordinates", async () => {
     await saveLocationPreference({ enabled: true, precision: "block" });
-    await expect(resolveDeviceLocation()).resolves.toBe("北京市朝阳区建国路88号");
+ await expect(resolveDeviceLocation()).resolves.toEqual({
+ text: "北京市朝阳区建国路88号",
+ precision: "block",
+ });
   });
 
   it("falls back to city level when block parts are missing", async () => {
     await saveLocationPreference({ enabled: true, precision: "city" });
     expoLocation.places = [{ city: "北京市", district: "", street: "", name: "" }];
-    await expect(resolveDeviceLocation()).resolves.toBe("北京市");
+ await expect(resolveDeviceLocation()).resolves.toEqual({ text: "北京市", precision: "city" });
   });
 
-  it("appends coordinates for precise mode", async () => {
+ it("appends coordinates for precise mode", async () => {
     await saveLocationPreference({ enabled: true, precision: "precise" });
-    await expect(resolveDeviceLocation()).resolves.toBe(
-      "北京市朝阳区建国路88号 (39.9042,116.4074 ±25m)",
-    );
+ await expect(resolveDeviceLocation()).resolves.toEqual({
+ text: "北京市朝阳区建国路88号 (39.9042,116.4074 ±25m)",
+ precision: "precise",
+ });
+ });
+
+ it("returns coordinates without reverse geocoding when an address is unnecessary", async () => {
+ const Location = await import("expo-location");
+ await saveLocationPreference({ enabled: true, precision: "precise" });
+
+ await expect(resolveDeviceLocation({
+ requestedPrecision: "precise",
+ addressRequired: false,
+ })).resolves.toEqual({
+ text: "(39.9042,116.4074 ±25m)",
+ precision: "precise",
+ });
+ expect(vi.mocked(Location.reverseGeocodeAsync)).not.toHaveBeenCalled();
+ });
+
+ it("skips reverse geocoding for coarse coordinate-only requests too", async () => {
+  const Location = await import("expo-location");
+  await saveLocationPreference({ enabled: true, precision: "precise" });
+
+  await expect(resolveDeviceLocation({
+   requestedPrecision: "city",
+   addressRequired: false,
+  })).resolves.toEqual({
+   text: "(39.9,116.4 ±25m)",
+   precision: "city",
   });
+  expect(vi.mocked(Location.reverseGeocodeAsync)).not.toHaveBeenCalled();
+ });
+
+ it("never exceeds the precision selected by the user", async () => {
+ await saveLocationPreference({ enabled: true, precision: "city" });
+
+ await expect(resolveDeviceLocation({
+  requestedPrecision: "precise",
+  addressRequired: false,
+ })).resolves.toEqual({ text: "(39.9,116.4 ±25m)", precision: "city" });
+ });
 
   it("resolves to empty when permission is denied", async () => {
     await saveLocationPreference({ enabled: true, precision: "block" });
     expoLocation.permission = "denied";
-    await expect(resolveDeviceLocation()).resolves.toBe("");
+ await expect(resolveDeviceLocation()).resolves.toBeNull();
   });
 
   it("falls back to the GMS-independent native fix on android", async () => {
@@ -89,8 +131,9 @@ describe("device location", () => {
       }),
     };
     await saveLocationPreference({ enabled: true, precision: "precise" });
-    await expect(resolveDeviceLocation()).resolves.toBe(
-      "未知位置 (39.9042,116.4074 ±150m)",
-    );
+ await expect(resolveDeviceLocation()).resolves.toEqual({
+ text: "未知位置 (39.9042,116.4074 ±150m)",
+ precision: "precise",
+ });
   });
 });

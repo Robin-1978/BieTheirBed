@@ -168,6 +168,7 @@ from knoa_platform.tools.mcp_connect import (
 )
 from knoa_platform.tools.memory_tool import MemoryTool
 from knoa_platform.tools.mouse import MouseTool
+from knoa_platform.tools.device_location import DeviceLocationTool
 from knoa_platform.tools.notification import NotificationTool
 from knoa_platform.tools.press_key import PressKeyTool
 from knoa_platform.tools.read_artifact import ReadArtifactTool
@@ -407,7 +408,8 @@ def _resolve_managed_model(
     required = (
         provider.requires_api_key
         if provider.requires_api_key is not None
-        else provider.driver in {"openai", "openai_compatible", "openai_responses", "anthropic"}
+        else provider.driver
+        in {"openai", "openai_compatible", "openai_responses", "anthropic"}
     )
     if required and not api_key:
         raise ValueError(f"Provider '{model.provider}' requires a configured secret")
@@ -444,7 +446,9 @@ def _vision_model_alias(managed: ManagedConfig) -> str:
     if managed.vision_model and managed.vision_model in managed.models:
         return managed.vision_model
     candidates = [
-        alias for alias, model in managed.models.items() if model.supports_vision is True
+        alias
+        for alias, model in managed.models.items()
+        if model.supports_vision is True
     ]
     if not candidates:
         return ""
@@ -514,8 +518,7 @@ def _build_agent_runtime_set(
                     return HealthStatus(
                         healthy=True,
                         detail=(
-                            "Fallback model available: "
-                            f"{fallback_provider.model_alias}"
+                            f"Fallback model available: {fallback_provider.model_alias}"
                         ),
                     )
                 return HealthStatus(
@@ -538,9 +541,7 @@ def _build_agent_runtime_set(
                 GatewayMCPConnector(capability_gateway),
                 system_prompt=instructions,
                 health_probe=native_health_probe,
-                max_iterations=(
-                    agent_iterations or managed.operational.max_iterations
-                ),
+                max_iterations=(agent_iterations or managed.operational.max_iterations),
                 max_tool_calls=max(1, managed.operational.max_total_tool_calls),
                 max_output_tokens=(
                     agent_output_tokens or managed.operational.max_output_tokens
@@ -587,9 +588,7 @@ def _build_agent_runtime_set(
         )
         workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
         runtime_home = (
-            paths.resolve(agent.home, default_parent=paths.root)
-            if agent.home
-            else None
+            paths.resolve(agent.home, default_parent=paths.root) if agent.home else None
         )
         runtimes[agent_id] = CodexAgentRuntime(
             CodexSessionRepository(state_root / "sessions.db"),
@@ -631,6 +630,7 @@ def _build_registry(
         WebFetchTool(),
         ClipboardTool(),
         MemoryTool(memory=memory, episodic=episodic),
+        DeviceLocationTool(),
         WeatherTool(),
         ExchangeTool(),
         WindowTool(),
@@ -660,7 +660,9 @@ def _bootstrap_managed_skills(
         resolved = root.expanduser().resolve()
         if not resolved.is_dir():
             continue
-        for package_root in sorted(path for path in resolved.iterdir() if path.is_dir()):
+        for package_root in sorted(
+            path for path in resolved.iterdir() if path.is_dir()
+        ):
             try:
                 provider = SkillPackageProvider(package_root, SkillCatalog())
             except ValueError:
@@ -694,7 +696,10 @@ def _freeze_skill_digests(
             raise ValueError(f"Skill source directory must match ID: {skill_id}")
         package = load_skill_package(source)
         frozen[skill_id] = skill.model_copy(
-            update={"source": str(source), "content_digest": skill_package_digest(package)}
+            update={
+                "source": str(source),
+                "content_digest": skill_package_digest(package),
+            }
         )
     return managed.model_copy(update={"skills": frozen})
 
@@ -855,16 +860,19 @@ def _bootstrap_provider_secrets(config: AppConfig, store: SecretStore) -> None:
 def build_core_runtime(
     config: AppConfig,
     *,
-    provider_factory: Callable[[ResolvedModelConfig], RuntimeModelProvider] | None = None,
+    provider_factory: Callable[[ResolvedModelConfig], RuntimeModelProvider]
+    | None = None,
 ) -> CoreRuntimeComposition:
     """Build one Core graph without legacy agents or in-process service fallback."""
 
     paths = RuntimePaths.from_root(config.runtime_root)
     if provider_factory is None:
+
         def provider_factory(model: ResolvedModelConfig) -> RuntimeModelProvider:
             if model.driver == "workspace_remote":
                 return RemoteModelProvider(model, paths=paths)
             return HttpModelProvider(model)
+
     packages = PackageStore(paths.packages)
     provider_secrets = SecretStore(paths.secrets / "providers")
     _bootstrap_provider_secrets(config, provider_secrets)
@@ -912,16 +920,19 @@ def build_core_runtime(
     resolver_holder = {"current": agent_resolver}
     managed_holder = {"current": managed}
     model_holder: dict[str, ResolvedModelConfig] = {}
-    token_calibration_store = TokenCalibrationStore(paths.data / "token_calibration.json")
+    token_calibration_store = TokenCalibrationStore(
+        paths.data / "token_calibration.json"
+    )
     token_estimators: dict[str, TokenEstimator] = {}
     sessions = RuntimeSessionRepository(database)
     active_agent = managed.agents.agents.get("knoa")
     active_model_alias = active_agent.model_binding.model if active_agent else ""
     active_model = managed.models.get(active_model_alias)
     effective_capacity = (
-        (active_model.context_window if active_model and active_model.context_window else 0)
-        or managed.operational.context_window_budget
-    )
+        active_model.context_window
+        if active_model and active_model.context_window
+        else 0
+    ) or managed.operational.context_window_budget
     prompt_budget = max(
         256,
         effective_capacity - managed.operational.max_output_tokens,
@@ -992,15 +1003,14 @@ def build_core_runtime(
             *mcp_providers,
         ),
     )
-    managed_extension_providers = {
-        "current": (*skill_providers, *mcp_providers)
-    }
+    managed_extension_providers = {"current": (*skill_providers, *mcp_providers)}
 
     tool_step = ToolStep(
         registry,
         ToolArgumentPolicy(config.working_directory),
         prepare_execution=ensure_desktop_session,
     )
+
     async def observe_usage(
         request: ExecuteAgentTurn,
         event: UsageReported,
@@ -1009,8 +1019,7 @@ def build_core_runtime(
         actual_prompt = _usage_integer(usage, "prompt_tokens", "input_tokens")
         estimated_prompt = int(usage.get("prompt_tokens_estimated") or 0)
         provider_model = str(
-            usage.get("provider_model")
-            or model_holder["current"].alias
+            usage.get("provider_model") or model_holder["current"].alias
         )
         if actual_prompt > 0 and estimated_prompt > 0:
             est = token_estimators.get(request.agent_id)
@@ -1113,9 +1122,7 @@ def build_core_runtime(
         )
         core_keys = {str(item["key"]) for item in core}
         return RuntimeTurnContext(
-            core_memory=tuple(
-                f"{item['key']}: {item['value']}" for item in core
-            ),
+            core_memory=tuple(f"{item['key']}: {item['value']}" for item in core),
             relevant_memory=tuple(
                 f"{item['key']}: {item['value']}"
                 for item in relevant
@@ -1152,8 +1159,7 @@ def build_core_runtime(
         runtimes,
         default_agent=managed.agents.default_agent,
         enabled={
-            agent_id: managed.agents.agents[agent_id].enabled
-            for agent_id in runtimes
+            agent_id: managed.agents.agents[agent_id].enabled for agent_id in runtimes
         },
         max_concurrency={
             agent_id: agent_resolver.agent(agent_id).max_concurrency
@@ -1165,8 +1171,7 @@ def build_core_runtime(
             if agent_resolver.agent(agent_id).visibility == "system"
         ),
         generation_ids={
-            agent_id: _agent_generation_id(managed, agent_id)
-            for agent_id in runtimes
+            agent_id: _agent_generation_id(managed, agent_id) for agent_id in runtimes
         },
     )
     agent_bindings = AgentSessionBindingRepository(database)
@@ -1245,11 +1250,7 @@ def build_core_runtime(
     task_approvals = DurableApprovalService(
         tasks,
         task_events,
-        reviewer=(
-            approval_reviewer
-            if managed.approval_review.mode != "off"
-            else None
-        ),
+        reviewer=(approval_reviewer if managed.approval_review.mode != "off" else None),
         review_mode=ApprovalReviewMode(managed.approval_review.mode),
         auto_max_risk=managed.approval_review.auto_max_risk,
     )
@@ -1283,9 +1284,7 @@ def build_core_runtime(
         agent_execution,
         interactions=interactions,
         approval_reviewer=(
-            approval_reviewer
-            if managed.approval_review.mode != "off"
-            else None
+            approval_reviewer if managed.approval_review.mode != "off" else None
         ),
         approval_review_mode=ApprovalReviewMode(managed.approval_review.mode),
         approval_auto_max_risk=managed.approval_review.auto_max_risk,
@@ -1293,15 +1292,13 @@ def build_core_runtime(
 
     async def preflight_configuration(candidate: ManagedConfig) -> None:
         try:
-            candidates, _primary, _model, _reviewer_model = (
-                _build_agent_runtime_set(
-                    candidate,
-                    bootstrap=config,
-                    paths=paths,
-                    capability_gateway=capability_gateway,
-                    provider_factory=provider_factory,
-                    artifact_store=artifacts,
-                )
+            candidates, _primary, _model, _reviewer_model = _build_agent_runtime_set(
+                candidate,
+                bootstrap=config,
+                paths=paths,
+                capability_gateway=capability_gateway,
+                provider_factory=provider_factory,
+                artifact_store=artifacts,
             )
             health = await asyncio.gather(
                 *(runtime.health_check() for runtime in candidates.values())
@@ -1505,16 +1502,18 @@ def build_core_runtime(
         applier=apply_configuration,
         normalizer=lambda candidate: _freeze_skill_digests(candidate, packages),
     )
-    task_service.configure_preflight(TaskLaunchPreflightEvaluator(
-        current_configuration=configuration.current,
-        configuration_state=configuration.state,
-        provider_secret_status=provider_secrets.status,
-        runtime_health=task_service.health_check,
-        tool_count=lambda scope: len(
-            registry.list_for(capabilities_for_scope(scope))
-        ),
-        runtime_root=config.runtime_root,
-    ))
+    task_service.configure_preflight(
+        TaskLaunchPreflightEvaluator(
+            current_configuration=configuration.current,
+            configuration_state=configuration.state,
+            provider_secret_status=provider_secrets.status,
+            runtime_health=task_service.health_check,
+            tool_count=lambda scope: len(
+                registry.list_for(capabilities_for_scope(scope))
+            ),
+            runtime_root=config.runtime_root,
+        )
+    )
     schedule_dispatcher = ScheduleDispatcher(schedules, task_service)
     schedule_service = ScheduleService(schedules, schedule_dispatcher)
     trigger_dispatcher = TriggerDispatcher(triggers, task_service, artifacts=artifacts)

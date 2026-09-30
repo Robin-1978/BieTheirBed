@@ -12304,7 +12304,8 @@
             "default": "user_input",
             "enum": [
               "user_input",
-              "mcp_elicitation"
+              "mcp_elicitation",
+              "device_location"
             ],
             "title": "Kind",
             "type": "string"

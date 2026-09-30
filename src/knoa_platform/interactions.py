@@ -1,4 +1,5 @@
 """Durable, provider-neutral user interactions for active Agent turns."""
+
 from __future__ import annotations
 
 import asyncio
@@ -34,7 +35,7 @@ class HumanInteraction(BaseModel):
     runtime_turn_ref: str = Field(min_length=1, max_length=256)
     runtime_interaction_id: str = Field(min_length=1, max_length=128)
     interaction_epoch: int = Field(ge=1)
-    kind: Literal["user_input", "mcp_elicitation"] = "user_input"
+    kind: Literal["user_input", "mcp_elicitation", "device_location"] = "user_input"
     state: InteractionState
     display: dict[str, Any] = Field(default_factory=dict)
     resolution_schema: dict[str, Any] = Field(default_factory=dict)
@@ -138,7 +139,7 @@ class HumanInteractionRepository:
         owner_id: str,
         event: InteractionRequested,
     ) -> tuple[HumanInteraction, bool]:
-        if event.kind not in {"user_input", "mcp_elicitation"}:
+        if event.kind not in {"user_input", "mcp_elicitation", "device_location"}:
             raise ValueError("Unsupported HumanInteraction kind")
         Draft202012Validator.check_schema(event.resolution_schema)
         if event.resolution_schema.get("type") != "object":
@@ -298,13 +299,55 @@ class HumanInteractionRepository:
             assert resolved is not None
             return self._record(resolved), True
 
+    def expire(
+        self,
+        principal_id: str,
+        interaction_id: str,
+        *,
+        resolved_by: str = "timeout",
+    ) -> tuple[HumanInteraction, bool]:
+        now = self._clock()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT * FROM human_interactions
+                WHERE interaction_id=? AND principal_id=?""",
+                (interaction_id, principal_id),
+            ).fetchone()
+            if row is None:
+                raise LookupError(interaction_id)
+            record = self._record(row)
+            if record.state != "pending":
+                return record, False
+            db.execute(
+                """UPDATE human_interactions
+                SET state='expired', resolved_at=?, resolved_by=?
+                WHERE interaction_id=? AND state='pending'""",
+                (now, resolved_by.strip(), interaction_id),
+            )
+            expired = db.execute(
+                "SELECT * FROM human_interactions WHERE interaction_id=?",
+                (interaction_id,),
+            ).fetchone()
+            assert expired is not None
+            return self._record(expired), True
+
 
 class _InteractionHandle:
-    def __init__(self, future: asyncio.Future[Any]) -> None:
+    def __init__(
+        self,
+        future: asyncio.Future[Any],
+        expire: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self._future = future
+        self._expire = expire
 
     async def wait(self) -> Any:
         return await self._future
+
+    async def expire(self) -> None:
+        if self._expire is not None:
+            await self._expire()
 
 
 class HumanInteractionService:
@@ -323,9 +366,7 @@ class HumanInteractionService:
         return ScopedInteractionPort(self, owner_kind)
 
     async def start(self) -> tuple[HumanInteraction, ...]:
-        recovered = await asyncio.to_thread(
-            self._repository.recover_runtime_lost
-        )
+        recovered = await asyncio.to_thread(self._repository.recover_runtime_lost)
         if self._changed is not None:
             for interaction in recovered:
                 await self._changed(interaction)
@@ -371,7 +412,13 @@ class HumanInteractionService:
             self._waiters[interaction.interaction_id] = future
         if created and self._changed is not None:
             await self._changed(interaction)
-        return _InteractionHandle(future)
+        return _InteractionHandle(
+            future,
+            lambda: self.expire(
+                scope.principal_id,
+                interaction.interaction_id,
+            ),
+        )
 
     async def resolve(
         self,
@@ -394,7 +441,25 @@ class HumanInteractionService:
             waiter = self._waiters.get(interaction_id)
             if changed and waiter is not None and not waiter.done():
                 waiter.set_result(value)
-                self._waiters.pop(interaction_id, None)
+            self._waiters.pop(interaction_id, None)
+        return interaction, changed
+
+    async def expire(
+        self,
+        principal_id: str,
+        interaction_id: str,
+    ) -> tuple[HumanInteraction, bool]:
+        interaction, changed = await asyncio.to_thread(
+            self._repository.expire,
+            principal_id,
+            interaction_id,
+        )
+        if changed and self._changed is not None:
+            await self._changed(interaction)
+        async with self._lock:
+            waiter = self._waiters.pop(interaction_id, None)
+            if changed and waiter is not None and not waiter.done():
+                waiter.cancel()
         return interaction, changed
 
     async def close(self) -> None:
@@ -413,6 +478,10 @@ class ScopedInteractionPort:
     ) -> None:
         self._service = service
         self._owner_kind = owner_kind
+
+    @property
+    def owner_kind(self) -> OwnerKind:
+        return self._owner_kind
 
     async def begin(
         self,

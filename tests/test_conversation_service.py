@@ -175,12 +175,31 @@ class TransientFailureRuntime(ChunkRuntime):
         )
 
 
+class CaptureRuntime(ChunkRuntime):
+    def __init__(self) -> None:
+        super().__init__(chunks=0)
+        self.request = None
+
+    async def execute_turn(self, request):
+        self.request = request
+        yield TurnFinished(
+            **_base(request),
+            status="completed",
+            final_output="done",
+        )
+
+
 def _service(tmp_path: Path, runtime: ChunkRuntime):
     database = tmp_path / "assistant.db"
     sessions = RuntimeSessionRepository(database, handle_factory=lambda: "session-a")
     scope = sessions.create("principal-a")
     repository = ConversationRepository(database, turn_id_factory=lambda: "turn-a")
-    return database, scope, repository, ConversationService(sessions, repository, runtime)
+    return (
+        database,
+        scope,
+        repository,
+        ConversationService(sessions, repository, runtime),
+    )
 
 
 @pytest.mark.asyncio
@@ -194,7 +213,10 @@ async def test_transient_empty_runtime_failure_is_retried_once(tmp_path: Path) -
         user_input="你好",
     )
 
-    snapshots = [signal.turn async for signal in service.updates(scope.principal_id, turn.turn_id)]
+    snapshots = [
+        signal.turn
+        async for signal in service.updates(scope.principal_id, turn.turn_id)
+    ]
 
     assert snapshots[-1].state is ChatTurnState.COMPLETED
     assert snapshots[-1].final_output == "你好！"
@@ -206,7 +228,33 @@ async def test_transient_empty_runtime_failure_is_retried_once(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_stream_coalesces_chunks_without_persisting_events(tmp_path: Path) -> None:
+async def test_legacy_device_location_is_not_forwarded_to_the_agent(
+    tmp_path: Path,
+) -> None:
+    runtime = CaptureRuntime()
+    _database, scope, _repository, service = _service(tmp_path, runtime)
+    await service.start()
+    turn = await service.create_turn(
+        scope,
+        client_request_id="request-location",
+        user_input="帮我检查这段代码",
+        device_location="北京市朝阳区建国路88号",
+    )
+
+    _snapshots = [
+        signal.turn
+        async for signal in service.updates(scope.principal_id, turn.turn_id)
+    ]
+
+    assert runtime.request is not None
+    assert runtime.request.device_location == ""
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_stream_coalesces_chunks_without_persisting_events(
+    tmp_path: Path,
+) -> None:
     database, scope, _repository, service = _service(tmp_path, ChunkRuntime())
     await service.start()
     turn = await service.create_turn(
@@ -215,7 +263,9 @@ async def test_stream_coalesces_chunks_without_persisting_events(tmp_path: Path)
         user_input="hello",
     )
 
-    snapshots = [signal async for signal in service.updates(scope.principal_id, turn.turn_id)]
+    snapshots = [
+        signal async for signal in service.updates(scope.principal_id, turn.turn_id)
+    ]
     completed = snapshots[-1].turn
     assert completed.state is ChatTurnState.COMPLETED
     assert completed.reasoning == "r" * 1000
@@ -232,15 +282,21 @@ async def test_stream_coalesces_chunks_without_persisting_events(tmp_path: Path)
     assert persisted.timeline == completed.timeline
 
     with sqlite3.connect(database) as db:
-        conversation_rows = db.execute("SELECT COUNT(*) FROM conversation_turns").fetchone()[0]
+        conversation_rows = db.execute(
+            "SELECT COUNT(*) FROM conversation_turns"
+        ).fetchone()[0]
         task_table = db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_tasks'"
         ).fetchone()
     assert conversation_rows == 1
     assert task_table is None
     await service.stop()
+
+
 @pytest.mark.asyncio
-async def test_stream_publishes_monotonic_ordered_progress_snapshots(tmp_path: Path) -> None:
+async def test_stream_publishes_monotonic_ordered_progress_snapshots(
+    tmp_path: Path,
+) -> None:
     _database, scope, repository, service = _service(tmp_path, ProgressRuntime())
     await service.start()
     turn = await service.create_turn(
@@ -249,7 +305,10 @@ async def test_stream_publishes_monotonic_ordered_progress_snapshots(tmp_path: P
         user_input="check",
     )
 
-    snapshots = [signal.turn async for signal in service.updates(scope.principal_id, turn.turn_id)]
+    snapshots = [
+        signal.turn
+        async for signal in service.updates(scope.principal_id, turn.turn_id)
+    ]
 
     assert len(snapshots) >= 4
     assert all(
@@ -269,7 +328,10 @@ async def test_stream_publishes_monotonic_ordered_progress_snapshots(tmp_path: P
         "tool_result",
         "content",
     ]
-    assert repository.get(scope.principal_id, turn.turn_id).timeline == snapshots[-1].timeline
+    assert (
+        repository.get(scope.principal_id, turn.turn_id).timeline
+        == snapshots[-1].timeline
+    )
     await service.stop()
 
 
@@ -285,7 +347,10 @@ async def test_tool_output_artifact_is_persisted_once_on_chat_turn(
         user_input="capture",
     )
 
-    snapshots = [signal.turn async for signal in service.updates(scope.principal_id, turn.turn_id)]
+    snapshots = [
+        signal.turn
+        async for signal in service.updates(scope.principal_id, turn.turn_id)
+    ]
 
     completed = snapshots[-1]
     assert [artifact.artifact_id for artifact in completed.artifacts] == ["artifact-a"]

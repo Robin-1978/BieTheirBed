@@ -380,19 +380,23 @@ export type HumanInteraction = {
   interaction_id: string;
   owner_kind: "conversation_turn" | "task_execution";
   owner_id: string;
-  kind: "user_input" | "mcp_elicitation";
+ kind: "user_input" | "mcp_elicitation" | "device_location";
   state: "pending" | "resolved" | "cancelled" | "expired" | "runtime_lost";
   display: {
     title?: string;
     description?: string;
-    fields?: Array<{
+ fields?: Array<{
       id: string;
       title?: string;
       description?: string;
       options?: Array<{ value: string; label: string; description?: string }>;
       allow_other?: boolean;
-    }>;
-  };
+ }>;
+ purpose?: string;
+ precision?: "city" | "block" | "precise";
+ address_required?: boolean;
+ automatic?: boolean;
+ };
   resolution_schema: {
     type?: string;
     properties?: Record<string, {

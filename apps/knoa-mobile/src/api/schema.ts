@@ -2839,7 +2839,7 @@ export interface components {
              * @default user_input
              * @enum {string}
              */
-            kind: "user_input" | "mcp_elicitation";
+            kind: "user_input" | "mcp_elicitation" | "device_location";
             /**
              * State
              * @enum {string}

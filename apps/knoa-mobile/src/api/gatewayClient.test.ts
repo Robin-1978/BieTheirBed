@@ -99,7 +99,7 @@ describe("GatewayClient conversation requests", () => {
     });
   });
 
-  it("attaches the device location snapshot to the chat turn", async () => {
+ it("never attaches a location snapshot to the initial chat turn", async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ turn: { turn_id: "turn-loc" } }), {
       status: 202,
       headers: { "Content-Type": "application/json" },
@@ -107,19 +107,17 @@ describe("GatewayClient conversation requests", () => {
     vi.stubGlobal("fetch", fetch);
     const client = new GatewayClient("https://knoa.example.com", "token-a");
 
-    await client.createChatTurn({
-      clientRequestId: "message-request-loc",
-      sessionHandle: "session-a",
-      text: "今天天气怎么样",
-      deviceLocation: "北京市朝阳区建国路88号",
-    });
+ await client.createChatTurn({
+ clientRequestId: "message-request-loc",
+ sessionHandle: "session-a",
+ text: "今天天气怎么样",
+ });
 
-    const init = fetch.mock.calls[0]![1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      client_request_id: "message-request-loc",
-      device_location: "北京市朝阳区建国路88号",
-    });
-  });
+ const init = fetch.mock.calls[0]![1] as RequestInit;
+ const body = JSON.parse(String(init.body));
+ expect(body.client_request_id).toBe("message-request-loc");
+ expect(body).not.toHaveProperty("device_location");
+ });
 
   it("retries one transient idle-transport failure with the same idempotency key", async () => {
     let attempts = 0;

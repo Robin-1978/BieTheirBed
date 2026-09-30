@@ -61,8 +61,7 @@ import {
 } from "@/api/chatArtifacts";
 import { saveArtifactFile } from "@/api/saveArtifactFile";
 import { GatewayError, type GatewayClient } from "@/api/gatewayClient";
-import { resolveDeviceLocation, loadLocationPreference } from "@/location/deviceLocation";
-import { getCachedLocationText } from "@/location/locationCache";
+import { answerDeviceLocationInteraction } from "@/location/deviceLocationInteraction";
 import { agentImageSupport } from "@/media/agentImageSupport";
 import { shouldResetConversation } from "@/state/conversationTransition";
 import { useChatTurns } from "@/hooks/useChatTurns";
@@ -152,7 +151,8 @@ export default function ChatScreen() {
     return () => { active = false; };
   }, [currentNodeId]);
 
-  const listRef = useRef<FlatList<ChatListItem>>(null);
+ const listRef = useRef<FlatList<ChatListItem>>(null);
+ const automaticLocationRequests = useRef(new Set<string>());
   const followLatest = useRef(true);
   const userDragging = useRef(false);
   const scrollIntent = useRef<"instant" | "smooth">("instant");
@@ -245,15 +245,53 @@ export default function ChatScreen() {
     watchTurn,
     refresh,
     turnWatcher,
-  } = useChatTurns({
+ } = useChatTurns({
     getConnection: () => sessionRef.current.connection(),
     runAuthenticated,
     sessionHandle: session.sessionHandle,
     hasClient: Boolean(session.client),
     onSessionReplaced: session.newConversation,
     showFeedback,
-    t,
-  });
+ t,
+ });
+
+ useEffect(() => {
+ for (const turn of turns) {
+ for (const interaction of turn.interactions ?? []) {
+ if (
+ interaction.kind !== "device_location"
+ || interaction.state !== "pending"
+ || automaticLocationRequests.current.has(interaction.interaction_id)
+ ) {
+ continue;
+ }
+ automaticLocationRequests.current.add(interaction.interaction_id);
+ void answerDeviceLocationInteraction(interaction)
+ .then((value) => runAuthenticated(
+ (client) => client.resolveInteraction(interaction.interaction_id, value),
+ ))
+ .then((result) => {
+ setTurns((current) => current.map((candidate) => (
+ candidate.turn_id !== interaction.owner_id
+ ? candidate
+ : {
+ ...candidate,
+ interactions: (candidate.interactions ?? []).map((item) => (
+ item.interaction_id === interaction.interaction_id
+ ? result.interaction
+ : item
+ )),
+ }
+ )));
+ watchTurn(interaction.owner_id);
+ })
+ .catch(() => showFeedback(t("interaction.submitFailed"), "error"))
+ .finally(() => {
+ automaticLocationRequests.current.delete(interaction.interaction_id);
+ });
+ }
+ }
+ }, [runAuthenticated, showFeedback, t, turns, watchTurn]);
 
   const {
     recordingState,
@@ -538,20 +576,13 @@ export default function ChatScreen() {
         return;
       }
 
-      // Send path never blocks on GPS: it reads the background-warmed
-      // cache (App open warms it, foreground + interval refresh it).
-      const deviceLocation = await getCachedLocationText();
-      if (!deviceLocation && (await loadLocationPreference()).enabled) {
-        showFeedback(t("chat.locationMissing"), "warning");
-      }
-      const accepted = await session.runAuthenticated((client) => client.createChatTurn({
-        clientRequestId: pending.requestId,
-        sessionHandle,
-        text: pending.userInput,
-        attachments: uploadedItems.flatMap((item) => item.uploaded ? [item.uploaded] : []),
-        agentId: fleet.activeAgentId || fleet.selectedAgentId,
-        deviceLocation,
-      }));
+ const accepted = await session.runAuthenticated((client) => client.createChatTurn({
+ clientRequestId: pending.requestId,
+ sessionHandle,
+ text: pending.userInput,
+ attachments: uploadedItems.flatMap((item) => item.uploaded ? [item.uploaded] : []),
+ agentId: fleet.activeAgentId || fleet.selectedAgentId,
+ }));
       setTurns((current) => mergeConversationTurns(current, [accepted]));
       setPendingTurn(null);
       watchTurn(accepted.turn_id);

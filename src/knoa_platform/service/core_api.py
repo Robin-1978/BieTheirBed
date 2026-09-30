@@ -3,6 +3,7 @@
 These models are the new public protocol. They intentionally do not accept the
 legacy ``method + params: dict`` message shape.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypeAlias
@@ -232,7 +233,9 @@ class ProductTaskSnapshot(CoreModel):
             pending_approval_count=task.pending_approval_count,
             work_status=product_task_work_status(
                 task.state.value,
-                None if task.latest_execution_state is None else task.latest_execution_state.value,
+                None
+                if task.latest_execution_state is None
+                else task.latest_execution_state.value,
                 pending_approval_count=task.pending_approval_count,
             ),
             created_at=task.created_at,
@@ -244,7 +247,7 @@ class HumanInteractionSnapshot(CoreModel):
     interaction_id: NonEmpty
     owner_kind: Literal["conversation_turn", "task_execution"]
     owner_id: NonEmpty
-    kind: Literal["user_input", "mcp_elicitation"] = "user_input"
+    kind: Literal["user_input", "mcp_elicitation", "device_location"] = "user_input"
     state: Literal["pending", "resolved", "cancelled", "expired", "runtime_lost"]
     display: dict[str, Any] = Field(default_factory=dict)
     resolution_schema: dict[str, Any] = Field(default_factory=dict)
@@ -347,11 +350,13 @@ class ProductTaskExecutionSnapshot(CoreModel):
             work_status=task_work_status(
                 execution.state.value,
                 pending_approval_count=sum(
-                    1 for approval in execution.approvals
+                    1
+                    for approval in execution.approvals
                     if approval.state is ApprovalState.PENDING
                 ),
                 pending_interaction_count=sum(
-                    1 for interaction in execution.interactions
+                    1
+                    for interaction in execution.interactions
                     if interaction.state == "pending"
                 ),
             ),
@@ -482,11 +487,11 @@ class ChatTurnSnapshot(CoreModel):
             work_status=turn_work_status(
                 turn.state.value,
                 pending_approval_count=sum(
-                    1 for approval in turn.approvals
-                    if approval.state == "pending"
+                    1 for approval in turn.approvals if approval.state == "pending"
                 ),
                 pending_interaction_count=sum(
-                    1 for interaction in turn.interactions
+                    1
+                    for interaction in turn.interactions
                     if interaction.state == "pending"
                 ),
             ),
@@ -619,7 +624,9 @@ class CreateSessionRequest(CoreModel):
     request_id: RequestId
     method: Literal["create_session"] = "create_session"
     activate: bool = True
-    agent_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None = None
+    agent_id: (
+        Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None
+    ) = None
 
 
 class GetConversationSessionRequest(CoreModel):
@@ -666,7 +673,9 @@ class CreateTaskRequest(CoreModel):
     priority: int = Field(default=0, ge=0, le=9)
     parent_task_id: Annotated[str, StringConstraints(max_length=128)] = ""
     origin: TaskOrigin = TaskOrigin.USER
-    agent_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None = None
+    agent_id: (
+        Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None
+    ) = None
 
     @field_validator("origin", mode="before")
     @classmethod
@@ -694,7 +703,9 @@ class CreateChatTurnRequest(CoreModel):
     input: Annotated[str, StringConstraints(max_length=200_000)] = ""
     attachments: tuple[ArtifactInputRef, ...] = Field(default=(), max_length=8)
     tools_enabled: bool = True
-    agent_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None = None
+    agent_id: (
+        Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None
+    ) = None
     device_location: Annotated[str, StringConstraints(max_length=500)] = ""
 
     @model_validator(mode="after")
@@ -815,7 +826,9 @@ class CreateProductTaskRequest(CoreModel):
     # starting the execution (create-and-run must not bypass preflight).
     auto_launch: bool = True
     notification_policy: dict[str, bool] = Field(default_factory=dict)
-    agent_id: Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None = None
+    agent_id: (
+        Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")] | None
+    ) = None
 
 
 class GetProductTaskRequest(CoreModel):
@@ -863,7 +876,9 @@ class UpdateProductTaskRequest(CoreModel):
     method: Literal["product_task_update"] = "product_task_update"
     task_id: TaskId
     title: Annotated[str, StringConstraints(max_length=200)] | None = None
-    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)] | None = None
+    goal: Annotated[str, StringConstraints(min_length=1, max_length=200_000)] | None = (
+        None
+    )
     attachments: tuple[ArtifactInputRef, ...] | None = Field(default=None, max_length=8)
     tools_enabled: bool | None = None
     priority: int | None = Field(default=None, ge=0, le=9)
@@ -1017,9 +1032,7 @@ class DeployMCPPackageRequest(CoreModel):
     @model_validator(mode="after")
     def require_session_for_resource_task(self) -> DeployMCPPackageRequest:
         if self.resource_uri and not self.session_handle:
-            raise ValueError(
-                "MCP Resource Task deployment requires a Session handle"
-            )
+            raise ValueError("MCP Resource Task deployment requires a Session handle")
         return self
 
 
@@ -1168,7 +1181,9 @@ class SetMemoryRequest(CoreModel):
         StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
     ]
     value: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
-    category: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)] = "general"
+    category: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)
+    ] = "general"
     importance: Literal["core", "relevant"] = "relevant"
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     session_handle: str = ""
@@ -1272,8 +1287,12 @@ class PreviewInvocationPolicyRequest(CoreModel):
 
 class UploadArtifactRequest(SessionRequest):
     method: Literal["artifact_upload"] = "artifact_upload"
-    data_url: Annotated[str, StringConstraints(min_length=1, max_length=64 * 1024 * 1024)]
-    media_type: Annotated[str, StringConstraints(min_length=1, max_length=128)] = "image/jpeg"
+    data_url: Annotated[
+        str, StringConstraints(min_length=1, max_length=64 * 1024 * 1024)
+    ]
+    media_type: Annotated[str, StringConstraints(min_length=1, max_length=128)] = (
+        "image/jpeg"
+    )
     name: Annotated[str, StringConstraints(max_length=160)] = ""
     caption: Annotated[str, StringConstraints(max_length=1000)] = ""
 
@@ -1439,7 +1458,9 @@ class ConversationSessionListMessage(CoreModel):
 
 
 class ConversationSessionDeletedMessage(CoreModel):
-    message_type: Literal["conversation_session_deleted"] = "conversation_session_deleted"
+    message_type: Literal["conversation_session_deleted"] = (
+        "conversation_session_deleted"
+    )
     api_version: Literal["v1"] = "v1"
     request_id: RequestId
     deleted: bool = True

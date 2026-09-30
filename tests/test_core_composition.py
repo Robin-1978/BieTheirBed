@@ -564,7 +564,9 @@ async def test_control_lists_only_principal_profile_tools(tmp_path: Path) -> Non
     remote_tools = set(remote_result.tools)
 
     assert "screenshot" in local_tools
+    assert "device_location" in local_tools
     assert "screenshot" not in remote_tools
+    assert "device_location" not in remote_tools
     assert remote_tools == {
         "currency_convert",
         "read_artifact",

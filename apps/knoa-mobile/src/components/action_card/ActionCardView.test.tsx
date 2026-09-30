@@ -29,7 +29,7 @@ describe("ActionCard protocol & rendering contracts", () => {
         type: "key_value",
         items: [
           { key: "影响版本", value: "v2.6.4-rc1", style: "code" },
-          { key: "代码责任人", value: "robotdev@example.com", style: "bold" },
+     { key: "代码责任人", value: "robotdev@example.com", style: "bold" },
           { key: "状态分类", value: "生产阻断", style: "badge" },
         ],
       },
