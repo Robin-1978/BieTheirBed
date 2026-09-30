@@ -265,7 +265,7 @@ export default function ChatScreen() {
  ) {
  continue;
  }
- automaticLocationRequests.current.add(interaction.interaction_id);
+  automaticLocationRequests.current.add(interaction.interaction_id);
  void answerDeviceLocationInteraction(interaction)
  .then((value) => runAuthenticated(
  (client) => client.resolveInteraction(interaction.interaction_id, value),
@@ -284,10 +284,13 @@ export default function ChatScreen() {
  }
  )));
  watchTurn(interaction.owner_id);
- })
- .catch(() => showFeedback(t("interaction.submitFailed"), "error"))
- .finally(() => {
  automaticLocationRequests.current.delete(interaction.interaction_id);
+ })
+ .catch(() => {
+ // Keep the id in the set: the interaction is still pending and the
+ // turn poll will re-emit the same object. Retrying on every poll
+ // would spam GPS + resolve calls, so only attempt once per mount.
+ showFeedback(t("interaction.submitFailed"), "error");
  });
  }
  }

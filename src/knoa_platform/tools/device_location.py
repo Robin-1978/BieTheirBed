@@ -25,7 +25,10 @@ class DeviceLocationTool(ToolBase):
         "Request the user's current phone location only when it is necessary for "
         "the current question. Do not call this when the user supplied a place, "
         "when a remembered address is sufficient, or for non-geographic meanings "
-        "of words such as position, locate, or location."
+        "of words such as position, locate, or location. "
+        "Pass the returned `location` string verbatim as the `location` argument "
+        "of weather/nearby/navigation tools; do not re-infer a city name from "
+        "coordinates."
     )
     effect = ToolEffect.READ_ONLY
     capabilities = frozenset({ToolCapability.HOST_READ})
@@ -58,11 +61,16 @@ class DeviceLocationTool(ToolBase):
             }
 
         purpose = str(kwargs.get("purpose") or "")
-        precision = str(kwargs.get("precision") or "block")
+        precision_raw = str(kwargs.get("precision") or "block")
         address_required = bool(kwargs.get("address_required", True))
-        interaction_id = f"device-location-{context.run_id}-{secrets.token_hex(8)}"[
-            :128
-        ]
+        precision_rank = {"city": 0, "block": 1, "precise": 2}
+        if precision_raw not in precision_rank:
+            return {"available": False, "reason": "device_location_invalid"}
+        precision = precision_raw
+        run_suffix = secrets.token_hex(8)
+        prefix = f"device-location-{context.run_id}-"
+        max_run_chars = max(0, 128 - len(prefix) - len(run_suffix))
+        interaction_id = f"{prefix}{context.run_id[:max_run_chars]}{run_suffix}"
         handle = await interaction.begin(
             context.scope,
             context.run_id,
@@ -104,9 +112,12 @@ class DeviceLocationTool(ToolBase):
                 handle.wait(),
                 timeout=self._response_timeout_seconds,
             )
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             await handle.expire()
             return {"available": False, "reason": "device_location_timeout"}
+        except asyncio.CancelledError:
+            await handle.expire()
+            raise
         if not isinstance(response, dict):
             return {"available": False, "reason": "device_location_invalid"}
         status = str(response.get("status") or "unavailable")
@@ -114,9 +125,8 @@ class DeviceLocationTool(ToolBase):
             return {"available": False, "reason": f"device_location_{status}"}
         location = str(response.get("location") or "").strip()[:500]
         resolved_precision = str(response.get("precision") or "")
-        if not location or resolved_precision not in {"city", "block", "precise"}:
+        if not location or resolved_precision not in precision_rank:
             return {"available": False, "reason": "device_location_invalid"}
-        precision_rank = {"city": 0, "block": 1, "precise": 2}
         if precision_rank[resolved_precision] > precision_rank[precision]:
             return {
                 "available": False,

@@ -166,7 +166,12 @@ function Stop-KnoaService(
  if ($service.Status -ne "StopPending") {
  # ServiceController.Stop() only submits the stop request. Unlike the
  # Stop-Service cmdlet it cannot wait forever before our timeout applies.
+ try {
  $service.Stop()
+ } catch [System.InvalidOperationException] {
+ Write-Warning "Knoa service $ServiceId cannot be stopped ($($_.Exception.Message)); skipping"
+ return
+ }
  }
  if (Wait-KnoaServiceStopped $service $GracefulTimeoutSeconds) { return }
  Write-Warning "Knoa service $ServiceId did not stop within $GracefulTimeoutSeconds seconds; terminating its process tree"

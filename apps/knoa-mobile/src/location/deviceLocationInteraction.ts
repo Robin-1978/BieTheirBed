@@ -15,20 +15,23 @@ export async function answerDeviceLocationInteraction(
  interaction: HumanInteraction,
 ): Promise<DeviceLocationResolution> {
  const preference = await loadLocationPreference();
+ const requestedPrecision = interaction.display.precision;
+ const validPrecision =
+  requestedPrecision === "city" ||
+  requestedPrecision === "block" ||
+  requestedPrecision === "precise"
+   ? (requestedPrecision as LocationPrecision)
+   : preference.precision;
  const fallback: DeviceLocationResolution = {
  status: "unavailable",
  location: "",
- precision: preference.precision,
+ precision: validPrecision,
  };
  if (interaction.kind !== "device_location" || interaction.state !== "pending") {
  return fallback;
  }
- const requestedPrecision = interaction.display.precision;
  const addressRequired = interaction.display.address_required;
- if (
- !["city", "block", "precise"].includes(requestedPrecision ?? "")
- || typeof addressRequired !== "boolean"
- ) {
+ if (typeof addressRequired !== "boolean") {
  return fallback;
  }
  if (!preference.enabled) {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -10,10 +11,56 @@ from knoa_platform.tools.http_limits import read_limited_json
 
 _MAX_WEATHER_RESPONSE_BYTES = 1024 * 1024
 
+_COORD_RE = re.compile(r"\(?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)")
+
+
+def weather_fallback_queries(query: str) -> list[str]:
+    """Broaden an over-specific Chinese address when wttr.in 500s.
+
+    Seen in production: "上海市嘉定区墨玉北路" 500s while
+    "上海市嘉定区" succeeds. Try full query first, then district, then city.
+    """
+    candidates = [query]
+    city = re.search(r"^(.+?市)", query)
+    district = re.search(r"^(.+?区)", query)
+    if district is not None and district.group(1) != query:
+        candidates.append(district.group(1))
+    if city is not None and city.group(1) not in candidates:
+        candidates.append(city.group(1))
+    return candidates
+
+
+def normalize_weather_location(raw: str) -> str:
+    """Prefer coordinates when device_location returned them.
+
+    device_location emits strings like "(31.3,121.2 ±30m)" or
+    "上海市嘉定区... (31.2,121.1 ±25m)". wttr.in resolves "lat,lon"
+    precisely but 500s on over-specific street addresses (seen with
+    "上海市嘉定区墨玉北路"). Extract the coordinate pair when present;
+    otherwise fall back to the raw text.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return text
+    match = _COORD_RE.search(text)
+    if match is None:
+        return text
+    try:
+        lat, lon = float(match.group(1)), float(match.group(2))
+    except ValueError:
+        return text
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return text
+    return f"{lat},{lon}"
+
 
 class WeatherTool(ToolBase):
     name = "weather"
-    description = "Get weather for a location."
+    description = (
+        "Get weather for a location. Accepts a city/place name or "
+        "'lat,lon' coordinates. When device_location just returned coordinates, "
+        "pass that location string through verbatim instead of guessing a city."
+    )
     effect = ToolEffect.READ_ONLY
     capabilities = frozenset({ToolCapability.NETWORK})
     risk = ToolRisk.LOW
@@ -25,20 +72,27 @@ class WeatherTool(ToolBase):
             return {"error": "No location provided"}
         if not isinstance(location, str) or len(location) > 200:
             return {"error": "Location must contain at most 200 characters"}
-        try:
-            url = f"https://wttr.in/{quote(location, safe='')}?format=j1"
-            headers = {"User-Agent": "curl/7.68.0"}
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                async with client.stream("GET", url, headers=headers) as resp:
-                    resp.raise_for_status()
-                    data = await read_limited_json(
-                        resp,
-                        _MAX_WEATHER_RESPONSE_BYTES,
-                    )
-        except httpx.HTTPError as e:
-            return {"error": f"Failed to fetch weather: {e}"}
-        except Exception as e:
-            return {"error": f"Weather lookup failed: {e}"}
+        query = normalize_weather_location(location)
+        last_error = ""
+        for attempt in weather_fallback_queries(query):
+            try:
+                url = f"https://wttr.in/{quote(attempt, safe='')}?format=j1"
+                headers = {"User-Agent": "curl/7.68.0"}
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    async with client.stream("GET", url, headers=headers) as resp:
+                        resp.raise_for_status()
+                        data = await read_limited_json(
+                            resp,
+                            _MAX_WEATHER_RESPONSE_BYTES,
+                        )
+                break
+            except httpx.HTTPError as e:
+                last_error = f"Failed to fetch weather: {e}"
+                continue
+            except Exception as e:
+                return {"error": f"Weather lookup failed: {e}"}
+        else:
+            return {"error": last_error or "Failed to fetch weather"}
 
         try:
             current = data.get("current_condition", [{}])[0]
@@ -81,7 +135,7 @@ class WeatherTool(ToolBase):
                     "location": {
                         "type": "string",
                         "maxLength": 200,
-                        "description": "City name or location (e.g. 'Shanghai', 'Beijing', 'New York')",
+                        "description": "City name, readable address, or 'lat,lon' coordinates from device_location (pass through verbatim, e.g. '(31.3,121.2)'). Prefer coordinates when available; avoid over-specific street addresses that weather lookup cannot resolve.",
                     },
                     "forecast": {
                         "type": "string",

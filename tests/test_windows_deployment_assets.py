@@ -105,6 +105,7 @@ def test_windows_installer_stops_services_before_updating_runtime() -> None:
     assert "$service.Stop()" in script
     assert "GracefulTimeoutSeconds = 30" in script
     assert "taskkill.exe /F /T /PID $servicePid" in script
+    assert "InvalidOperationException" in script
     assert "Stop-Service -InputObject $service -Force" not in script
     assert '$env:KNOA_SOURCE_UPDATE_ACTIVE -ne "1"' in script
     assert 'if ($sourceInstall -and $env:KNOA_SOURCE_UPDATE_ACTIVE -ne "1")' in script
