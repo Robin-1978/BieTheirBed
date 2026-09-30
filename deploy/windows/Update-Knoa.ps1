@@ -8,50 +8,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Get-ListeningPids([int[]]$Ports) {
-    $owners = @{}
-    foreach ($port in $Ports) { $owners[$port] = @() }
-    foreach ($connection in (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)) {
-        if ($owners.ContainsKey([int]$connection.LocalPort)) {
-            $owners[[int]$connection.LocalPort] += [int]$connection.OwningProcess
-        }
-    }
-    return $owners
-}
-
-function Stop-KnoaPortOwners([int[]]$Ports) {
-    $owners = Get-ListeningPids $Ports
-    foreach ($entry in $owners.GetEnumerator()) {
-        foreach ($ownerPid in ($entry.Value | Select-Object -Unique)) {
-            if ($ownerPid -le 0 -or $ownerPid -eq $PID) { continue }
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
-            $commandLine = [string]$process.CommandLine
-            $processName = [string]$process.Name
-            $executablePath = [string]$process.ExecutablePath
-            $isKnoaRelated = ($commandLine -and $commandLine -match "(?i)knoa|Run-Knoa") -or
-                ($processName -match "(?i)^python|^powershell|^conhost") -or
-                ($executablePath -and $executablePath -match "(?i)knoa")
-            if (-not $isKnoaRelated -and $commandLine) {
-                throw "Foreign process $ownerPid owns Knoa port $($entry.Key): $commandLine"
-            }
-            Write-Host "Terminating stray port owner on port $($entry.Key): PID $ownerPid ($processName)"
-            & taskkill.exe /F /T /PID $ownerPid 2>$null | Out-Null
-        }
-    }
-}
-
-function Wait-KnoaPortsReleased([int[]]$Ports, [int]$TimeoutSeconds = 30) {
-    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    do {
-        Stop-KnoaPortOwners $Ports
-        $owners = Get-ListeningPids $Ports
-        if (($owners.Values | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum -eq 0) { return }
-        Start-Sleep -Milliseconds 500
-    } while ([DateTime]::UtcNow -lt $deadline)
-    $detail = ($owners.GetEnumerator() | Where-Object { $_.Value.Count } | ForEach-Object { "$($_.Key):$($_.Value -join ',')" }) -join '; '
-    throw "Knoa ports were not released before restart: $detail"
-}
-
 function Test-LifecycleService {
     $service = Get-Service -Name "KnoaHostLifecycle" -ErrorAction SilentlyContinue
     if (-not $service) { return }
@@ -71,35 +27,26 @@ function Test-Administrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Restart-InstalledServices([string]$SelectedRole) {
-    $serviceIds = @()
-    if ($SelectedRole -in @("all", "hub")) { $serviceIds += "KnoaHostedHub" }
-    if ($SelectedRole -in @("all", "node")) { $serviceIds += "KnoaNode" }
-    $ports = @()
-    if ($SelectedRole -in @("all", "hub")) { $ports += 9529, 9532 }
-    if ($SelectedRole -in @("all", "node")) { $ports += 9527, 9530, 9531, 9541 }
-    foreach ($serviceId in $serviceIds) {
-        $service = Get-Service -Name $serviceId -ErrorAction SilentlyContinue
-        if ($service -and $service.Status -ne "Stopped") {
-            Stop-Service -Name $serviceId -Force -ErrorAction Stop
-            $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(30))
-        }
-    }
-    Wait-KnoaPortsReleased $ports
-    foreach ($serviceId in $serviceIds) {
-        $service = Get-Service -Name $serviceId -ErrorAction SilentlyContinue
-        if ($service) {
-            Start-Service -Name $serviceId
-            $service.WaitForStatus(
-                [System.ServiceProcess.ServiceControllerStatus]::Running,
-                [TimeSpan]::FromSeconds(30)
-            )
-        }
-        $service = Get-Service -Name $serviceId -ErrorAction Stop
-        $service.Refresh()
-        if ($service.Status -ne "Running") {
-            throw "Knoa service did not remain running: $serviceId ($($service.Status))"
-        }
+function Assert-InstalledServicesRunning([string]$SelectedRole) {
+ # Install-Knoa.ps1 owns the only stop/start cycle because it must release
+ # loaded runtime files. The recovery updater validates that result without
+ # immediately stopping the freshly started services a second time.
+ $serviceIds = @()
+ if ($SelectedRole -in @("all", "hub")) { $serviceIds += "KnoaHostedHub" }
+ if ($SelectedRole -in @("all", "node")) { $serviceIds += "KnoaNode" }
+ foreach ($serviceId in $serviceIds) {
+ $service = Get-Service -Name $serviceId -ErrorAction Stop
+ $service.Refresh()
+ if ($service.Status -eq "StartPending") {
+ $service.WaitForStatus(
+ [System.ServiceProcess.ServiceControllerStatus]::Running,
+ [TimeSpan]::FromSeconds(30)
+ )
+ }
+ $service.Refresh()
+ if ($service.Status -ne "Running") {
+ throw "Knoa installer did not leave the service running: $serviceId ($($service.Status))"
+ }
         Start-Sleep -Seconds 2
         $service.Refresh()
         if ($service.Status -ne "Running") {
@@ -329,9 +276,9 @@ function Restore-PreviousRevision {
     Write-Warning "Restoring Knoa source revision $previousCommit"
     & $git -C $resolvedSource reset --hard $previousCommit
     if ($LASTEXITCODE -ne 0) { throw "Could not restore Knoa source revision $previousCommit" }
-    & $installer @installArguments
-    if ($LASTEXITCODE -ne 0) { throw "Could not reinstall the previous Knoa revision" }
-    Restart-InstalledServices $Role
+ & $installer @installArguments
+ if ($LASTEXITCODE -ne 0) { throw "Could not reinstall the previous Knoa revision" }
+ Assert-InstalledServicesRunning $Role
     if ($Role -in @("all", "node")) {
         $nodePort = if ($state -and $state.node_gateway_port) { [int]$state.node_gateway_port } else { 9531 }
         Test-NodeGatewayHealth $nodePort
@@ -345,9 +292,9 @@ try {
     if (Test-Path -LiteralPath $InstallationStatePath) {
         $updatedState = Get-Content -LiteralPath $InstallationStatePath -Raw -Encoding UTF8 |
             ConvertFrom-Json
-    }
-    Assert-InstalledRuntimeMatchesSource $resolvedSource $updatedState
-    Restart-InstalledServices $Role
+ }
+ Assert-InstalledRuntimeMatchesSource $resolvedSource $updatedState
+ Assert-InstalledServicesRunning $Role
     if ($Role -in @("all", "node")) {
         $nodePort = if ($state -and $state.node_gateway_port) { [int]$state.node_gateway_port } else { 9531 }
         Test-NodeGatewayHealth $nodePort

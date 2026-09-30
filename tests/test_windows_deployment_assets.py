@@ -102,6 +102,12 @@ def test_windows_installer_stops_services_before_updating_runtime() -> None:
     assert stop_node in script
     assert script.index(stop_hub) < script.index(install_package)
     assert script.index(stop_node) < script.index(install_package)
+    assert "$service.Stop()" in script
+    assert "GracefulTimeoutSeconds = 30" in script
+    assert "taskkill.exe /F /T /PID $servicePid" in script
+    assert "Stop-Service -InputObject $service -Force" not in script
+    assert '$env:KNOA_SOURCE_UPDATE_ACTIVE -ne "1"' in script
+    assert 'if ($sourceInstall -and $env:KNOA_SOURCE_UPDATE_ACTIVE -ne "1")' in script
 
 
 def test_windows_source_update_reconciles_new_runtime_dependencies() -> None:
@@ -166,7 +172,9 @@ def test_windows_one_click_updater_pulls_reinstalls_and_recovers_services() -> N
     assert "merge --ff-only" in updater
     assert "release\\versions.json" in updater
     assert 'Join-Path $resolvedSource "deploy\\windows\\Install-Knoa.ps1"' in updater
-    assert "Restart-InstalledServices $Role" in updater
+    assert "Assert-InstalledServicesRunning $Role" in updater
+    assert "Restart-InstalledServices" not in updater
+    assert "Stop-Service" not in updater
     assert "SkipPairingQr = $true" in updater
     assert "local tracked changes" in updater
     assert "Update-Knoa.ps1" in launcher

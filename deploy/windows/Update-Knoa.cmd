@@ -4,7 +4,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Update-Knoa.ps1"
 set "RESULT=%ERRORLEVEL%"
 echo.
 if "%RESULT%"=="0" (
-  echo Knoa update and service restart completed.
+ echo Knoa update and service verification completed.
 ) else (
   echo Knoa update failed with exit code %RESULT%.
   echo Please check the detailed update logs in: %ProgramData%\Knoa\Logs\Updates\

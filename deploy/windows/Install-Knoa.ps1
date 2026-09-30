@@ -143,15 +143,42 @@ function Wait-WrapperExecutableReleased([string]$WrapperPath, [int]$TimeoutSecon
     throw "Knoa wrapper process is still running: $WrapperPath"
 }
 
-function Stop-KnoaService([string]$ServiceId) {
-    $service = Get-Service -Name $ServiceId -ErrorAction SilentlyContinue
-    if ($service -and $service.Status -ne "Stopped") {
-        Stop-Service -InputObject $service -Force
-        $service.WaitForStatus(
-            [System.ServiceProcess.ServiceControllerStatus]::Stopped,
-            [TimeSpan]::FromSeconds(30)
-        )
-    }
+function Wait-KnoaServiceStopped($Service, [int]$TimeoutSeconds) {
+ $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+ do {
+ $Service.Refresh()
+ if ($Service.Status -eq "Stopped") { return $true }
+ Start-Sleep -Milliseconds 250
+ } while ([DateTime]::UtcNow -lt $deadline)
+ $Service.Refresh()
+ return $Service.Status -eq "Stopped"
+}
+
+function Stop-KnoaService(
+ [string]$ServiceId,
+ [int]$GracefulTimeoutSeconds = 30,
+ [int]$ForcedTimeoutSeconds = 10
+) {
+ $service = Get-Service -Name $ServiceId -ErrorAction SilentlyContinue
+ if (-not $service -or $service.Status -eq "Stopped") { return }
+
+ Write-Host "Stopping Knoa service: $ServiceId"
+ if ($service.Status -ne "StopPending") {
+ # ServiceController.Stop() only submits the stop request. Unlike the
+ # Stop-Service cmdlet it cannot wait forever before our timeout applies.
+ $service.Stop()
+ }
+ if (Wait-KnoaServiceStopped $service $GracefulTimeoutSeconds) { return }
+ Write-Warning "Knoa service $ServiceId did not stop within $GracefulTimeoutSeconds seconds; terminating its process tree"
+
+ $serviceRecord = Get-CimInstance Win32_Service -Filter "Name='$ServiceId'" -ErrorAction SilentlyContinue
+ $servicePid = if ($serviceRecord) { [int]$serviceRecord.ProcessId } else { 0 }
+ if ($servicePid -gt 0 -and $servicePid -ne $PID) {
+ & taskkill.exe /F /T /PID $servicePid 2>$null | Out-Null
+ }
+ if (-not (Wait-KnoaServiceStopped $service $ForcedTimeoutSeconds)) {
+ throw "Knoa service $ServiceId did not stop after forced termination"
+ }
 }
 
 function Get-ListeningPids([int[]]$Ports) {
@@ -348,7 +375,9 @@ $nodeWrapper = Join-Path $serviceRoot "KnoaNode\KnoaNode.exe"
 if ($installHub) { Stop-KnoaService "KnoaHostedHub" }
 if ($installNode) { Stop-KnoaService "KnoaNode" }
 $lifecycleService = Get-Service -Name "KnoaHostLifecycle" -ErrorAction SilentlyContinue
-if ($lifecycleService) { Stop-KnoaService "KnoaHostLifecycle" }
+if ($lifecycleService -and $env:KNOA_SOURCE_UPDATE_ACTIVE -ne "1") {
+ Stop-KnoaService "KnoaHostLifecycle"
+}
 if ($installNode) {
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | `
         Where-Object {
@@ -391,7 +420,9 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | `
 $portsToRelease = @()
 if ($installHub) { $portsToRelease += $HubPort, 9532 }
 if ($installNode) { $portsToRelease += $NodeCorePort, $NodeGatewayPort, $NodeMcpPort, 9541 }
-if ($sourceInstall) { $portsToRelease += 9533 }
+if ($sourceInstall -and $env:KNOA_SOURCE_UPDATE_ACTIVE -ne "1") {
+ $portsToRelease += 9533
+}
 if ($portsToRelease.Count -gt 0) {
     Wait-KnoaPortsReleased ($portsToRelease | Select-Object -Unique)
 }

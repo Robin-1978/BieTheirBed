@@ -96,7 +96,9 @@ C:\ProgramData\Knoa\Scripts\Update-Knoa.cmd
 The recovery updater requests administrator access, detects the WinSW services actually
 installed on that computer, refuses to overwrite tracked local changes, runs
 `git pull --ff-only`, reconciles every role already installed on the shared
-runtime, restarts the WinSW services and verifies that they are running. A
+runtime, and verifies the services started by the installer without performing
+a second stop/start cycle. Service shutdown is bounded; after the graceful
+timeout the installer terminates only that Knoa service's process tree. A
 Node-only computer therefore updates only `KnoaNode`; it never installs Hub
 because of stale state.
 If installation fails after a service was stopped, it attempts to restore the existing service.
