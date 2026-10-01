@@ -769,7 +769,7 @@ const double speed = parse_speed(tag(way.tags(), "maxspeed"));
  std::string subcategory;
  for (const char* key : kAreaCategoryKeys) {
  const std::string value = tag(area.tags(), key);
- if (!value.empty()) { category = key; subcategory = value; break; }
+ if (!value.empty()) { category = key; subcategory = (value == "yes" || value == "no" || value == "true" || value == "false") ? key : value; break; }
  }
  if (!boundary && (area_names.first.empty() || category.empty())) return;
  double lat_sum = 0;

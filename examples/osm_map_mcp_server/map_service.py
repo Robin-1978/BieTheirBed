@@ -124,6 +124,55 @@ def _fts_expression(value: str) -> str:
     return " AND ".join(pieces)
 
 
+def _normalize_category(category: str, subcategory: str) -> tuple[str, str]:
+    """Normalize raw OSM category values for stable query results.
+
+    The production database already contains rows like
+    ``category=building subcategory=yes``. Rebuilding 21 GB is expensive,
+    so normalize at query time and fix the builders for future builds.
+    """
+    category = (category or "").strip()
+    subcategory = (subcategory or "").strip()
+    if subcategory.lower() in {"yes", "no", "true", "false", "1", "0"}:
+        subcategory = category or subcategory
+    return category, subcategory
+
+
+def _strip_admin_suffix(value: str) -> str:
+    """Strip trailing Chinese admin suffixes so 上海 matches 上海市."""
+    stripped = _normalize_text(value)
+    for _ in range(3):
+        for suffix in ("市", "省", "区", "县", "旗", "州", "盟", "镇", "乡", "街道", "村"):
+            if stripped.endswith(suffix) and len(stripped) > 2:
+                stripped = stripped[: -len(suffix)]
+                break
+        else:
+            break
+    return stripped
+
+
+def _region_name_score(row_name: str, query: str) -> int:
+    """Score region name match: 0 exact (suffix-insensitive), 1 contains, 2 other."""
+    row_norm = _normalize_text(row_name)
+    query_norm = _normalize_text(query)
+    if not row_norm or not query_norm:
+        return 2
+    if row_norm == query_norm or _strip_admin_suffix(row_norm) == _strip_admin_suffix(query_norm):
+        return 0
+    if query_norm in row_norm or row_norm in query_norm:
+        return 1
+    stripped_row = _strip_admin_suffix(row_norm)
+    stripped_query = _strip_admin_suffix(query_norm)
+    if stripped_query and (stripped_query in stripped_row or stripped_row in stripped_query):
+        return 1
+    return 2
+
+
+def _bounds_area(bounds: tuple[float, float, float, float]) -> float:
+    min_lat, min_lon, max_lat, max_lon = bounds
+    return max(0.0, max_lat - min_lat) * max(0.0, max_lon - min_lon)
+
+
 def _validate_coordinate(latitude: float, longitude: float) -> tuple[float, float]:
     if not (math.isfinite(latitude) and math.isfinite(longitude)):
         raise MapError("invalid_coordinate", "coordinates must be finite")
@@ -383,12 +432,13 @@ def _feature_result(
     latitude, longitude = convert_coordinate(
         float(row["lat"]), float(row["lon"]), "wgs84", coordinate_system
     )
+    category, subcategory = _normalize_category(row["category"], row["subcategory"])
     result: dict[str, Any] = {
         "place_id": _place_id(row),
         "name": row["name"],
         "feature_type": row["feature_type"],
-        "category": row["category"],
-        "subcategory": row["subcategory"],
+        "category": category,
+        "subcategory": subcategory,
         "location": {
             "latitude": round(latitude, 7),
             "longitude": round(longitude, 7),
@@ -527,27 +577,45 @@ class MapService:
         feature_types: Sequence[str] = (),
         bounds: tuple[float, float, float, float] | None = None,
     ) -> list[sqlite3.Row]:
-        sql = (
+        tokens = search_tokens(query)
+        strict = _fts_expression(query)
+        relaxed = None
+        if len(tokens) > 2:
+            # No-space queries like 上海人民广场 produce a spurious boundary
+            # bigram (海人) that never appears in documents. Fall back to OR
+            # so 上海 + 人民广场 still match.
+            pieces = []
+            for token in tokens[:32]:
+                escaped = token.replace('"', '""')
+                suffix = "*" if len(token) == 1 or token.isascii() else ""
+                pieces.append(f'"{escaped}"{suffix}')
+            relaxed = " OR ".join(pieces)
+        sql_base = (
             "SELECT f.*,bm25(feature_fts) AS text_rank FROM feature_fts "
             "JOIN features f ON f.id=feature_fts.rowid "
         )
-        parameters: list[Any] = []
+        parameters_base: list[Any] = []
         if bounds is not None:
-            sql += "JOIN features_rtree r ON r.id=f.id "
-        sql += "WHERE feature_fts MATCH ? "
-        parameters.append(_fts_expression(query))
+            sql_base += "JOIN features_rtree r ON r.id=f.id "
+        sql_base += "WHERE feature_fts MATCH ? "
         if feature_types:
-            sql += "AND f.feature_type IN (%s) " % ",".join("?" for _ in feature_types)
-            parameters.extend(feature_types)
+            sql_base += "AND f.feature_type IN (%s) " % ",".join("?" for _ in feature_types)
+            parameters_base.extend(feature_types)
         if bounds is not None:
             min_lat, min_lon, max_lat, max_lon = bounds
-            sql += (
+            sql_base += (
                 "AND r.max_lat>=? AND r.min_lat<=? AND r.max_lon>=? AND r.min_lon<=? "
             )
-            parameters.extend((min_lat, max_lat, min_lon, max_lon))
-        sql += "ORDER BY text_rank LIMIT ?"
-        parameters.append(min(500, max(1, limit)))
-        return database.execute(sql, parameters).fetchall()
+            parameters_base.extend((min_lat, max_lat, min_lon, max_lon))
+        sql_base += "ORDER BY text_rank LIMIT ?"
+        rows = database.execute(
+            sql_base, [strict, *parameters_base, min(500, max(1, limit))]
+        ).fetchall()
+        if not rows and relaxed is not None:
+            rows = database.execute(
+                sql_base, [relaxed, *parameters_base, min(500, max(1, limit))]
+            ).fetchall()
+        return rows
 
     def _region_bounds(
         self,
@@ -555,21 +623,39 @@ class MapService:
         region: str,
     ) -> tuple[float, float, float, float] | None:
         rows = self._search_rows(
-            database, region, limit=30, feature_types=("boundary", "place")
+            database, region, limit=100, feature_types=("boundary", "place")
         )
         if not rows:
             return None
-        normalized = _normalize_text(region)
-        rows.sort(
-            key=lambda row: (
-                0 if _normalize_text(row["name"]) == normalized else 1,
-                0 if row["feature_type"] == "boundary" else 1,
-                int(row["admin_level"] or 99),
-                -int(row["population"] or 0),
+        scored: list[tuple[Any, ...]] = []
+        for row in rows:
+            bounds = (row["min_lat"], row["min_lon"], row["max_lat"], row["max_lon"])
+            area = _bounds_area(bounds)
+            scored.append(
+                (
+                    _region_name_score(row["name"], region),
+                    0 if row["feature_type"] == "boundary" else 1,
+                    int(row["admin_level"] or 99),
+                    -area,
+                    -int(row["population"] or 0),
+                    bounds,
+                )
             )
-        )
-        row = rows[0]
-        return row["min_lat"], row["min_lon"], row["max_lat"], row["max_lon"]
+        scored.sort(key=lambda item: item[:-1])
+        best_bounds = scored[0][5]
+        # Safety net: never return a degenerate point from a tiny hamlet when a
+        # large boundary with a decent name match exists.
+        best_area = _bounds_area(best_bounds)
+        if best_area < 1e-6:
+            for item in scored:
+                if item[0] <= 1 and _bounds_area(item[5]) > 1e-4:
+                    return item[5]
+            # Genuine point region (small town): expand so the RTree filter
+            # does not collapse to zero results.
+            min_lat, min_lon, max_lat, max_lon = best_bounds
+            pad = 0.05
+            return (min_lat - pad, min_lon - pad, max_lat + pad, max_lon + pad)
+        return best_bounds
 
     def search_places(
         self,
@@ -601,10 +687,45 @@ class MapService:
                 if region.strip()
                 else None
             )
-            rows = self._search_rows(database, query, limit=300, bounds=bounds)
+            if bounds is None and bias is not None:
+                # Coordinate bias must affect retrieval, not just reranking:
+                # nationwide names like 人民广场 have thousands of rows and
+                # BM25 top-300 never contains the nearby one. Prefilter to a
+                # ~60 km box first; fall back to global on empty.
+                d_lat, d_lon = 0.3, 0.3 / max(
+                    0.2, math.cos(math.radians(bias[0]))
+                )
+                near_bounds = (
+                    bias[0] - d_lat,
+                    bias[1] - d_lon,
+                    bias[0] + d_lat,
+                    bias[1] + d_lon,
+                )
+                rows = self._search_rows(
+                    database, query, limit=300, bounds=near_bounds
+                )
+                if not rows:
+                    rows = self._search_rows(database, query, limit=300, bounds=bounds)
+            else:
+                rows = self._search_rows(database, query, limit=300, bounds=bounds)
         finally:
             database.close()
         normalized = _normalize_text(query)
+
+        _PLACE_SUBRANK = {
+            "city": 0,
+            "town": 1,
+            "borough": 2,
+            "suburb": 3,
+            "quarter": 4,
+            "neighbourhood": 5,
+            "neighborhood": 5,
+            "subdistrict": 6,
+            "village": 7,
+            "hamlet": 8,
+            "square": 9,
+            "station": 1,
+        }
 
         def rank(row: sqlite3.Row) -> tuple[Any, ...]:
             name = _normalize_text(row["name"])
@@ -628,9 +749,17 @@ class MapService:
                 "road": 4,
                 "area": 5,
             }.get(row["feature_type"], 9)
+            place_subrank = (
+                _PLACE_SUBRANK.get(row["subcategory"], 4)
+                if row["category"] == "place"
+                else 0
+            )
             tags = row["tags_json"]
             referenced = bool(
                 row["website"] or '"wikidata"' in tags or '"wikipedia"' in tags
+            )
+            category, subcategory = _normalize_category(
+                row["category"], row["subcategory"]
             )
             category_rank = {
                 "place": 0,
@@ -641,22 +770,33 @@ class MapService:
                 "shop": 2,
                 "leisure": 2,
                 "railway": 2,
-                "public_transport": (2 if row["subcategory"] == "station" else 4),
-            }.get(row["category"], 3)
+                "public_transport": (2 if subcategory == "station" else 4),
+            }.get(category, 3)
             return (
                 not exact,
                 not prefix,
+                -int(row["population"] or 0),
+                place_subrank,
                 not referenced,
                 category_rank,
                 type_rank,
                 distance,
                 float(row["text_rank"]),
-                -int(row["population"] or 0),
             )
 
         rows.sort(key=rank)
+        # Dedupe: one OSM object can be stored as poi+address or poi+area.
+        # Keep the best-ranked feature_type per (osm_type, osm_id).
+        seen: set[tuple[str, int]] = set()
+        deduped: list[sqlite3.Row] = []
+        for row in rows:
+            key = (row["osm_type"], int(row["osm_id"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(row)
         items = []
-        for row in rows[:limit]:
+        for row in deduped[:limit]:
             distance = (
                 _haversine_m(bias[0], bias[1], row["lat"], row["lon"])
                 if bias is not None
@@ -709,6 +849,17 @@ class MapService:
                 "AND f.feature_type IN ('poi','place','address') "
             )
         values = [value.strip() for value in categories if value.strip()][:20]
+        normalized_values: list[str] = []
+        for value in values:
+            if ":" in value:
+                category, subcategory = value.split(":", 1)
+                category, subcategory = _normalize_category(
+                    category.strip(), subcategory.strip()
+                )
+                normalized_values.append(f"{category}:{subcategory}")
+            else:
+                normalized_values.append(value.strip())
+        values = normalized_values
         if values:
             clauses = []
             for value in values:
@@ -732,12 +883,20 @@ class MapService:
             if distance <= radius_m:
                 candidates.append((distance, row))
         candidates.sort(key=lambda item: (item[0], item[1]["name"]))
-        results = [
-            _feature_result(
-                row, distance_m=distance, coordinate_system=coordinate_system
+        seen_keys: set[tuple[str, int]] = set()
+        results = []
+        for distance, row in candidates:
+            key = (row["osm_type"], int(row["osm_id"]))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            results.append(
+                _feature_result(
+                    row, distance_m=distance, coordinate_system=coordinate_system
+                )
             )
-            for distance, row in candidates[:limit]
-        ]
+            if len(results) >= limit:
+                break
         return {
             "center": {
                 "latitude": latitude,
@@ -805,6 +964,15 @@ class MapService:
             if distance <= 2_000:
                 nearby.append((distance, row))
         nearby.sort(key=lambda item: (item[0], item[1]["feature_type"] != "address"))
+        deduped_nearby: list[tuple[float, sqlite3.Row]] = []
+        seen_nearby: set[tuple[str, int]] = set()
+        for distance, row in nearby:
+            key = (row["osm_type"], int(row["osm_id"]))
+            if key in seen_nearby:
+                continue
+            seen_nearby.add(key)
+            deduped_nearby.append((distance, row))
+        nearby = deduped_nearby
         administrative = [
             {
                 "name": row["name"],
@@ -857,12 +1025,16 @@ class MapService:
             raise MapError("place_not_found", "place_id was not found in this dataset")
         return _feature_result(row, coordinate_system=coordinate_system, details=True)
 
-    def _resolve_location(
+    def _resolve_candidates(
         self,
         value: str,
         *,
         coordinate_system: str,
-    ) -> tuple[float, float, dict[str, Any]]:
+        limit: int = 6,
+        bias_latitude: float | None = None,
+        bias_longitude: float | None = None,
+    ) -> list[tuple[float, float, dict[str, Any]]]:
+        """Resolve text to ranked coordinate candidates (never just top-1)."""
         cleaned = value.strip()
         coordinate = _COORDINATE_RE.search(cleaned)
         if coordinate is not None:
@@ -872,19 +1044,40 @@ class MapService:
                 coordinate_system,
                 "wgs84",
             )
-            return latitude, longitude, {"input": value, "matched_by": "coordinate"}
-        result = self.search_places(cleaned, limit=1)
+            return [(latitude, longitude, {"input": value, "matched_by": "coordinate"})]
+        kwargs: dict[str, Any] = {}
+        if bias_latitude is not None and bias_longitude is not None:
+            kwargs = {
+                "latitude": bias_latitude,
+                "longitude": bias_longitude,
+                "coordinate_system": coordinate_system,
+            }
+        result = self.search_places(cleaned, limit=limit, **kwargs)
         if not result["results"]:
             raise MapError(
                 "location_not_found", f"location could not be resolved: {cleaned}"
             )
-        place = result["results"][0]
-        location = place["location"]
-        return (
-            float(location["latitude"]),
-            float(location["longitude"]),
-            {"input": value, "matched_by": "place", "place": place},
-        )
+        candidates = []
+        for place in result["results"]:
+            location = place["location"]
+            candidates.append(
+                (
+                    float(location["latitude"]),
+                    float(location["longitude"]),
+                    {"input": value, "matched_by": "place", "place": place},
+                )
+            )
+        return candidates
+
+    def _resolve_location(
+        self,
+        value: str,
+        *,
+        coordinate_system: str,
+    ) -> tuple[float, float, dict[str, Any]]:
+        return self._resolve_candidates(
+            value, coordinate_system=coordinate_system, limit=1
+        )[0]
 
     def _nearest_route_node(
         self,
@@ -1027,10 +1220,9 @@ class MapService:
     def _route_steps(edges: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         steps: list[dict[str, Any]] = []
         for edge in edges:
-            name, highway = (
-                str(edge.get("name") or "未命名道路"),
-                str(edge.get("highway") or "road"),
-            )
+            raw_name = str(edge.get("name") or "").strip()
+            highway = str(edge.get("highway") or "road")
+            name = raw_name or "未命名道路"
             if steps and steps[-1]["name"] == name and steps[-1]["highway"] == highway:
                 steps[-1]["distance_m"] += float(edge["length_m"])
             else:
@@ -1042,9 +1234,33 @@ class MapService:
                         "distance_m": float(edge["length_m"]),
                     }
                 )
+        # Collapse short unnamed segments into the next named road so downtown
+        # routes do not read as "沿未命名道路行进 x N".
+        collapsed: list[dict[str, Any]] = []
+        pending_unnamed_m = 0.0
         for step in steps:
+            if step["name"] == "未命名道路":
+                pending_unnamed_m += step["distance_m"]
+                continue
+            if pending_unnamed_m:
+                step = {**step, "distance_m": step["distance_m"] + pending_unnamed_m}
+                step["instruction"] = f"沿{step['name']}行进"
+                pending_unnamed_m = 0.0
+            collapsed.append(step)
+        if pending_unnamed_m and collapsed:
+            collapsed[-1]["distance_m"] += pending_unnamed_m
+        elif pending_unnamed_m:
+            collapsed.append(
+                {
+                    "instruction": "沿未命名道路行进",
+                    "name": "未命名道路",
+                    "highway": "road",
+                    "distance_m": pending_unnamed_m,
+                }
+            )
+        for step in collapsed:
             step["distance_m"] = round(step["distance_m"])
-        return steps[:200]
+        return collapsed[:200]
 
     def route(
         self,
@@ -1059,24 +1275,117 @@ class MapService:
             raise MapError(
                 "invalid_route_mode", "route mode must be walking, cycling or driving"
             )
-        origin_lat, origin_lon, origin_match = self._resolve_location(
-            origin, coordinate_system=coordinate_system
+        origin_cands = self._resolve_candidates(
+            origin, coordinate_system=coordinate_system, limit=6
         )
-        dest_lat, dest_lon, dest_match = self._resolve_location(
-            destination, coordinate_system=coordinate_system
+        dest_cands = self._resolve_candidates(
+            destination, coordinate_system=coordinate_system, limit=6
         )
+        # Mutual geographic bias: ambiguous names like 人民广场 exist in many
+        # cities. Bias dest resolution toward the origin top-1 and vice versa
+        # so same-city pairs surface even when unbiased top-6 misses them.
+        try:
+            o0_lat, o0_lon, _ = origin_cands[0]
+            biased_dest = self._resolve_candidates(
+                destination,
+                coordinate_system=coordinate_system,
+                limit=6,
+                bias_latitude=o0_lat,
+                bias_longitude=o0_lon,
+            )
+        except (MapError, IndexError):
+            biased_dest = []
+        try:
+            d0_lat, d0_lon, _ = dest_cands[0]
+            biased_origin = self._resolve_candidates(
+                origin,
+                coordinate_system=coordinate_system,
+                limit=6,
+                bias_latitude=d0_lat,
+                bias_longitude=d0_lon,
+            )
+        except (MapError, IndexError):
+            biased_origin = []
+        seen_places: set[str] = set()
+        merged_origin: list[tuple[float, float, dict[str, Any]]] = []
+        for cand in (*biased_origin, *origin_cands):
+            pid = str(cand[2].get("place", {}).get("place_id", cand[:2]))
+            if pid in seen_places:
+                continue
+            seen_places.add(pid)
+            merged_origin.append(cand)
+        seen_places.clear()
+        merged_dest: list[tuple[float, float, dict[str, Any]]] = []
+        for cand in (*biased_dest, *dest_cands):
+            pid = str(cand[2].get("place", {}).get("place_id", cand[:2]))
+            if pid in seen_places:
+                continue
+            seen_places.add(pid)
+            merged_dest.append(cand)
+        # Rank pairs by candidate rank first, distance second: a far同名
+        # (e.g. 故宫北院区 25 km away) must not beat the intended top-1 pair.
+        # Only nearby fallbacks (same complex gates) are worth trying.
+        indexed_pairs = []
+        for i, (o_lat, o_lon, o_match) in enumerate(merged_origin[:6]):
+            for j, (d_lat, d_lon, d_match) in enumerate(merged_dest[:6]):
+                if i + j > 4:
+                    continue
+                indexed_pairs.append(
+                    (i + j, _haversine_m(o_lat, o_lon, d_lat, d_lon),
+                     o_lat, o_lon, o_match, d_lat, d_lon, d_match)
+                )
+        indexed_pairs.sort(key=lambda p: (p[0], p[1]))
+        pairs = [p[2:] for p in indexed_pairs]
+        best_straight = indexed_pairs[0][1] if indexed_pairs else 0.0
         database = self._connect()
+        last_error: MapError | None = None
         try:
             mode_bit = MODE_BITS[mode]
-            start, start_lat, start_lon, start_distance = self._nearest_route_node(
-                database, origin_lat, origin_lon, mode_bit
-            )
-            goal, goal_lat, goal_lon, goal_distance = self._nearest_route_node(
-                database, dest_lat, dest_lon, mode_bit
-            )
-            node_ids, edges, distance, duration, expansions = self._route_search(
-                database, start, goal, goal_lat, goal_lon, mode
-            )
+            for origin_lat, origin_lon, origin_match, dest_lat, dest_lon, dest_match in pairs:
+                straight = _haversine_m(origin_lat, origin_lon, dest_lat, dest_lon)
+                # Don't silently route from a far同名 fallback (e.g. 故宫北院区
+                # 25 km away) when the intended pair is next door but car-free.
+                if straight > best_straight + 5_000 and straight > 10_000:
+                    continue
+                # Bounded A* cannot serve inter-province driving; fail fast
+                # with a clear code instead of burning the expansion budget.
+                if straight > 300_000:
+                    last_error = MapError(
+                        "route_too_far",
+                        "locations are too far apart for offline bounded routing",
+                    )
+                    continue
+                try:
+                    start, start_lat, start_lon, start_distance = self._nearest_route_node(
+                        database, origin_lat, origin_lon, mode_bit
+                    )
+                    goal, goal_lat, goal_lon, goal_distance = self._nearest_route_node(
+                        database, dest_lat, dest_lon, mode_bit
+                    )
+                except MapError as exc:
+                    last_error = exc
+                    continue
+                # Skip pairs whose road snap is absurd (e.g. wrong-city match).
+                if start_distance > 5_000 or goal_distance > 5_000:
+                    last_error = MapError(
+                        "route_network_not_found",
+                        "no routable road was found near the resolved place",
+                    )
+                    continue
+                try:
+                    node_ids, edges, distance, duration, expansions = self._route_search(
+                        database, start, goal, goal_lat, goal_lon, mode
+                    )
+                except MapError as exc:
+                    last_error = exc
+                    # route_not_found on this pair -> try next candidate pair
+                    # (e.g. 故宫 area centroid is car-free, museum gate is not).
+                    continue
+                break
+            else:
+                raise last_error or MapError(
+                    "route_not_found", "the locations are not connected for this mode"
+                )
             coordinates: dict[int, tuple[float, float]] = {}
             for offset in range(0, len(node_ids), 5_000):
                 batch = node_ids[offset : offset + 5_000]

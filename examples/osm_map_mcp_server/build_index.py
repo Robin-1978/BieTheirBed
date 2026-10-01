@@ -215,6 +215,12 @@ def _primary_category(tags: Any) -> tuple[str, str]:
     return "", ""
 
 
+def _normalize_area_category(category: str, subcategory: str) -> tuple[str, str]:
+    if subcategory.lower() in {"yes", "no", "true", "false", "1", "0"}:
+        subcategory = category
+    return category, subcategory
+
+
 def _names(tags: Any) -> tuple[str, str]:
     values = []
     for key in (
@@ -651,7 +657,9 @@ class MapImportHandler(osmium.SimpleHandler):
         area_category = area_subcategory = ""
         for key in AREA_CATEGORY_KEYS:
             if _tag(tags, key):
-                area_category, area_subcategory = key, _tag(tags, key)
+                area_category, area_subcategory = _normalize_area_category(
+                    key, _tag(tags, key)
+                )
                 break
         if not boundary and (not name or not area_category):
             return
