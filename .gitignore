@@ -26,6 +26,7 @@ node_modules/
 /target/
 /attachments/
 /cache/
+examples/osm_map_mcp_server/bin/
 screen_look.png
 screenshot.png
 window_screenshot.png

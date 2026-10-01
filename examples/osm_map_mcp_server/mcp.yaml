@@ -1,0 +1,52 @@
+enabled: true
+transport: stdio
+command: '@knoa-python'
+args:
+- server.py
+working_directory: .
+optional_env:
+- OSM_MAP_DB
+- OSM_MAP_ROUTE_TIMEOUT_SECONDS
+- OSM_MAP_ROUTE_MAX_EXPANSIONS
+timeout_seconds: 60
+tools:
+  map.search_places:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low
+  map.reverse_geocode:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low
+  map.nearby_search:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low
+  map.get_place:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low
+  map.route:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low
+  map.distance:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low
+  map.convert_coordinates:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low
+  map.dataset_info:
+    effect: read_only
+    capabilities:
+    - mcp
+    risk: low

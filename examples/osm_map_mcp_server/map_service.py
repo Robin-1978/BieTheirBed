@@ -1,0 +1,1176 @@
+"""Read-only query and routing service for the offline OSM map database."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import heapq
+import json
+import math
+import os
+from pathlib import Path
+import re
+import sqlite3
+import struct
+import time
+from typing import Any, Iterable, Sequence
+import unicodedata
+
+try:
+    from .taxonomy import category_inventory
+except ImportError:  # pragma: no cover - direct script execution
+    from taxonomy import category_inventory
+
+
+SCHEMA_VERSION = "1"
+MODE_BITS = {"walking": 1, "cycling": 2, "driving": 4}
+SUPPORTED_COORDINATE_SYSTEMS = frozenset({"wgs84", "gcj02", "bd09"})
+_EARTH_RADIUS_M = 6_371_000.0
+_COORDINATE_RE = re.compile(
+    r"(?<![\d.])(-?\d{1,2}(?:\.\d+)?)\s*[,，]\s*"
+    r"(-?\d{1,3}(?:\.\d+)?)(?![\d.])"
+)
+_SEARCH_PART_RE = re.compile(r"[\u3400-\u9fff]+|[a-z0-9]+", re.IGNORECASE)
+
+
+class MapError(RuntimeError):
+    """Stable, user-visible map failure."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+    def as_dict(self) -> dict[str, str]:
+        return {"code": self.code, "message": str(self)}
+
+
+@dataclass(frozen=True)
+class MapSettings:
+    database_path: Path
+    route_timeout_seconds: float = 20.0
+    route_max_expansions: int = 250_000
+
+    @classmethod
+    def from_env(cls) -> "MapSettings":
+        configured = os.environ.get("OSM_MAP_DB", "").strip()
+        path = (
+            Path(configured).expanduser()
+            if configured
+            else Path("~/.local/share/knoa/osm-map/china.sqlite").expanduser()
+        )
+        return cls(
+            database_path=path,
+            route_timeout_seconds=_bounded_float(
+                os.environ.get("OSM_MAP_ROUTE_TIMEOUT_SECONDS", "20"), 1.0, 60.0
+            ),
+            route_max_expansions=_bounded_int(
+                os.environ.get("OSM_MAP_ROUTE_MAX_EXPANSIONS", "250000"),
+                1_000,
+                1_000_000,
+            ),
+        )
+
+
+def _bounded_float(value: object, lower: float, upper: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid numeric setting") from exc
+    return max(lower, min(parsed, upper))
+
+
+def _bounded_int(value: object, lower: int, upper: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid integer setting") from exc
+    return max(lower, min(parsed, upper))
+
+
+def _normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).casefold().strip()
+    return re.sub(r"\s+", " ", normalized)
+
+
+def search_tokens(value: str) -> list[str]:
+    """Create deterministic Chinese bigrams and Latin tokens for FTS."""
+    tokens: list[str] = []
+    for part in _SEARCH_PART_RE.findall(_normalize_text(value)):
+        if re.fullmatch(r"[\u3400-\u9fff]+", part):
+            if len(part) == 1:
+                tokens.append(part)
+            else:
+                tokens.extend(part[index : index + 2] for index in range(len(part) - 1))
+        else:
+            tokens.append(part)
+    return list(dict.fromkeys(tokens))
+
+
+def search_document(*values: str) -> str:
+    """Build the text stored in the unicode61 FTS index."""
+    raw = " ".join(_normalize_text(value) for value in values if value)
+    grams = " ".join(search_tokens(raw))
+    return f"{raw} {grams}".strip()
+
+
+def _fts_expression(value: str) -> str:
+    tokens = search_tokens(value)
+    if not tokens:
+        raise MapError("invalid_query", "query must contain searchable text")
+    pieces = []
+    for token in tokens[:32]:
+        escaped = token.replace('"', '""')
+        suffix = "*" if len(token) == 1 or token.isascii() else ""
+        pieces.append(f'"{escaped}"{suffix}')
+    return " AND ".join(pieces)
+
+
+def _validate_coordinate(latitude: float, longitude: float) -> tuple[float, float]:
+    if not (math.isfinite(latitude) and math.isfinite(longitude)):
+        raise MapError("invalid_coordinate", "coordinates must be finite")
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise MapError("invalid_coordinate", "coordinate is outside the valid range")
+    return latitude, longitude
+
+
+def _haversine_m(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
+    phi_a, phi_b = math.radians(lat_a), math.radians(lat_b)
+    delta_phi = math.radians(lat_b - lat_a)
+    delta_lambda = math.radians(lon_b - lon_a)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi_a) * math.cos(phi_b) * math.sin(delta_lambda / 2) ** 2
+    )
+    return 2 * _EARTH_RADIUS_M * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _outside_china(latitude: float, longitude: float) -> bool:
+    return not (72.004 <= longitude <= 137.8347 and 0.8293 <= latitude <= 55.8271)
+
+
+def _transform_latitude(x: float, y: float) -> float:
+    result = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
+    result += (20 * math.sin(6 * x * math.pi) + 20 * math.sin(2 * x * math.pi)) * 2 / 3
+    result += (20 * math.sin(y * math.pi) + 40 * math.sin(y / 3 * math.pi)) * 2 / 3
+    result += (
+        (160 * math.sin(y / 12 * math.pi) + 320 * math.sin(y * math.pi / 30)) * 2 / 3
+    )
+    return result
+
+
+def _transform_longitude(x: float, y: float) -> float:
+    result = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
+    result += (20 * math.sin(6 * x * math.pi) + 20 * math.sin(2 * x * math.pi)) * 2 / 3
+    result += (20 * math.sin(x * math.pi) + 40 * math.sin(x / 3 * math.pi)) * 2 / 3
+    result += (
+        (150 * math.sin(x / 12 * math.pi) + 300 * math.sin(x / 30 * math.pi)) * 2 / 3
+    )
+    return result
+
+
+def _wgs84_to_gcj02(latitude: float, longitude: float) -> tuple[float, float]:
+    if _outside_china(latitude, longitude):
+        return latitude, longitude
+    d_lat = _transform_latitude(longitude - 105, latitude - 35)
+    d_lon = _transform_longitude(longitude - 105, latitude - 35)
+    rad_lat = math.radians(latitude)
+    magic = 1 - 0.00669342162296594323 * math.sin(rad_lat) ** 2
+    sqrt_magic = math.sqrt(magic)
+    d_lat = (
+        d_lat
+        * 180
+        / ((6_378_245 * (1 - 0.00669342162296594323)) / (magic * sqrt_magic) * math.pi)
+    )
+    d_lon = d_lon * 180 / (6_378_245 / sqrt_magic * math.cos(rad_lat) * math.pi)
+    return latitude + d_lat, longitude + d_lon
+
+
+def _gcj02_to_wgs84(latitude: float, longitude: float) -> tuple[float, float]:
+    if _outside_china(latitude, longitude):
+        return latitude, longitude
+    guess_lat, guess_lon = latitude, longitude
+    for _ in range(6):
+        converted_lat, converted_lon = _wgs84_to_gcj02(guess_lat, guess_lon)
+        guess_lat -= converted_lat - latitude
+        guess_lon -= converted_lon - longitude
+    return guess_lat, guess_lon
+
+
+def _gcj02_to_bd09(latitude: float, longitude: float) -> tuple[float, float]:
+    radius = math.hypot(longitude, latitude) + 0.00002 * math.sin(
+        latitude * math.pi * 3000 / 180
+    )
+    theta = math.atan2(latitude, longitude) + 0.000003 * math.cos(
+        longitude * math.pi * 3000 / 180
+    )
+    return radius * math.sin(theta) + 0.006, radius * math.cos(theta) + 0.0065
+
+
+def _bd09_to_gcj02(latitude: float, longitude: float) -> tuple[float, float]:
+    x, y = longitude - 0.0065, latitude - 0.006
+    radius = math.hypot(x, y) - 0.00002 * math.sin(y * math.pi * 3000 / 180)
+    theta = math.atan2(y, x) - 0.000003 * math.cos(x * math.pi * 3000 / 180)
+    return radius * math.sin(theta), radius * math.cos(theta)
+
+
+def convert_coordinate(
+    latitude: float,
+    longitude: float,
+    source: str,
+    target: str,
+) -> tuple[float, float]:
+    latitude, longitude = _validate_coordinate(float(latitude), float(longitude))
+    source, target = source.lower().replace("-", ""), target.lower().replace("-", "")
+    if (
+        source not in SUPPORTED_COORDINATE_SYSTEMS
+        or target not in SUPPORTED_COORDINATE_SYSTEMS
+    ):
+        raise MapError(
+            "invalid_coordinate_system", "supported systems are wgs84, gcj02 and bd09"
+        )
+    if source == target:
+        return latitude, longitude
+    if source == "gcj02":
+        wgs_lat, wgs_lon = _gcj02_to_wgs84(latitude, longitude)
+    elif source == "bd09":
+        gcj_lat, gcj_lon = _bd09_to_gcj02(latitude, longitude)
+        wgs_lat, wgs_lon = _gcj02_to_wgs84(gcj_lat, gcj_lon)
+    else:
+        wgs_lat, wgs_lon = latitude, longitude
+    if target == "wgs84":
+        return wgs_lat, wgs_lon
+    gcj_lat, gcj_lon = _wgs84_to_gcj02(wgs_lat, wgs_lon)
+    return (gcj_lat, gcj_lon) if target == "gcj02" else _gcj02_to_bd09(gcj_lat, gcj_lon)
+
+
+class _WKBReader:
+    def __init__(self, data: bytes) -> None:
+        self.data = memoryview(data)
+        self.offset = 0
+
+    def _unpack(self, fmt: str, endian: str) -> tuple[Any, ...]:
+        size = struct.calcsize(endian + fmt)
+        if self.offset + size > len(self.data):
+            raise ValueError("truncated WKB")
+        values = struct.unpack_from(endian + fmt, self.data, self.offset)
+        self.offset += size
+        return values
+
+    def geometry(self) -> tuple[str, Any]:
+        if self.offset >= len(self.data):
+            raise ValueError("empty WKB")
+        byte_order = int(self.data[self.offset])
+        self.offset += 1
+        endian = "<" if byte_order == 1 else ">" if byte_order == 0 else ""
+        if not endian:
+            raise ValueError("invalid WKB byte order")
+        (raw_type,) = self._unpack("I", endian)
+        if raw_type & 0x20000000:
+            self._unpack("I", endian)
+        geometry_type = (raw_type & 0x0FFFFFFF) % 1000
+        if geometry_type == 1:
+            return "Point", self._unpack("dd", endian)
+        if geometry_type == 2:
+            (count,) = self._unpack("I", endian)
+            return "LineString", [self._unpack("dd", endian) for _ in range(count)]
+        if geometry_type == 3:
+            (ring_count,) = self._unpack("I", endian)
+            rings = []
+            for _ in range(ring_count):
+                (count,) = self._unpack("I", endian)
+                rings.append([self._unpack("dd", endian) for _ in range(count)])
+            return "Polygon", rings
+        if geometry_type in {4, 5, 6, 7}:
+            (count,) = self._unpack("I", endian)
+            children = [self.geometry() for _ in range(count)]
+            name = {
+                4: "MultiPoint",
+                5: "MultiLineString",
+                6: "MultiPolygon",
+                7: "GeometryCollection",
+            }
+            return name[geometry_type], children
+        raise ValueError(f"unsupported WKB geometry type {geometry_type}")
+
+
+def _read_wkb(data: bytes | None) -> tuple[str, Any] | None:
+    return None if not data else _WKBReader(data).geometry()
+
+
+def _point_in_ring(longitude: float, latitude: float, ring: Sequence[Any]) -> bool:
+    inside = False
+    previous = len(ring) - 1
+    for current in range(len(ring)):
+        x_cur, y_cur = ring[current]
+        x_prev, y_prev = ring[previous]
+        if (y_cur > latitude) != (y_prev > latitude):
+            crossing = (x_prev - x_cur) * (latitude - y_cur) / (y_prev - y_cur) + x_cur
+            if longitude < crossing:
+                inside = not inside
+        previous = current
+    return inside
+
+
+def _geometry_contains(
+    geometry: tuple[str, Any] | None, lon: float, lat: float
+) -> bool:
+    if geometry is None:
+        return False
+    kind, value = geometry
+    if kind == "Polygon":
+        return bool(
+            value
+            and _point_in_ring(lon, lat, value[0])
+            and not any(_point_in_ring(lon, lat, ring) for ring in value[1:])
+        )
+    if kind in {"MultiPolygon", "GeometryCollection"}:
+        return any(_geometry_contains(child, lon, lat) for child in value)
+    return False
+
+
+def _iter_lines(geometry: tuple[str, Any] | None) -> Iterable[Sequence[Any]]:
+    if geometry is None:
+        return
+    kind, value = geometry
+    if kind == "LineString":
+        yield value
+    elif kind == "Polygon":
+        yield from value
+    elif kind in {"MultiLineString", "MultiPolygon", "GeometryCollection"}:
+        for child in value:
+            yield from _iter_lines(child)
+
+
+def _point_segment_distance_m(
+    lat: float, lon: float, a: Sequence[float], b: Sequence[float]
+) -> float:
+    scale_x, scale_y = math.cos(math.radians(lat)) * 111_320, 110_540
+    ax, ay = (a[0] - lon) * scale_x, (a[1] - lat) * scale_y
+    bx, by = (b[0] - lon) * scale_x, (b[1] - lat) * scale_y
+    dx, dy = bx - ax, by - ay
+    if dx == 0 and dy == 0:
+        return math.hypot(ax, ay)
+    ratio = max(0.0, min(1.0, -(ax * dx + ay * dy) / (dx * dx + dy * dy)))
+    return math.hypot(ax + ratio * dx, ay + ratio * dy)
+
+
+def _distance_to_geometry_m(
+    lat: float, lon: float, geometry: tuple[str, Any] | None
+) -> float | None:
+    if geometry is None:
+        return None
+    if geometry[0] == "Point":
+        point = geometry[1]
+        return _haversine_m(lat, lon, point[1], point[0])
+    best: float | None = None
+    for line in _iter_lines(geometry):
+        for index in range(1, len(line)):
+            distance = _point_segment_distance_m(lat, lon, line[index - 1], line[index])
+            best = distance if best is None else min(best, distance)
+    return best
+
+
+def _place_id(row: sqlite3.Row) -> str:
+    return f"osm:{row['osm_type']}:{row['osm_id']}:{row['feature_type']}"
+
+
+def _feature_result(
+    row: sqlite3.Row,
+    *,
+    distance_m: float | None = None,
+    coordinate_system: str = "wgs84",
+    details: bool = False,
+) -> dict[str, Any]:
+    latitude, longitude = convert_coordinate(
+        float(row["lat"]), float(row["lon"]), "wgs84", coordinate_system
+    )
+    result: dict[str, Any] = {
+        "place_id": _place_id(row),
+        "name": row["name"],
+        "feature_type": row["feature_type"],
+        "category": row["category"],
+        "subcategory": row["subcategory"],
+        "location": {
+            "latitude": round(latitude, 7),
+            "longitude": round(longitude, 7),
+            "coordinate_system": coordinate_system,
+        },
+    }
+    for key in ("brand", "address", "admin_context"):
+        if row[key]:
+            result[key] = row[key]
+    if row["admin_level"]:
+        result["admin_level"] = int(row["admin_level"])
+    if distance_m is not None:
+        result["distance_m"] = round(distance_m)
+    if details:
+        result["aliases"] = [part for part in row["aliases"].split("|") if part]
+        result["bbox_wgs84"] = {
+            "min_latitude": row["min_lat"],
+            "min_longitude": row["min_lon"],
+            "max_latitude": row["max_lat"],
+            "max_longitude": row["max_lon"],
+        }
+        result["contact"] = {
+            key: row[key]
+            for key in ("postcode", "phone", "website", "opening_hours")
+            if row[key]
+        }
+        result["osm"] = {"type": row["osm_type"], "id": int(row["osm_id"])}
+    return result
+
+
+def _douglas_peucker(
+    points: list[tuple[float, float]], tolerance_m: float
+) -> list[tuple[float, float]]:
+    if len(points) <= 2:
+        return points
+    start, end = points[0], points[-1]
+    maximum, split_index = -1.0, 0
+    for index in range(1, len(points) - 1):
+        distance = _point_segment_distance_m(
+            points[index][0],
+            points[index][1],
+            (start[1], start[0]),
+            (end[1], end[0]),
+        )
+        if distance > maximum:
+            maximum, split_index = distance, index
+    if maximum <= tolerance_m:
+        return [start, end]
+    left = _douglas_peucker(points[: split_index + 1], tolerance_m)
+    right = _douglas_peucker(points[split_index:], tolerance_m)
+    return left[:-1] + right
+
+
+class MapService:
+    """Bounded read-only access to one completed map database."""
+
+    def __init__(self, settings: MapSettings) -> None:
+        self.settings = settings
+
+    def _connect(self, *, require_ready: bool = True) -> sqlite3.Connection:
+        path = self.settings.database_path
+        if not path.is_file():
+            raise MapError("dataset_missing", f"map database does not exist: {path}")
+        database = sqlite3.connect(
+            f"file:{path.resolve()}?mode=ro&immutable=1",
+            uri=True,
+            timeout=5.0,
+        )
+        database.row_factory = sqlite3.Row
+        database.execute("PRAGMA query_only=ON")
+        try:
+            metadata = dict(database.execute("SELECT key,value FROM metadata"))
+        except sqlite3.DatabaseError as exc:
+            database.close()
+            raise MapError(
+                "dataset_invalid", "map database metadata is unreadable"
+            ) from exc
+        if metadata.get("schema_version") != SCHEMA_VERSION:
+            database.close()
+            raise MapError(
+                "dataset_incompatible", "map database schema version is incompatible"
+            )
+        if require_ready and metadata.get("build_state") != "ready":
+            database.close()
+            raise MapError("dataset_not_ready", "map database build has not completed")
+        return database
+
+    @staticmethod
+    def _metadata(database: sqlite3.Connection) -> dict[str, str]:
+        return dict(database.execute("SELECT key,value FROM metadata"))
+
+    def dataset_info(self) -> dict[str, Any]:
+        database = self._connect(require_ready=False)
+        try:
+            metadata = self._metadata(database)
+        finally:
+            database.close()
+        counts = {
+            key.removesuffix("_count"): int(value)
+            for key, value in metadata.items()
+            if key.endswith("_count") and value.isdigit()
+        }
+        routing = "ready" if counts.get("route_edge", 0) else "unavailable"
+        return {
+            "schema_version": metadata.get("schema_version", ""),
+            "build_state": metadata.get("build_state", "unknown"),
+            "source": {
+                "path": metadata.get("source_name", ""),
+                "replication_timestamp": metadata.get("replication_timestamp", ""),
+                "replication_sequence": metadata.get("replication_sequence", ""),
+                "sha256": metadata.get("source_sha256", ""),
+            },
+            "bounds_wgs84": json.loads(metadata.get("bounds", "{}")),
+            "counts": counts,
+            "capabilities": {
+                "place_search": "ready",
+                "reverse_geocoding": "ready",
+                "nearby_search": "ready",
+                "walking_routing": routing,
+                "cycling_routing": routing,
+                "driving_routing": routing,
+                "public_transit_routing": "unsupported",
+                "live_traffic": "unsupported",
+                "weather": "unsupported",
+            },
+            "coordinate_systems": sorted(SUPPORTED_COORDINATE_SYSTEMS),
+            "license": "OpenStreetMap contributors, ODbL 1.0",
+        }
+
+    def _search_rows(
+        self,
+        database: sqlite3.Connection,
+        query: str,
+        *,
+        limit: int,
+        feature_types: Sequence[str] = (),
+        bounds: tuple[float, float, float, float] | None = None,
+    ) -> list[sqlite3.Row]:
+        sql = (
+            "SELECT f.*,bm25(feature_fts) AS text_rank FROM feature_fts "
+            "JOIN features f ON f.id=feature_fts.rowid "
+        )
+        parameters: list[Any] = []
+        if bounds is not None:
+            sql += "JOIN features_rtree r ON r.id=f.id "
+        sql += "WHERE feature_fts MATCH ? "
+        parameters.append(_fts_expression(query))
+        if feature_types:
+            sql += "AND f.feature_type IN (%s) " % ",".join("?" for _ in feature_types)
+            parameters.extend(feature_types)
+        if bounds is not None:
+            min_lat, min_lon, max_lat, max_lon = bounds
+            sql += (
+                "AND r.max_lat>=? AND r.min_lat<=? AND r.max_lon>=? AND r.min_lon<=? "
+            )
+            parameters.extend((min_lat, max_lat, min_lon, max_lon))
+        sql += "ORDER BY text_rank LIMIT ?"
+        parameters.append(min(500, max(1, limit)))
+        return database.execute(sql, parameters).fetchall()
+
+    def _region_bounds(
+        self,
+        database: sqlite3.Connection,
+        region: str,
+    ) -> tuple[float, float, float, float] | None:
+        rows = self._search_rows(
+            database, region, limit=30, feature_types=("boundary", "place")
+        )
+        if not rows:
+            return None
+        normalized = _normalize_text(region)
+        rows.sort(
+            key=lambda row: (
+                0 if _normalize_text(row["name"]) == normalized else 1,
+                0 if row["feature_type"] == "boundary" else 1,
+                int(row["admin_level"] or 99),
+                -int(row["population"] or 0),
+            )
+        )
+        row = rows[0]
+        return row["min_lat"], row["min_lon"], row["max_lat"], row["max_lon"]
+
+    def search_places(
+        self,
+        query: str,
+        *,
+        region: str = "",
+        latitude: float | None = None,
+        longitude: float | None = None,
+        coordinate_system: str = "wgs84",
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        query = query.strip()
+        if not query or len(query) > 200:
+            raise MapError("invalid_query", "query must contain 1 to 200 characters")
+        limit = max(1, min(int(limit), 30))
+        if (latitude is None) != (longitude is None):
+            raise MapError(
+                "invalid_coordinate", "latitude and longitude must be supplied together"
+            )
+        bias = (
+            convert_coordinate(latitude, longitude, coordinate_system, "wgs84")
+            if latitude is not None and longitude is not None
+            else None
+        )
+        database = self._connect()
+        try:
+            bounds = (
+                self._region_bounds(database, region.strip())
+                if region.strip()
+                else None
+            )
+            rows = self._search_rows(database, query, limit=300, bounds=bounds)
+        finally:
+            database.close()
+        normalized = _normalize_text(query)
+
+        def rank(row: sqlite3.Row) -> tuple[Any, ...]:
+            name = _normalize_text(row["name"])
+            aliases = {
+                _normalize_text(value) for value in row["aliases"].split("|") if value
+            }
+            exact = name == normalized or normalized in aliases
+            prefix = name.startswith(normalized) or any(
+                alias.startswith(normalized) for alias in aliases
+            )
+            distance = (
+                _haversine_m(bias[0], bias[1], row["lat"], row["lon"])
+                if bias is not None
+                else 0.0
+            )
+            type_rank = {
+                "place": 0,
+                "poi": 1,
+                "address": 2,
+                "boundary": 3,
+                "road": 4,
+                "area": 5,
+            }.get(row["feature_type"], 9)
+            tags = row["tags_json"]
+            referenced = bool(
+                row["website"] or '"wikidata"' in tags or '"wikipedia"' in tags
+            )
+            category_rank = {
+                "place": 0,
+                "tourism": 1,
+                "historic": 1,
+                "man_made": 1,
+                "amenity": 2,
+                "shop": 2,
+                "leisure": 2,
+                "railway": 2,
+                "public_transport": (2 if row["subcategory"] == "station" else 4),
+            }.get(row["category"], 3)
+            return (
+                not exact,
+                not prefix,
+                not referenced,
+                category_rank,
+                type_rank,
+                distance,
+                float(row["text_rank"]),
+                -int(row["population"] or 0),
+            )
+
+        rows.sort(key=rank)
+        items = []
+        for row in rows[:limit]:
+            distance = (
+                _haversine_m(bias[0], bias[1], row["lat"], row["lon"])
+                if bias is not None
+                else None
+            )
+            items.append(
+                _feature_result(
+                    row, distance_m=distance, coordinate_system=coordinate_system
+                )
+            )
+        return {"query": query, "region": region, "results": items, "count": len(items)}
+
+    def nearby_search(
+        self,
+        latitude: float,
+        longitude: float,
+        *,
+        coordinate_system: str = "wgs84",
+        radius_m: int = 1_000,
+        query: str = "",
+        categories: Sequence[str] = (),
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        wgs_lat, wgs_lon = convert_coordinate(
+            latitude, longitude, coordinate_system, "wgs84"
+        )
+        radius_m, limit = (
+            max(10, min(int(radius_m), 50_000)),
+            max(1, min(int(limit), 50)),
+        )
+        d_lat = radius_m / 110_540
+        d_lon = radius_m / max(10_000, 111_320 * math.cos(math.radians(wgs_lat)))
+        parameters: list[Any] = [
+            wgs_lat - d_lat,
+            wgs_lat + d_lat,
+            wgs_lon - d_lon,
+            wgs_lon + d_lon,
+        ]
+        if query.strip():
+            sql = (
+                "SELECT f.* FROM feature_fts JOIN features f ON f.id=feature_fts.rowid "
+                "JOIN features_rtree r ON r.id=f.id WHERE r.max_lat>=? AND r.min_lat<=? "
+                "AND r.max_lon>=? AND r.min_lon<=? AND feature_fts MATCH ? "
+            )
+            parameters.append(_fts_expression(query))
+        else:
+            sql = (
+                "SELECT f.* FROM features f JOIN features_rtree r ON r.id=f.id "
+                "WHERE r.max_lat>=? AND r.min_lat<=? AND r.max_lon>=? AND r.min_lon<=? "
+                "AND f.feature_type IN ('poi','place','address') "
+            )
+        values = [value.strip() for value in categories if value.strip()][:20]
+        if values:
+            clauses = []
+            for value in values:
+                if ":" in value:
+                    category, subcategory = value.split(":", 1)
+                    clauses.append("(f.category=? AND f.subcategory=?)")
+                    parameters.extend((category, subcategory))
+                else:
+                    clauses.append("(f.category=? OR f.subcategory=?)")
+                    parameters.extend((value, value))
+            sql += "AND (" + " OR ".join(clauses) + ") "
+        sql += "LIMIT 1000"
+        database = self._connect()
+        try:
+            rows = database.execute(sql, parameters).fetchall()
+        finally:
+            database.close()
+        candidates = []
+        for row in rows:
+            distance = _haversine_m(wgs_lat, wgs_lon, row["lat"], row["lon"])
+            if distance <= radius_m:
+                candidates.append((distance, row))
+        candidates.sort(key=lambda item: (item[0], item[1]["name"]))
+        results = [
+            _feature_result(
+                row, distance_m=distance, coordinate_system=coordinate_system
+            )
+            for distance, row in candidates[:limit]
+        ]
+        return {
+            "center": {
+                "latitude": latitude,
+                "longitude": longitude,
+                "coordinate_system": coordinate_system,
+            },
+            "radius_m": radius_m,
+            "results": results,
+            "count": len(results),
+        }
+
+    def reverse_geocode(
+        self,
+        latitude: float,
+        longitude: float,
+        *,
+        coordinate_system: str = "wgs84",
+        nearby_limit: int = 5,
+    ) -> dict[str, Any]:
+        wgs_lat, wgs_lon = convert_coordinate(
+            latitude, longitude, coordinate_system, "wgs84"
+        )
+        nearby_limit = max(0, min(int(nearby_limit), 10))
+        database = self._connect()
+        try:
+            boundaries = database.execute(
+                "SELECT f.* FROM features f JOIN features_rtree r ON r.id=f.id "
+                "WHERE f.feature_type='boundary' AND r.min_lat<=? AND r.max_lat>=? "
+                "AND r.min_lon<=? AND r.max_lon>=?",
+                (wgs_lat, wgs_lat, wgs_lon, wgs_lon),
+            ).fetchall()
+            span_lat = 2_000 / 110_540
+            span_lon = 2_000 / max(10_000, 111_320 * math.cos(math.radians(wgs_lat)))
+            nearby_rows = database.execute(
+                "SELECT f.* FROM features f JOIN features_rtree r ON r.id=f.id "
+                "WHERE f.feature_type IN ('address','road','poi','place') "
+                "AND r.max_lat>=? AND r.min_lat<=? AND r.max_lon>=? AND r.min_lon<=? LIMIT 500",
+                (
+                    wgs_lat - span_lat,
+                    wgs_lat + span_lat,
+                    wgs_lon - span_lon,
+                    wgs_lon + span_lon,
+                ),
+            ).fetchall()
+        finally:
+            database.close()
+        containing = []
+        for row in boundaries:
+            try:
+                if _geometry_contains(_read_wkb(row["geom"]), wgs_lon, wgs_lat):
+                    containing.append(row)
+            except (ValueError, struct.error):
+                continue
+        containing.sort(key=lambda row: int(row["admin_level"] or 99))
+        nearby = []
+        for row in nearby_rows:
+            try:
+                distance = _distance_to_geometry_m(
+                    wgs_lat, wgs_lon, _read_wkb(row["geom"])
+                )
+            except (ValueError, struct.error):
+                distance = None
+            if distance is None:
+                distance = _haversine_m(wgs_lat, wgs_lon, row["lat"], row["lon"])
+            if distance <= 2_000:
+                nearby.append((distance, row))
+        nearby.sort(key=lambda item: (item[0], item[1]["feature_type"] != "address"))
+        administrative = [
+            {
+                "name": row["name"],
+                "admin_level": int(row["admin_level"]),
+                "place_id": _place_id(row),
+            }
+            for row in containing
+        ]
+        parts = [item["name"] for item in administrative]
+        if nearby:
+            label = nearby[0][1]["address"] or nearby[0][1]["name"]
+            if label and label not in parts:
+                parts.append(label)
+        return {
+            "location": {
+                "latitude": latitude,
+                "longitude": longitude,
+                "coordinate_system": coordinate_system,
+            },
+            "wgs84": {"latitude": round(wgs_lat, 7), "longitude": round(wgs_lon, 7)},
+            "formatted_address": "".join(parts),
+            "administrative_areas": administrative,
+            "nearby": [
+                _feature_result(
+                    row, distance_m=distance, coordinate_system=coordinate_system
+                )
+                for distance, row in nearby[:nearby_limit]
+            ],
+        }
+
+    def get_place(
+        self, place_id: str, *, coordinate_system: str = "wgs84"
+    ) -> dict[str, Any]:
+        match = re.fullmatch(
+            r"osm:(node|way|relation|area):(-?\d+):([a-z_]+)", place_id
+        )
+        if match is None:
+            raise MapError(
+                "invalid_place_id", "place_id is not a valid OSM map identifier"
+            )
+        database = self._connect()
+        try:
+            row = database.execute(
+                "SELECT * FROM features WHERE osm_type=? AND osm_id=? AND feature_type=?",
+                (match.group(1), int(match.group(2)), match.group(3)),
+            ).fetchone()
+        finally:
+            database.close()
+        if row is None:
+            raise MapError("place_not_found", "place_id was not found in this dataset")
+        return _feature_result(row, coordinate_system=coordinate_system, details=True)
+
+    def _resolve_location(
+        self,
+        value: str,
+        *,
+        coordinate_system: str,
+    ) -> tuple[float, float, dict[str, Any]]:
+        cleaned = value.strip()
+        coordinate = _COORDINATE_RE.search(cleaned)
+        if coordinate is not None:
+            latitude, longitude = convert_coordinate(
+                float(coordinate.group(1)),
+                float(coordinate.group(2)),
+                coordinate_system,
+                "wgs84",
+            )
+            return latitude, longitude, {"input": value, "matched_by": "coordinate"}
+        result = self.search_places(cleaned, limit=1)
+        if not result["results"]:
+            raise MapError(
+                "location_not_found", f"location could not be resolved: {cleaned}"
+            )
+        place = result["results"][0]
+        location = place["location"]
+        return (
+            float(location["latitude"]),
+            float(location["longitude"]),
+            {"input": value, "matched_by": "place", "place": place},
+        )
+
+    def _nearest_route_node(
+        self,
+        database: sqlite3.Connection,
+        latitude: float,
+        longitude: float,
+        mode_bit: int,
+    ) -> tuple[int, float, float, float]:
+        for radius_m in (200, 500, 1_000, 3_000, 10_000):
+            d_lat = radius_m / 110_540
+            d_lon = radius_m / max(10_000, 111_320 * math.cos(math.radians(latitude)))
+            rows = database.execute(
+                "SELECT n.id,n.lat,n.lon FROM route_nodes n JOIN route_nodes_rtree r ON r.id=n.id "
+                "WHERE (n.modes & ?) != 0 AND r.max_lat>=? AND r.min_lat<=? "
+                "AND r.max_lon>=? AND r.min_lon<=? LIMIT 500",
+                (
+                    mode_bit,
+                    latitude - d_lat,
+                    latitude + d_lat,
+                    longitude - d_lon,
+                    longitude + d_lon,
+                ),
+            ).fetchall()
+            if rows:
+                best = min(
+                    rows,
+                    key=lambda row: _haversine_m(
+                        latitude, longitude, row["lat"], row["lon"]
+                    ),
+                )
+                distance = _haversine_m(latitude, longitude, best["lat"], best["lon"])
+                return int(best["id"]), float(best["lat"]), float(best["lon"]), distance
+        raise MapError(
+            "route_network_not_found", "no routable road was found near the location"
+        )
+
+    @staticmethod
+    def _edge_speed_mps(mode: str, highway: str, speed_kph: float) -> float:
+        if mode == "walking":
+            return 0.75 if highway == "steps" else 1.33
+        if mode == "cycling":
+            return {"cycleway": 5.6, "path": 4.2, "track": 3.5, "steps": 0.8}.get(
+                highway, 4.5
+            )
+        effective = speed_kph or {
+            "motorway": 100,
+            "trunk": 80,
+            "primary": 60,
+            "secondary": 50,
+            "tertiary": 40,
+            "residential": 30,
+            "living_street": 15,
+            "service": 20,
+        }.get(highway, 30)
+        return max(2.0, min(effective, 130.0) / 3.6)
+
+    def _route_search(
+        self,
+        database: sqlite3.Connection,
+        start: int,
+        goal: int,
+        goal_lat: float,
+        goal_lon: float,
+        mode: str,
+    ) -> tuple[list[int], list[dict[str, Any]], float, float, int]:
+        if start == goal:
+            return [start], [], 0.0, 0.0, 0
+        mode_bit = MODE_BITS[mode]
+        max_speed = {"walking": 1.6, "cycling": 9.0, "driving": 36.2}[mode]
+        deadline = time.monotonic() + self.settings.route_timeout_seconds
+        queue: list[tuple[float, float, int]] = [(0.0, 0.0, start)]
+        best_cost = {start: 0.0}
+        predecessor: dict[int, tuple[int, dict[str, Any]]] = {}
+        closed: set[int] = set()
+        expansions = 0
+        sql = (
+            "SELECT e.target AS neighbor,e.length_m,e.name,e.highway,e.speed_kph,"
+            "e.way_id,e.seq,n.lat AS neighbor_lat,n.lon AS neighbor_lon "
+            "FROM route_edges e JOIN route_nodes n ON n.id=e.target "
+            "WHERE e.source=? AND (e.forward_modes & ?) != 0 UNION ALL "
+            "SELECT e.source AS neighbor,e.length_m,e.name,e.highway,e.speed_kph,"
+            "e.way_id,e.seq,n.lat AS neighbor_lat,n.lon AS neighbor_lon "
+            "FROM route_edges e JOIN route_nodes n ON n.id=e.source "
+            "WHERE e.target=? AND (e.backward_modes & ?) != 0"
+        )
+        while queue:
+            _, cost, node = heapq.heappop(queue)
+            if node in closed or cost != best_cost.get(node):
+                continue
+            if node == goal:
+                break
+            closed.add(node)
+            expansions += 1
+            if (
+                expansions > self.settings.route_max_expansions
+                or time.monotonic() > deadline
+            ):
+                raise MapError(
+                    "route_search_limit",
+                    "route search reached its bounded resource limit",
+                )
+            for edge in database.execute(sql, (node, mode_bit, node, mode_bit)):
+                neighbor = int(edge["neighbor"])
+                if neighbor in closed:
+                    continue
+                speed = self._edge_speed_mps(
+                    mode, edge["highway"], float(edge["speed_kph"] or 0)
+                )
+                candidate = cost + float(edge["length_m"]) / speed
+                if candidate >= best_cost.get(neighbor, math.inf):
+                    continue
+                heuristic = (
+                    _haversine_m(
+                        edge["neighbor_lat"],
+                        edge["neighbor_lon"],
+                        goal_lat,
+                        goal_lon,
+                    )
+                    / max_speed
+                )
+                best_cost[neighbor] = candidate
+                predecessor[neighbor] = (node, dict(edge))
+                heapq.heappush(queue, (candidate + heuristic, candidate, neighbor))
+        if goal not in predecessor:
+            raise MapError(
+                "route_not_found", "the locations are not connected for this mode"
+            )
+        nodes, edges, current = [goal], [], goal
+        while current != start:
+            previous, edge = predecessor[current]
+            nodes.append(previous)
+            edges.append(edge)
+            current = previous
+        nodes.reverse()
+        edges.reverse()
+        distance = sum(float(edge["length_m"]) for edge in edges)
+        return nodes, edges, distance, best_cost[goal], expansions
+
+    @staticmethod
+    def _route_steps(edges: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+        steps: list[dict[str, Any]] = []
+        for edge in edges:
+            name, highway = (
+                str(edge.get("name") or "未命名道路"),
+                str(edge.get("highway") or "road"),
+            )
+            if steps and steps[-1]["name"] == name and steps[-1]["highway"] == highway:
+                steps[-1]["distance_m"] += float(edge["length_m"])
+            else:
+                steps.append(
+                    {
+                        "instruction": f"沿{name}行进",
+                        "name": name,
+                        "highway": highway,
+                        "distance_m": float(edge["length_m"]),
+                    }
+                )
+        for step in steps:
+            step["distance_m"] = round(step["distance_m"])
+        return steps[:200]
+
+    def route(
+        self,
+        origin: str,
+        destination: str,
+        *,
+        mode: str = "driving",
+        coordinate_system: str = "wgs84",
+        output_coordinate_system: str = "wgs84",
+    ) -> dict[str, Any]:
+        if mode not in MODE_BITS:
+            raise MapError(
+                "invalid_route_mode", "route mode must be walking, cycling or driving"
+            )
+        origin_lat, origin_lon, origin_match = self._resolve_location(
+            origin, coordinate_system=coordinate_system
+        )
+        dest_lat, dest_lon, dest_match = self._resolve_location(
+            destination, coordinate_system=coordinate_system
+        )
+        database = self._connect()
+        try:
+            mode_bit = MODE_BITS[mode]
+            start, start_lat, start_lon, start_distance = self._nearest_route_node(
+                database, origin_lat, origin_lon, mode_bit
+            )
+            goal, goal_lat, goal_lon, goal_distance = self._nearest_route_node(
+                database, dest_lat, dest_lon, mode_bit
+            )
+            node_ids, edges, distance, duration, expansions = self._route_search(
+                database, start, goal, goal_lat, goal_lon, mode
+            )
+            coordinates: dict[int, tuple[float, float]] = {}
+            for offset in range(0, len(node_ids), 5_000):
+                batch = node_ids[offset : offset + 5_000]
+                placeholders = ",".join("?" for _ in batch)
+                for row in database.execute(
+                    f"SELECT id,lat,lon FROM route_nodes WHERE id IN ({placeholders})",
+                    batch,
+                ):
+                    coordinates[int(row["id"])] = (float(row["lat"]), float(row["lon"]))
+        except sqlite3.OperationalError as exc:
+            if "route_" in str(exc) or "no such table" in str(exc):
+                raise MapError(
+                    "route_unavailable", "this map database has no routing index"
+                ) from exc
+            raise
+        finally:
+            database.close()
+        points = [coordinates[node] for node in node_ids if node in coordinates]
+        simplified = _douglas_peucker(points, max(2.0, distance / 50_000))
+        if len(simplified) > 500:
+            stride = math.ceil(len(simplified) / 500)
+            simplified = simplified[::stride]
+            if simplified[-1] != points[-1]:
+                simplified.append(points[-1])
+        geometry = []
+        for latitude, longitude in simplified:
+            converted_lat, converted_lon = convert_coordinate(
+                latitude, longitude, "wgs84", output_coordinate_system
+            )
+            geometry.append([round(converted_lon, 7), round(converted_lat, 7)])
+        return {
+            "mode": mode,
+            "origin": {**origin_match, "snap_distance_m": round(start_distance)},
+            "destination": {**dest_match, "snap_distance_m": round(goal_distance)},
+            "distance_m": round(distance),
+            "duration_seconds": round(duration),
+            "steps": self._route_steps(edges),
+            "geometry": {
+                "type": "LineString",
+                "coordinates": geometry,
+                "coordinate_system": output_coordinate_system,
+            },
+            "search": {"expanded_nodes": expansions},
+        }
+
+    def distance(
+        self,
+        origins: Sequence[str],
+        destination: str,
+        *,
+        mode: str = "straight",
+        coordinate_system: str = "wgs84",
+    ) -> dict[str, Any]:
+        if not origins or len(origins) > 16:
+            raise MapError("invalid_origins", "origins must contain 1 to 16 locations")
+        dest_lat, dest_lon, dest_match = self._resolve_location(
+            destination, coordinate_system=coordinate_system
+        )
+        results = []
+        if mode == "straight":
+            for origin in origins:
+                latitude, longitude, match = self._resolve_location(
+                    origin, coordinate_system=coordinate_system
+                )
+                results.append(
+                    {
+                        "origin": match,
+                        "distance_m": round(
+                            _haversine_m(latitude, longitude, dest_lat, dest_lon)
+                        ),
+                    }
+                )
+        elif mode in MODE_BITS:
+            if len(origins) > 4:
+                raise MapError(
+                    "route_matrix_too_large", "road distance accepts at most 4 origins"
+                )
+            for origin in origins:
+                routed = self.route(
+                    origin, destination, mode=mode, coordinate_system=coordinate_system
+                )
+                results.append(
+                    {
+                        "origin": routed["origin"],
+                        "distance_m": routed["distance_m"],
+                        "duration_seconds": routed["duration_seconds"],
+                    }
+                )
+        else:
+            raise MapError(
+                "invalid_distance_mode",
+                "distance mode must be straight, walking, cycling or driving",
+            )
+        return {"mode": mode, "destination": dest_match, "results": results}
+
+    def categories(self) -> dict[str, Any]:
+        return {"categories": category_inventory()}

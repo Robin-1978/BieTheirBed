@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.16)
+project(osm_map_builder LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_path(OSMIUM_INCLUDE_DIR osmium/io/reader.hpp
+ HINTS ENV LIBOSMIUM_INCLUDE_DIR)
+if(NOT OSMIUM_INCLUDE_DIR)
+  message(FATAL_ERROR "libosmium headers were not found; install libosmium2-dev")
+endif()
+
+find_package(BZip2 REQUIRED)
+find_package(EXPAT REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(SQLite3 REQUIRED)
+find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
+
+add_executable(osm_map_builder osm_map_builder.cpp)
+target_include_directories(osm_map_builder PRIVATE ${OSMIUM_INCLUDE_DIR})
+target_compile_options(osm_map_builder PRIVATE -O3 -Wall -Wextra -Wpedantic)
+target_link_libraries(osm_map_builder PRIVATE
+  BZip2::BZip2
+  EXPAT::EXPAT
+  OpenSSL::Crypto
+  SQLite::SQLite3
+  Threads::Threads
+  ZLIB::ZLIB)
+
+install(TARGETS osm_map_builder RUNTIME DESTINATION bin)
