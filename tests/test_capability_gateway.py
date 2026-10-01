@@ -140,6 +140,38 @@ async def test_gateway_projects_builtin_handler_as_standard_mcp_tool(tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_gateway_call_tool_loads_grant_scoped_inventory_first(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    gateway = CapabilityGateway(
+        registry,
+        ToolStep(registry, ToolArgumentPolicy(tmp_path)),
+    )
+    grant = await gateway.grants.issue(
+        scope=RuntimeScope(principal_id="principal-a", session_handle="session-a"),
+        run_id="turn-direct-call",
+        client_request_id="request-direct-call",
+        capabilities=frozenset({ToolCapability.NETWORK}),
+        cancellation=asyncio.Event(),
+        confirmation=None,
+        tool_commit=None,
+        tool_names=frozenset({"echo"}),
+    )
+
+    async with GatewayMCPClient(gateway).bind(grant) as bound:
+        result = await bound.call_tool(
+            ProposedToolCall(
+                call_id="model-call-direct",
+                name="echo",
+                arguments={"message": "hello"},
+            )
+        )
+
+    assert result.status == "completed"
+    assert result.output == {"echo": "hello"}
+
+
+@pytest.mark.asyncio
 async def test_gateway_enforces_invocation_tool_call_budget(tmp_path) -> None:
     registry = ToolRegistry()
     registry.register(EchoTool())

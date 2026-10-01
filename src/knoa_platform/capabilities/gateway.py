@@ -641,6 +641,7 @@ class BoundGatewayToolClient:
     ) -> None:
         self._session = session
         self._grant = grant
+        self._tool_inventory_loaded = False
 
     async def list_tools(self) -> tuple[dict[str, Any], ...]:
         result = await self._session.list_tools(
@@ -658,11 +659,17 @@ class BoundGatewayToolClient:
             if tool.output_schema is not None:
                 definition["outputSchema"] = dict(tool.output_schema)
             definitions.append(definition)
+        # ClientSession validates successful tool results against schemas cached
+        # by list_tools().  Keep that cache warm through this grant-aware path;
+        # otherwise the SDK performs an unscoped tools/list after tools/call.
+        self._tool_inventory_loaded = True
         # Preserve registry/provider order. The Core prefix is intentionally
         # stable for upstream KV caches; MCP recall must not reorder it.
         return tuple(definitions)
 
     async def call_tool(self, call: ProposedToolCall) -> ToolStepResult:
+        if not self._tool_inventory_loaded:
+            await self.list_tools()
         result = await self._session.call_tool(
             call.name,
             call.arguments,
