@@ -356,6 +356,74 @@ async def test_knoa_runtime_owns_session_checkpoint_and_one_terminal_event(
 
 
 @pytest.mark.asyncio
+async def test_runtime_retries_provider_failure_after_tool_result(tmp_path: Path) -> None:
+    class TransientAfterToolProvider:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def stream(self, request, cancellation):
+            del cancellation
+
+            async def iterate():
+                self.requests.append(request)
+                if len(self.requests) == 1:
+                    yield ProviderChunk(
+                        tool_calls=(
+                            ProposedToolCall(
+                                call_id="inspect-retry",
+                                name="image_inspect",
+                                arguments={
+                                    "artifact_id": "image-a",
+                                    "question": "What is visible?",
+                                },
+                            ),
+                        ),
+                        finish_reason="tool_calls",
+                        terminal=True,
+                     )
+                elif len(self.requests) == 2:
+                    yield ProviderChunk(
+                        finish_reason="error",
+                        terminal=True,
+                        error_code="provider_failed",
+                     )
+                else:
+                    yield ProviderChunk(content_delta="Recovered after provider failure.")
+                    yield ProviderChunk(finish_reason="stop", terminal=True)
+
+            return iterate()
+
+    provider = TransientAfterToolProvider()
+    client = ImageClient()
+    runtime = KnoaAgentRuntime(
+        provider,
+        ContextCheckpointRepository(tmp_path / "context.db"),
+        ImageConnector(client),
+        system_prompt="system",
+        health_probe=healthy,
+     )
+    session = await runtime.create_session(
+        CreateRuntimeSession(operation_id="create-provider-retry", binding_epoch=1)
+     )
+    turn = await runtime.start_turn(
+        RuntimeTurnRequest(
+            session=session,
+            operation_id="operation-provider-retry",
+            input=(TextPart(text="Inspect and answer"),),
+            mcp=grant(),
+         )
+     )
+
+    events = [event async for event in turn.events]
+
+    assert events[-1].status == "completed"
+    assert events[-1].final_output == "Recovered after provider failure."
+    assert len(provider.requests) == 3
+    assert [call.name for call in client.calls] == ["image_inspect"]
+    assert "observation-a" in str(provider.requests[2].messages)
+
+
+@pytest.mark.asyncio
 async def test_knoa_runtime_restores_compacted_summary_from_checkpoint(
     tmp_path: Path,
 ) -> None:

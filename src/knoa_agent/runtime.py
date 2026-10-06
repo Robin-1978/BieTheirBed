@@ -155,6 +155,44 @@ class KnoaAgentRuntime(AgentRuntime):
         self._guard = asyncio.Lock()
         self._draining = False
 
+    async def _stream_model_with_retry(
+        self,
+        request: AgentModelRequest,
+        cancellation: asyncio.Event,
+         ) -> AsyncIterator[Any]:
+        """Retry one provider failure when the model emitted no observable output."""
+        current_request = request
+        for attempt in range(2):
+            emitted = False
+            terminal = None
+            async for chunk in self._provider.stream(current_request, cancellation):
+                observable = bool(
+                    getattr(chunk, "content_delta", "")
+                    or getattr(chunk, "reasoning_delta", "")
+                    or getattr(chunk, "tool_calls", ())
+                 )
+                emitted = emitted or observable
+                if getattr(chunk, "terminal", False):
+                    terminal = chunk
+                    if (
+                        attempt == 0
+                        and not emitted
+                        and str(getattr(chunk, "finish_reason", "")) == "error"
+                     ):
+                        break
+                yield chunk
+            if cancellation.is_set():
+                return
+            failed = terminal is None or str(
+                getattr(terminal, "finish_reason", "")
+             ) == "error"
+            if attempt == 0 and failed and not emitted:
+                current_request = request.model_copy(
+                    update={"call_id": uuid.uuid4().hex}
+                 )
+                continue
+            return
+
     @property
     def descriptor(self) -> AgentDescriptor:
         return AgentDescriptor(
@@ -366,7 +404,7 @@ class KnoaAgentRuntime(AgentRuntime):
                         temperature=self._temperature,
                         max_output_tokens=self._max_output_tokens,
                     )
-                    async for chunk in self._provider.stream(
+                    async for chunk in self._stream_model_with_retry(
                         model_request,
                         cancellation,
                     ):
