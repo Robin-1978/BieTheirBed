@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import heapq
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -17,8 +18,24 @@ import unicodedata
 from urllib.parse import urlencode
 
 try:
+    from .map_visual import (
+        MapCircle,
+        MapLine,
+        MapMarker,
+        RoadSegment,
+        render_static_map,
+        scene_bounds,
+    )
     from .taxonomy import category_inventory
 except ImportError:  # pragma: no cover - direct script execution
+    from map_visual import (
+        MapCircle,
+        MapLine,
+        MapMarker,
+        RoadSegment,
+        render_static_map,
+        scene_bounds,
+    )
     from taxonomy import category_inventory
 
 
@@ -31,6 +48,7 @@ _COORDINATE_RE = re.compile(
     r"(-?\d{1,3}(?:\.\d+)?)(?![\d.])"
 )
 _SEARCH_PART_RE = re.compile(r"[\u3400-\u9fff]+|[a-z0-9]+", re.IGNORECASE)
+logger = logging.getLogger("osm-map-service")
 
 
 class MapError(RuntimeError):
@@ -49,6 +67,7 @@ class MapSettings:
     database_path: Path
     route_timeout_seconds: float = 20.0
     route_max_expansions: int = 250_000
+    managed_file_root: Path | None = None
 
     @classmethod
     def from_env(cls) -> "MapSettings":
@@ -67,6 +86,15 @@ class MapSettings:
                 os.environ.get("OSM_MAP_ROUTE_MAX_EXPANSIONS", "250000"),
                 1_000,
                 1_000_000,
+            ),
+            managed_file_root=(
+                Path(managed_root).expanduser()
+                if (
+                    managed_root := os.environ.get(
+                        "KNOA_MCP_MANAGED_FILE_ROOT", ""
+                    ).strip()
+                )
+                else None
             ),
         )
 
@@ -700,6 +728,83 @@ class MapService:
     def _metadata(database: sqlite3.Connection) -> dict[str, str]:
         return dict(database.execute("SELECT key,value FROM metadata"))
 
+    def _background_roads(
+        self,
+        bounds: tuple[float, float, float, float],
+        *,
+        limit: int = 8_000,
+    ) -> list[RoadSegment]:
+        min_lat, min_lon, max_lat, max_lon = bounds
+        if _haversine_m(min_lat, min_lon, max_lat, max_lon) > 80_000:
+            return []
+        database = self._connect()
+        try:
+            rows = database.execute(
+                "SELECT s.lat AS start_lat,s.lon AS start_lon,"
+                "t.lat AS end_lat,t.lon AS end_lon,e.highway,e.name "
+                "FROM route_nodes_rtree r "
+                "JOIN route_nodes s ON s.id=r.id "
+                "JOIN route_edges e ON e.source=s.id "
+                "JOIN route_nodes t ON t.id=e.target "
+                "WHERE r.min_lat BETWEEN ? AND ? AND r.min_lon BETWEEN ? AND ? "
+                "LIMIT ?",
+                (min_lat, max_lat, min_lon, max_lon, limit),
+            ).fetchall()
+        finally:
+            database.close()
+        return [
+            RoadSegment(
+                start=(float(row["start_lat"]), float(row["start_lon"])),
+                end=(float(row["end_lat"]), float(row["end_lon"])),
+                highway=str(row["highway"] or "road"),
+                name=str(row["name"] or ""),
+            )
+            for row in rows
+        ]
+
+    def _attach_visual(
+        self,
+        result: dict[str, Any],
+        *,
+        include_map_image: bool,
+        title: str,
+        subtitle: str,
+        markers: Sequence[MapMarker],
+        lines: Sequence[MapLine] = (),
+        circle: MapCircle | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        name: str = "地图.png",
+    ) -> dict[str, Any]:
+        root = self.settings.managed_file_root
+        if not include_map_image or root is None:
+            return result
+        points = [(marker.latitude, marker.longitude) for marker in markers]
+        for line in lines:
+            points.extend(line.points)
+        try:
+            fitted_bounds = bounds or scene_bounds(points, circle=circle)
+            descriptor = render_static_map(
+                root,
+                title=title,
+                subtitle=subtitle,
+                markers=markers,
+                lines=lines,
+                roads=self._background_roads(fitted_bounds),
+                circle=circle,
+                bounds=fitted_bounds,
+                name=name,
+            )
+        except Exception as exc:  # noqa: BLE001 - visualization is best effort
+            logger.warning("Static map rendering failed (%s)", type(exc).__name__)
+            return result
+        result["visualization"] = {
+            "type": "static_map",
+            "caption": title,
+            "media_type": "image/png",
+        }
+        result["managed_file"] = descriptor
+        return result
+
     def dataset_info(self) -> dict[str, Any]:
         database = self._connect(require_ready=False)
         try:
@@ -838,6 +943,7 @@ class MapService:
         longitude: float | None = None,
         coordinate_system: str = "wgs84",
         limit: int = 10,
+        include_map_image: bool = False,
     ) -> dict[str, Any]:
         query = query.strip()
         if not query or len(query) > 200:
@@ -981,8 +1087,9 @@ class MapService:
                 continue
             seen.add(key)
             deduped.append(row)
+        selected = deduped[:limit]
         items = []
-        for row in deduped[:limit]:
+        for row in selected:
             distance = (
                 _haversine_m(bias[0], bias[1], row["lat"], row["lon"])
                 if bias is not None
@@ -993,7 +1100,31 @@ class MapService:
                     row, distance_m=distance, coordinate_system=coordinate_system
                 )
             )
-        return {"query": query, "region": region, "results": items, "count": len(items)}
+        result = {
+            "query": query,
+            "region": region,
+            "results": items,
+            "count": len(items),
+        }
+        markers = [
+            MapMarker(
+                float(row["lat"]),
+                float(row["lon"]),
+                str(index),
+                "#7c3aed",
+            )
+            for index, row in enumerate(selected, start=1)
+        ]
+        if bias is not None:
+            markers.insert(0, MapMarker(bias[0], bias[1], "我", "#2563eb"))
+        return self._attach_visual(
+            result,
+            include_map_image=include_map_image,
+            title=f"地点搜索：{query}",
+            subtitle=f"{region + ' · ' if region else ''}{len(items)} 个结果",
+            markers=markers,
+            name="地点搜索地图.png",
+        )
 
     def nearby_search(
         self,
@@ -1005,6 +1136,7 @@ class MapService:
         query: str = "",
         categories: Sequence[str] = (),
         limit: int = 20,
+        include_map_image: bool = False,
     ) -> dict[str, Any]:
         wgs_lat, wgs_lon = convert_coordinate(
             latitude, longitude, coordinate_system, "wgs84"
@@ -1071,6 +1203,7 @@ class MapService:
         candidates.sort(key=lambda item: (item[0], item[1]["name"]))
         seen_keys: set[tuple[str, int]] = set()
         results = []
+        visual_rows: list[sqlite3.Row] = []
         for distance, row in candidates:
             key = (row["osm_type"], int(row["osm_id"]))
             if key in seen_keys:
@@ -1081,9 +1214,10 @@ class MapService:
                     row, distance_m=distance, coordinate_system=coordinate_system
                 )
             )
+            visual_rows.append(row)
             if len(results) >= limit:
                 break
-        return {
+        result = {
             "center": {
                 "latitude": latitude,
                 "longitude": longitude,
@@ -1093,6 +1227,25 @@ class MapService:
             "results": results,
             "count": len(results),
         }
+        markers = [MapMarker(wgs_lat, wgs_lon, "我", "#2563eb")]
+        markers.extend(
+            MapMarker(
+                float(row["lat"]),
+                float(row["lon"]),
+                str(index),
+                "#f97316",
+            )
+            for index, row in enumerate(visual_rows, start=1)
+        )
+        return self._attach_visual(
+            result,
+            include_map_image=include_map_image,
+            title=f"周边查找{f'：{query}' if query.strip() else ''}",
+            subtitle=f"半径{_format_distance_zh(radius_m)} · {len(results)} 个结果",
+            markers=markers,
+            circle=MapCircle(wgs_lat, wgs_lon, radius_m),
+            name="周边查找地图.png",
+        )
 
     def reverse_geocode(
         self,
@@ -1101,6 +1254,7 @@ class MapService:
         *,
         coordinate_system: str = "wgs84",
         nearby_limit: int = 5,
+        include_map_image: bool = False,
     ) -> dict[str, Any]:
         wgs_lat, wgs_lon = convert_coordinate(
             latitude, longitude, coordinate_system, "wgs84"
@@ -1172,7 +1326,8 @@ class MapService:
             label = nearby[0][1]["address"] or nearby[0][1]["name"]
             if label and label not in parts:
                 parts.append(label)
-        return {
+        selected_nearby = nearby[:nearby_limit]
+        result = {
             "location": {
                 "latitude": latitude,
                 "longitude": longitude,
@@ -1185,12 +1340,36 @@ class MapService:
                 _feature_result(
                     row, distance_m=distance, coordinate_system=coordinate_system
                 )
-                for distance, row in nearby[:nearby_limit]
+                for distance, row in selected_nearby
             ],
         }
+        markers = [MapMarker(wgs_lat, wgs_lon, "我", "#2563eb")]
+        markers.extend(
+            MapMarker(
+                float(row["lat"]),
+                float(row["lon"]),
+                str(index),
+                "#f97316",
+            )
+            for index, (_distance, row) in enumerate(selected_nearby, start=1)
+        )
+        return self._attach_visual(
+            result,
+            include_map_image=include_map_image,
+            title="当前位置",
+            subtitle=result["formatted_address"]
+            or f"附近 {len(selected_nearby)} 个地点",
+            markers=markers,
+            circle=MapCircle(wgs_lat, wgs_lon, 2_000),
+            name="当前位置地图.png",
+        )
 
     def get_place(
-        self, place_id: str, *, coordinate_system: str = "wgs84"
+        self,
+        place_id: str,
+        *,
+        coordinate_system: str = "wgs84",
+        include_map_image: bool = False,
     ) -> dict[str, Any]:
         match = re.fullmatch(
             r"osm:(node|way|relation|area):(-?\d+):([a-z_]+)", place_id
@@ -1209,7 +1388,42 @@ class MapService:
             database.close()
         if row is None:
             raise MapError("place_not_found", "place_id was not found in this dataset")
-        return _feature_result(row, coordinate_system=coordinate_system, details=True)
+        result = _feature_result(row, coordinate_system=coordinate_system, details=True)
+        shape_lines: list[MapLine] = []
+        try:
+            geometry = _read_wkb(row["geom"])
+            for raw_line in _iter_lines(geometry):
+                points = [(float(point[1]), float(point[0])) for point in raw_line]
+                if len(points) > 1_200:
+                    stride = math.ceil(len(points) / 1_200)
+                    points = points[::stride]
+                    endpoint = (float(raw_line[-1][1]), float(raw_line[-1][0]))
+                    if points[-1] != endpoint:
+                        points.append(endpoint)
+                if len(points) >= 2:
+                    shape_lines.append(
+                        MapLine(tuple(points), color="#7c3aed", width=5, outline=True)
+                    )
+                if len(shape_lines) >= 20:
+                    break
+        except (ValueError, struct.error, TypeError):
+            shape_lines = []
+        bounds = scene_bounds(
+            [
+                (float(row["min_lat"]), float(row["min_lon"])),
+                (float(row["max_lat"]), float(row["max_lon"])),
+            ]
+        )
+        return self._attach_visual(
+            result,
+            include_map_image=include_map_image,
+            title=str(row["name"] or "地点详情"),
+            subtitle=f"{result['category']}:{result['subcategory']}",
+            markers=[MapMarker(float(row["lat"]), float(row["lon"]), "1", "#7c3aed")],
+            lines=shape_lines,
+            bounds=bounds,
+            name="地点详情地图.png",
+        )
 
     def _resolve_candidates(
         self,
@@ -1487,6 +1701,27 @@ class MapService:
             steps.append(instruction)
         return steps
 
+    @staticmethod
+    def _route_step_points(
+        edges: Sequence[dict[str, Any]],
+        *,
+        start_latitude: float,
+        start_longitude: float,
+    ) -> list[tuple[float, float]]:
+        groups: list[tuple[tuple[str, str], tuple[float, float]]] = []
+        latitude, longitude = start_latitude, start_longitude
+        for edge in edges:
+            raw_name = str(edge.get("name") or "").strip()
+            highway = str(edge.get("highway") or "road")
+            key = (raw_name, "" if raw_name else highway)
+            if not groups or groups[-1][0] != key:
+                groups.append((key, (latitude, longitude)))
+            latitude = float(edge["neighbor_lat"])
+            longitude = float(edge["neighbor_lon"])
+        if len(groups) > 30:
+            groups = [*groups[:14], groups[14], *groups[-14:]]
+        return [point for _key, point in groups]
+
     def route(
         self,
         origin: str,
@@ -1496,6 +1731,7 @@ class MapService:
         coordinate_system: str = "wgs84",
         output_coordinate_system: str = "wgs84",
         include_geometry: bool = False,
+        include_map_image: bool = False,
     ) -> dict[str, Any]:
         if mode not in MODE_BITS:
             raise MapError(
@@ -1705,7 +1941,39 @@ class MapService:
                 "coordinates": geometry,
                 "coordinate_system": output_coordinate_system,
             }
-        return result
+        image_points = _douglas_peucker(points, max(2.0, distance / 100_000))
+        if len(image_points) > 2_000:
+            stride = math.ceil(len(image_points) / 2_000)
+            image_points = image_points[::stride]
+            if image_points[-1] != points[-1]:
+                image_points.append(points[-1])
+        step_points = self._route_step_points(
+            edges,
+            start_latitude=start_lat,
+            start_longitude=start_lon,
+        )
+        numbered_points = list(enumerate(step_points[1:], start=2))
+        if len(numbered_points) > 12:
+            numbered_points = [*numbered_points[:6], *numbered_points[-6:]]
+        markers = [
+            *(
+                MapMarker(latitude, longitude, str(index), "#f59e0b")
+                for index, (latitude, longitude) in numbered_points
+            ),
+            MapMarker(points[0][0], points[0][1], "起", "#16a34a"),
+            MapMarker(points[-1][0], points[-1][1], "终", "#dc2626"),
+        ]
+        return self._attach_visual(
+            result,
+            include_map_image=include_map_image,
+            title=f"{_MODE_LABELS[mode]}路线",
+            subtitle=result["summary"]["text"],
+            markers=markers,
+            lines=[
+                MapLine(tuple(image_points), color="#1677ff", width=7, outline=True)
+            ],
+            name="路线图.png",
+        )
 
     def distance(
         self,
@@ -1714,6 +1982,7 @@ class MapService:
         *,
         mode: str = "straight",
         coordinate_system: str = "wgs84",
+        include_map_image: bool = False,
     ) -> dict[str, Any]:
         if not origins or len(origins) > 16:
             raise MapError("invalid_origins", "origins must contain 1 to 16 locations")
@@ -1721,8 +1990,11 @@ class MapService:
             destination, coordinate_system=coordinate_system
         )
         results = []
+        visual_markers = [MapMarker(dest_lat, dest_lon, "终", "#dc2626")]
+        visual_lines: list[MapLine] = []
+        colors = ("#2563eb", "#7c3aed", "#0891b2", "#ea580c")
         if mode == "straight":
-            for origin in origins:
+            for index, origin in enumerate(origins, start=1):
                 latitude, longitude, match = self._resolve_location(
                     origin, coordinate_system=coordinate_system
                 )
@@ -1734,14 +2006,28 @@ class MapService:
                         ),
                     }
                 )
+                color = colors[(index - 1) % len(colors)]
+                visual_markers.append(MapMarker(latitude, longitude, str(index), color))
+                visual_lines.append(
+                    MapLine(
+                        ((latitude, longitude), (dest_lat, dest_lon)),
+                        color=color,
+                        width=4,
+                        outline=True,
+                    )
+                )
         elif mode in MODE_BITS:
             if len(origins) > 4:
                 raise MapError(
                     "route_matrix_too_large", "road distance accepts at most 4 origins"
                 )
-            for origin in origins:
+            for index, origin in enumerate(origins, start=1):
                 routed = self.route(
-                    origin, destination, mode=mode, coordinate_system=coordinate_system
+                    origin,
+                    destination,
+                    mode=mode,
+                    coordinate_system=coordinate_system,
+                    include_map_image=False,
                 )
                 results.append(
                     {
@@ -1750,12 +2036,36 @@ class MapService:
                         "duration_seconds": routed["duration_seconds"],
                     }
                 )
+                preview = routed["route_preview"]["coordinates"]
+                route_points = tuple(
+                    (float(point[1]), float(point[0])) for point in preview
+                )
+                if route_points:
+                    color = colors[(index - 1) % len(colors)]
+                    visual_markers.append(
+                        MapMarker(
+                            route_points[0][0], route_points[0][1], str(index), color
+                        )
+                    )
+                    visual_lines.append(
+                        MapLine(route_points, color=color, width=5, outline=True)
+                    )
         else:
             raise MapError(
                 "invalid_distance_mode",
                 "distance mode must be straight, walking, cycling or driving",
             )
-        return {"mode": mode, "destination": dest_match, "results": results}
+        result = {"mode": mode, "destination": dest_match, "results": results}
+        mode_label = "直线" if mode == "straight" else _MODE_LABELS[mode]
+        return self._attach_visual(
+            result,
+            include_map_image=include_map_image,
+            title="距离比较",
+            subtitle=f"{mode_label}距离 · {len(results)} 个起点",
+            markers=visual_markers,
+            lines=visual_lines,
+            name="距离比较地图.png",
+        )
 
     def categories(self) -> dict[str, Any]:
         return {"categories": category_inventory()}

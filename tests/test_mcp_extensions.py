@@ -175,7 +175,9 @@ def _provider(config: MCPServerConfig, client: _FakeMCPClient) -> MCPServerProvi
 
 
 @pytest.mark.asyncio
-async def test_mcp_negotiation_prefers_discover_and_falls_back_only_for_legacy() -> None:
+async def test_mcp_negotiation_prefers_discover_and_falls_back_only_for_legacy() -> (
+    None
+):
     from mcp import types
     from mcp.shared.exceptions import MCPError
 
@@ -402,9 +404,7 @@ async def test_mcp_elicitation_uses_current_tool_step_interaction_owner(
     registry = ToolRegistry()
     manager = ExtensionManager(registry, (_provider(_config(), client),))
     await manager.start()
-    interaction = _InteractionPort(
-        {"action": "accept", "content": {"choice": "a"}}
-    )
+    interaction = _InteractionPort({"action": "accept", "content": {"choice": "a"}})
 
     result = await ToolStep(registry, ToolArgumentPolicy(tmp_path)).execute(
         _context(
@@ -454,6 +454,69 @@ async def test_mcp_structured_result_drops_duplicate_json_text(tmp_path: Path) -
     await manager.stop()
 
     assert result.output == {"structured_content": payload}
+
+
+@pytest.mark.asyncio
+async def test_mcp_managed_file_becomes_artifact_without_private_descriptor(
+    tmp_path: Path,
+) -> None:
+    definition = MCPToolDefinition(
+        name="ping",
+        description="Ping",
+        input_schema={"type": "object", "properties": {}},
+    )
+    descriptor = {
+        "kind": "managed_file",
+        "relative_handle": "map.png",
+        "name": "地图.png",
+        "media_type": "image/png",
+        "size_bytes": 123,
+        "sha256": "a" * 64,
+    }
+    client = _FakeMCPClient(
+        (definition,),
+        SimpleNamespace(
+            content=[],
+            structuredContent={"answer": 42, "managed_file": descriptor},
+            isError=False,
+        ),
+    )
+
+    class Store:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def import_managed_file(self, session_id, managed_root, received):
+            self.calls.append((session_id, managed_root, received))
+            return {"artifact_id": "artifact-map", "name": "地图.png"}
+
+    store = Store()
+    managed_root = tmp_path / "managed"
+    registry = ToolRegistry()
+    manager = ExtensionManager(
+        registry,
+        (
+            MCPServerProvider(
+                "docs",
+                _config(),
+                client_factory=lambda _config: client,
+                managed_file_root=managed_root,
+                artifact_store=store,
+            ),
+        ),
+    )
+    await manager.start()
+    result = await ToolStep(registry, ToolArgumentPolicy(tmp_path)).execute(
+        _context(frozenset({ToolCapability.NETWORK, ToolCapability.MCP})),
+        ProposedToolCall(call_id="call-a", name="mcp__docs__ping"),
+    )
+    await manager.stop()
+
+    assert result.output == {
+        "structured_content": {"answer": 42},
+        "artifact": {"artifact_id": "artifact-map", "name": "地图.png"},
+    }
+    assert store.calls == [("session-a", managed_root.resolve(), descriptor)]
 
 
 @pytest.mark.asyncio
@@ -1112,14 +1175,18 @@ async def test_mcp_client_read_only_tools_concurrency_and_write_exclusion() -> N
             nonlocal active_concurrent_calls, max_concurrent_reads, writer_conflict
             if name.startswith("read"):
                 active_concurrent_calls += 1
-                max_concurrent_reads = max(max_concurrent_reads, active_concurrent_calls)
+                max_concurrent_reads = max(
+                    max_concurrent_reads, active_concurrent_calls
+                )
                 await asyncio.sleep(0.04)
                 active_concurrent_calls -= 1
             else:
                 if active_concurrent_calls > 0:
                     writer_conflict = True
                 await asyncio.sleep(0.04)
-            return SimpleNamespace(content=[SimpleNamespace(type="text", text=name)], isError=False)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text=name)], isError=False
+            )
 
     client._session = MockSession()
 
@@ -1177,7 +1244,9 @@ async def test_mcp_client_call_tool_auto_reconnects_on_connection_closed() -> No
             attempts += 1
             if attempts == 1:
                 raise MCPError(code=CONNECTION_CLOSED, message="Connection closed")
-            return SimpleNamespace(content=[SimpleNamespace(type="text", text="recovered")], isError=False)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="recovered")], isError=False
+            )
 
     client._session = MockSession()
     restarted = False
@@ -1192,5 +1261,3 @@ async def test_mcp_client_call_tool_auto_reconnects_on_connection_closed() -> No
     assert attempts == 2
     assert restarted is True
     assert result.content[0].text == "recovered"
-
-

@@ -1,4 +1,5 @@
 """Manually imported local MCP packages discovered below the runtime root."""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +9,7 @@ from pathlib import Path
 import shutil
 import stat
 import sys
+from typing import Any
 import uuid
 
 import yaml
@@ -170,14 +172,14 @@ def build_mcp_package_providers(
     *,
     excluded_ids: frozenset[str] = frozenset(),
     secret_root: str | Path | None = None,
+    managed_file_root: str | Path | None = None,
+    artifact_store: Any | None = None,
 ) -> tuple[MCPServerProvider, ...]:
     """Discover safe package directories; each manifest loads in its own lifecycle."""
 
     resolved = Path(root).expanduser().resolve()
     resolved_secret_root = (
-        Path(secret_root).expanduser().resolve()
-        if secret_root is not None
-        else None
+        Path(secret_root).expanduser().resolve() if secret_root is not None else None
     )
     if not resolved.is_dir():
         return ()
@@ -185,7 +187,9 @@ def build_mcp_package_providers(
     for package_root in sorted(path for path in resolved.iterdir() if path.is_dir()):
         server_id = package_root.name
         if not MCP_SERVER_ID_PATTERN.fullmatch(server_id):
-            logger.warning("Ignoring MCP package with unsafe directory name: %s", package_root)
+            logger.warning(
+                "Ignoring MCP package with unsafe directory name: %s", package_root
+            )
             continue
         if server_id in excluded_ids:
             logger.warning(
@@ -199,14 +203,19 @@ def build_mcp_package_providers(
         try:
             manifest = yaml.safe_load(_read_manifest(package_root))
         except (OSError, ValueError, yaml.YAMLError) as exc:
-            logger.warning("Ignoring unreadable local MCP package %s: %s", package_root, exc)
+            logger.warning(
+                "Ignoring unreadable local MCP package %s: %s", package_root, exc
+            )
             continue
         if (
             isinstance(manifest, dict)
             and manifest.get("transport", "stdio") == "stdio"
             and not str(manifest.get("command", "")).strip()
         ):
-            logger.warning("Ignoring incomplete local MCP package without command: %s", package_root)
+            logger.warning(
+                "Ignoring incomplete local MCP package without command: %s",
+                package_root,
+            )
             continue
         providers.append(
             MCPServerProvider(
@@ -218,6 +227,12 @@ def build_mcp_package_providers(
                     resolved_secret_root,
                     server_id,
                 ),
+                managed_file_root=(
+                    Path(managed_file_root) / server_id
+                    if managed_file_root is not None
+                    else None
+                ),
+                artifact_store=artifact_store,
             )
         )
     return tuple(providers)
@@ -225,9 +240,7 @@ def build_mcp_package_providers(
 
 def _is_hidden_metadata(name: str) -> bool:
     return (
-        name.startswith(".")
-        or name == "__pycache__"
-        or name.endswith((".pyc", ".pyo"))
+        name.startswith(".") or name == "__pycache__" or name.endswith((".pyc", ".pyo"))
     )
 
 
@@ -282,6 +295,8 @@ class MCPPackageService:
         *,
         reserved_ids: frozenset[str] = frozenset(),
         secret_root: str | Path | None = None,
+        managed_file_root: str | Path | None = None,
+        artifact_store: Any | None = None,
     ) -> None:
         self._package_root = Path(package_root).expanduser().resolve()
         self._staging_root = Path(staging_root).expanduser().resolve()
@@ -294,6 +309,12 @@ class MCPPackageService:
             if secret_root is not None
             else None
         )
+        self._managed_file_root = (
+            Path(managed_file_root).expanduser().resolve()
+            if managed_file_root is not None
+            else None
+        )
+        self._artifact_store = artifact_store
         self._import_lock = asyncio.Lock()
 
     async def deploy_local(
@@ -405,6 +426,12 @@ class MCPPackageService:
                 self._secret_root,
                 server_id,
             ),
+            managed_file_root=(
+                self._managed_file_root / server_id
+                if self._managed_file_root is not None
+                else None
+            ),
+            artifact_store=self._artifact_store,
         )
         try:
             status = await self._manager.add_provider(provider)
@@ -424,6 +451,12 @@ class MCPPackageService:
                         self._secret_root,
                         server_id,
                     ),
+                    managed_file_root=(
+                        self._managed_file_root / server_id
+                        if self._managed_file_root is not None
+                        else None
+                    ),
+                    artifact_store=self._artifact_store,
                 )
                 restored_status = await self._manager.add_provider(restored)
                 if restored_status.state is ExtensionState.RUNNING:

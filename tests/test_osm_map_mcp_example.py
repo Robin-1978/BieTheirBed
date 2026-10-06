@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from argparse import Namespace
 from pathlib import Path
@@ -8,6 +9,7 @@ import struct
 import sys
 
 import pytest
+from PIL import Image
 import yaml
 
 from examples.osm_map_mcp_server import update_map
@@ -312,6 +314,53 @@ def test_offline_map_queries_and_routes(tmp_path: Path) -> None:
         service.route("31.202,121.402", "31.200,121.400", mode="driving")
 
 
+def test_spatial_queries_render_valid_managed_pngs(tmp_path: Path) -> None:
+    managed_root = tmp_path / "managed"
+    service = MapService(
+        MapSettings(
+            database_path=_database(tmp_path),
+            managed_file_root=managed_root,
+        )
+    )
+
+    results = [
+        service.search_places("东方咖啡", include_map_image=True),
+        service.nearby_search(
+            31.201,
+            121.401,
+            radius_m=500,
+            categories=("amenity:cafe",),
+            include_map_image=True,
+        ),
+        service.reverse_geocode(31.201, 121.401, include_map_image=True),
+        service.get_place("osm:way:100:road", include_map_image=True),
+        service.route(
+            "31.200,121.400",
+            "31.202,121.402",
+            mode="walking",
+            include_map_image=True,
+        ),
+        service.distance(
+            ("31.200,121.400", "31.201,121.401"),
+            "31.202,121.402",
+            include_map_image=True,
+        ),
+    ]
+
+    for result in results:
+        assert result["visualization"]["type"] == "static_map"
+        descriptor = result["managed_file"]
+        path = managed_root / descriptor["relative_handle"]
+        data = path.read_bytes()
+        assert descriptor["kind"] == "managed_file"
+        assert descriptor["media_type"] == "image/png"
+        assert descriptor["size_bytes"] == len(data)
+        assert descriptor["sha256"] == hashlib.sha256(data).hexdigest()
+        with Image.open(path) as image:
+            assert image.format == "PNG"
+            assert image.size == (960, 600)
+
+
 def test_route_steps_preserve_unnamed_road_types_and_turns() -> None:
     steps = MapService._route_steps(
         [
@@ -431,6 +480,18 @@ def test_map_tool_guidance_and_fruit_taxonomy() -> None:
             "ordinary directions so the result stays compact."
         ),
     }
+    for name in (
+        "map.search_places",
+        "map.reverse_geocode",
+        "map.nearby_search",
+        "map.get_place",
+        "map.route",
+        "map.distance",
+    ):
+        assert (
+            tools[name].input_schema["properties"]["include_map_image"]["default"]
+            is True
+        )
     assert "水果" in category_terms("shop", "greengrocer")
 
 

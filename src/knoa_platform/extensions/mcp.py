@@ -1083,9 +1083,8 @@ class MCPTool(ToolBase):
         input_schema: dict[str, Any],
         policy: MCPToolPolicyConfig,
         client: MCPClientPort,
-        managed_file_importer: Callable[
-            [str, dict[str, Any]], dict[str, Any]
-        ] | None = None,
+        managed_file_importer: Callable[[str, dict[str, Any]], dict[str, Any]]
+        | None = None,
     ) -> None:
         self.name = public_name
         self.description = description or f"MCP tool {remote_name}"
@@ -1145,7 +1144,7 @@ class MCPTool(ToolBase):
             )
             return await handle.wait()
 
-        is_read_only = (self.effect == ToolEffect.READ_ONLY)
+        is_read_only = self.effect == ToolEffect.READ_ONLY
         try:
             try:
                 result = await self._client.call_tool(
@@ -1167,9 +1166,7 @@ class MCPTool(ToolBase):
         rendered = _render_mcp_result(result)
         structured = rendered.get("structured_content")
         descriptor = (
-            structured.get("managed_file")
-            if isinstance(structured, dict)
-            else None
+            structured.get("managed_file") if isinstance(structured, dict) else None
         )
         if descriptor is not None:
             if self._managed_file_importer is None or scope is None:
@@ -1181,6 +1178,9 @@ class MCPTool(ToolBase):
                 )
             except Exception:  # noqa: BLE001 - untrusted MCP descriptor
                 return {"error": "MCP managed-file validation failed"}
+            rendered["structured_content"] = {
+                key: value for key, value in structured.items() if key != "managed_file"
+            }
             rendered["artifact"] = artifact
         return rendered
 
@@ -1332,11 +1332,15 @@ class MCPServerProvider(ExtensionProvider):
             prompts = await client.list_prompts()
         except Exception:  # noqa: BLE001 - optional MCP capability
             prompts = ()
-        if self._expected_inventory_digest and mcp_inventory_digest(
-            discovered_tools,
-            resources,
-            prompts,
-        ) != self._expected_inventory_digest:
+        if (
+            self._expected_inventory_digest
+            and mcp_inventory_digest(
+                discovered_tools,
+                resources,
+                prompts,
+            )
+            != self._expected_inventory_digest
+        ):
             raise RuntimeError("MCP inventory drifted after permission review")
         definitions = {definition.name: definition for definition in discovered_tools}
         tools: list[ToolBase] = []
@@ -1356,10 +1360,12 @@ class MCPServerProvider(ExtensionProvider):
                         None
                         if self._managed_file_root is None
                         or self._artifact_store is None
-                        else lambda session_id, descriptor: self._artifact_store.import_managed_file(
-                            session_id,
-                            self._managed_file_root,
-                            descriptor,
+                        else lambda session_id, descriptor: (
+                            self._artifact_store.import_managed_file(
+                                session_id,
+                                self._managed_file_root,
+                                descriptor,
+                            )
                         )
                     ),
                 )

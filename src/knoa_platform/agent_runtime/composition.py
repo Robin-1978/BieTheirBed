@@ -994,6 +994,8 @@ def build_core_runtime(
         paths.mcp,
         excluded_ids=frozenset(managed.mcp_servers),
         secret_root=paths.mcp_secrets,
+        managed_file_root=paths.cache / "mcp-managed-files",
+        artifact_store=artifacts,
     )
     mcp_providers = (*configured_mcp_providers, *package_mcp_providers)
     extensions = ExtensionManager(
@@ -1536,6 +1538,8 @@ def build_core_runtime(
             if config.package_id
         ),
         secret_root=paths.mcp_secrets,
+        managed_file_root=paths.cache / "mcp-managed-files",
+        artifact_store=artifacts,
     )
     delegation_repository = DelegationRepository(database)
     delegations = DelegationService(

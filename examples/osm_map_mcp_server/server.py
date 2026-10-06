@@ -38,6 +38,11 @@ _COORDINATE_SYSTEM = {
 }
 _LATITUDE = {"type": "number", "minimum": -90, "maximum": 90}
 _LONGITUDE = {"type": "number", "minimum": -180, "maximum": 180}
+_MAP_IMAGE = {
+    "type": "boolean",
+    "default": True,
+    "description": "Attach a rendered offline map image to the conversation.",
+}
 _READ_ONLY = types.ToolAnnotations(
     read_only_hint=True,
     destructive_hint=False,
@@ -53,7 +58,8 @@ def _tool_definitions() -> list[types.Tool]:
             title="Search offline map places",
             description=(
                 "Search Chinese places, addresses, roads, brands and POIs in the local OSM "
-                "dataset. Use region to disambiguate names and coordinates to bias ranking."
+                "dataset. Use region to disambiguate names and coordinates to bias ranking. "
+                "Returns a numbered map image by default."
             ),
             input_schema=_schema(
                 {
@@ -62,6 +68,7 @@ def _tool_definitions() -> list[types.Tool]:
                     "latitude": _LATITUDE,
                     "longitude": _LONGITUDE,
                     "coordinate_system": _COORDINATE_SYSTEM,
+                    "include_map_image": _MAP_IMAGE,
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
@@ -78,13 +85,15 @@ def _tool_definitions() -> list[types.Tool]:
             title="Reverse geocode offline coordinates",
             description=(
                 "Return containing administrative areas plus nearby addresses, roads and "
-                "places for one coordinate. Latitude and longitude are separate fields."
+                "places for one coordinate. Latitude and longitude are separate fields. "
+                "Returns a current-location map image by default."
             ),
             input_schema=_schema(
                 {
                     "latitude": _LATITUDE,
                     "longitude": _LONGITUDE,
                     "coordinate_system": _COORDINATE_SYSTEM,
+                    "include_map_image": _MAP_IMAGE,
                     "nearby_limit": {
                         "type": "integer",
                         "minimum": 0,
@@ -103,13 +112,15 @@ def _tool_definitions() -> list[types.Tool]:
                 "Find places within a true circular radius. Optional categories accept an "
                 "OSM value such as cafe or a qualified value such as amenity:cafe. Use "
                 "for nearby/周边/附近/哪里买 requests. For fruit try shop:greengrocer, "
-                "shop:supermarket and shop:convenience together."
+                "shop:supermarket and shop:convenience together. Returns a numbered radius "
+                "map image by default."
             ),
             input_schema=_schema(
                 {
                     "latitude": _LATITUDE,
                     "longitude": _LONGITUDE,
                     "coordinate_system": _COORDINATE_SYSTEM,
+                    "include_map_image": _MAP_IMAGE,
                     "radius_m": {
                         "type": "integer",
                         "minimum": 10,
@@ -136,7 +147,10 @@ def _tool_definitions() -> list[types.Tool]:
         types.Tool(
             name="map.get_place",
             title="Read offline place details",
-            description="Read details for one stable place_id returned by another map tool.",
+            description=(
+                "Read details for one stable place_id returned by another map tool. Returns "
+                "a place or boundary map image by default."
+            ),
             input_schema=_schema(
                 {
                     "place_id": {
@@ -144,6 +158,7 @@ def _tool_definitions() -> list[types.Tool]:
                         "pattern": r"^osm:(node|way|relation|area):-?[0-9]+:[a-z_]+$",
                     },
                     "coordinate_system": _COORDINATE_SYSTEM,
+                    "include_map_image": _MAP_IMAGE,
                 },
                 ["place_id"],
             ),
@@ -160,7 +175,8 @@ def _tool_definitions() -> list[types.Tool]:
                 "打开高德地图导航 link. route_preview is a compact line for UI rendering; "
                 "request include_geometry only when exact route coordinates are required. "
                 "Routes over 300 km are rejected; report that limit instead of inventing "
-                "roads, travel time, tolls or fuel cost."
+                "roads, travel time, tolls or fuel cost. Returns a route map image with "
+                "start, destination and turn markers by default."
             ),
             input_schema=_schema(
                 {
@@ -181,6 +197,7 @@ def _tool_definitions() -> list[types.Tool]:
                             "ordinary directions so the result stays compact."
                         ),
                     },
+                    "include_map_image": _MAP_IMAGE,
                 },
                 ["origin", "destination"],
             ),
@@ -191,7 +208,8 @@ def _tool_definitions() -> list[types.Tool]:
             title="Calculate offline map distances",
             description=(
                 "Calculate straight-line distance for up to 16 origins, or walking, cycling "
-                "or driving distance for up to 4 origins, to one destination."
+                "or driving distance for up to 4 origins, to one destination. Returns a "
+                "numbered comparison map image by default."
             ),
             input_schema=_schema(
                 {
@@ -208,6 +226,7 @@ def _tool_definitions() -> list[types.Tool]:
                         "default": "straight",
                     },
                     "coordinate_system": _COORDINATE_SYSTEM,
+                    "include_map_image": _MAP_IMAGE,
                 },
                 ["origins", "destination"],
             ),
@@ -261,7 +280,8 @@ class OSMMapMCPApplication:
                 "Offline China map backed by OpenStreetMap. Coordinates use explicit "
                 "latitude/longitude fields; route text coordinates use latitude,longitude. "
                 "Use map.route for 怎么走/路线/导航 requests and map.nearby_search for "
-                "周边/附近 requests. "
+                "周边/附近 requests. Spatial tools attach an offline map image by default; "
+                "match numbered markers to the structured result order or route steps. "
                 "Inspect map://dataset when source age or supported capabilities matter."
             ),
             on_list_resources=self._list_resources,
@@ -336,6 +356,7 @@ class OSMMapMCPApplication:
                         arguments.get("coordinate_system") or "wgs84"
                     ),
                     limit=int(arguments.get("limit", 10)),
+                    include_map_image=bool(arguments.get("include_map_image", True)),
                 )
             elif name == "map.reverse_geocode":
                 result = await asyncio.to_thread(
@@ -346,6 +367,7 @@ class OSMMapMCPApplication:
                         arguments.get("coordinate_system") or "wgs84"
                     ),
                     nearby_limit=int(arguments.get("nearby_limit", 5)),
+                    include_map_image=bool(arguments.get("include_map_image", True)),
                 )
             elif name == "map.nearby_search":
                 result = await asyncio.to_thread(
@@ -359,6 +381,7 @@ class OSMMapMCPApplication:
                     query=str(arguments.get("query") or ""),
                     categories=tuple(arguments.get("categories") or ()),
                     limit=int(arguments.get("limit", 20)),
+                    include_map_image=bool(arguments.get("include_map_image", True)),
                 )
             elif name == "map.get_place":
                 result = await asyncio.to_thread(
@@ -367,6 +390,7 @@ class OSMMapMCPApplication:
                     coordinate_system=str(
                         arguments.get("coordinate_system") or "wgs84"
                     ),
+                    include_map_image=bool(arguments.get("include_map_image", True)),
                 )
             elif name == "map.route":
                 result = await asyncio.to_thread(
@@ -381,6 +405,7 @@ class OSMMapMCPApplication:
                         arguments.get("output_coordinate_system") or "wgs84"
                     ),
                     include_geometry=bool(arguments.get("include_geometry", False)),
+                    include_map_image=bool(arguments.get("include_map_image", True)),
                 )
             elif name == "map.distance":
                 result = await asyncio.to_thread(
@@ -391,6 +416,7 @@ class OSMMapMCPApplication:
                     coordinate_system=str(
                         arguments.get("coordinate_system") or "wgs84"
                     ),
+                    include_map_image=bool(arguments.get("include_map_image", True)),
                 )
             elif name == "map.convert_coordinates":
                 source, target = str(arguments["source"]), str(arguments["target"])

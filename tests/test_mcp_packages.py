@@ -88,9 +88,7 @@ def test_private_mcp_environment_is_server_scoped_and_requires_0600(
     path.write_text('JIRA_API_TOKEN="safe-$value"\n', encoding="utf-8")
     path.chmod(0o600)
 
-    assert load_mcp_private_environment(path) == {
-        "JIRA_API_TOKEN": "safe-$value"
-    }
+    assert load_mcp_private_environment(path) == {"JIRA_API_TOKEN": "safe-$value"}
 
     path.chmod(0o644)
     with pytest.raises(PermissionError, match="0600"):
@@ -122,6 +120,24 @@ def test_configured_server_takes_precedence_over_local_package(tmp_path: Path) -
     )
 
     assert providers == ()
+
+
+def test_local_package_provider_gets_scoped_managed_file_delivery(
+    tmp_path: Path,
+) -> None:
+    _write_package(tmp_path / "packages", "monitor")
+    artifact_store = object()
+    managed_root = tmp_path / "managed"
+
+    providers = build_mcp_package_providers(
+        tmp_path / "packages",
+        managed_file_root=managed_root,
+        artifact_store=artifact_store,
+    )
+
+    assert len(providers) == 1
+    assert providers[0]._managed_file_root == (managed_root / "monitor").resolve()
+    assert providers[0]._artifact_store is artifact_store
 
 
 @pytest.mark.asyncio
@@ -243,11 +259,15 @@ async def test_deploy_update_preserves_resource_task_and_replaces_package(
     manager = ExtensionManager(ToolRegistry())
     manager._running = True
     resource_tasks = _ResourceTasks()
+    artifact_store = object()
+    managed_root = tmp_path / "runtime" / "cache" / "mcp-managed-files"
     service = MCPPackageService(
         tmp_path / "runtime" / "mcp",
         tmp_path / "runtime" / "cache" / "mcp-imports",
         manager,
         resource_tasks,  # type: ignore[arg-type]
+        managed_file_root=managed_root,
+        artifact_store=artifact_store,
     )
 
     async def running(provider):
@@ -280,6 +300,11 @@ async def test_deploy_update_preserves_resource_task_and_replaces_package(
     assert updated == "updated"
     assert (target / "version.txt").read_text(encoding="utf-8") == "two"
     assert config.resource_tasks["assigned"] == route
+    assert (
+        service._providers["jira"]._managed_file_root
+        == (managed_root / "jira").resolve()
+    )
+    assert service._providers["jira"]._artifact_store is artifact_store
 
 
 @pytest.mark.asyncio
