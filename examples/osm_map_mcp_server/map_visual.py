@@ -332,12 +332,6 @@ def render_static_map(
                 break
         if (x, y) != (origin_x, origin_y):
             draw.line((origin_x, origin_y, x, y), fill=marker.color, width=2)
-            draw.ellipse(
-                (origin_x - 4, origin_y - 4, origin_x + 4, origin_y + 4),
-                fill=marker.color,
-                outline="#ffffff",
-                width=1,
-            )
         draw.ellipse(
             (x - radius - 3, y - radius - 3, x + radius + 3, y + radius + 3),
             fill="#ffffff",
