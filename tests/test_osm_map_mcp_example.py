@@ -17,6 +17,8 @@ from examples.osm_map_mcp_server.map_service import (
     convert_coordinate,
     search_document,
 )
+from examples.osm_map_mcp_server.server import _tool_definitions
+from examples.osm_map_mcp_server.taxonomy import category_terms
 from knoa_platform.extensions.mcp import StdioMCPClient
 from knoa_platform.extensions.models import MCPServerConfig
 
@@ -83,6 +85,9 @@ def _feature(
     admin_level: int = 0,
     address: str = "",
     brand: str = "",
+    aliases: str = "",
+    population: int = 0,
+    admin_context: str = "上海市测试区",
 ) -> tuple:
     min_lat, min_lon, max_lat, max_lon = bounds or (
         latitude,
@@ -90,21 +95,29 @@ def _feature(
         latitude,
         longitude,
     )
-    document = search_document(name, brand, address, category, subcategory)
+    document = search_document(
+        name,
+        aliases,
+        brand,
+        address,
+        admin_context,
+        category,
+        subcategory,
+    )
     return (
         feature_id,
         osm_type,
         osm_id,
         feature_type,
         name,
-        "",
+        aliases,
         brand,
         category,
         subcategory,
         admin_level,
-        0,
+        population,
         address,
-        "上海市测试区",
+        admin_context,
         "",
         "",
         "",
@@ -267,6 +280,7 @@ def test_offline_map_queries_and_routes(tmp_path: Path) -> None:
         mode="walking",
     )
     assert route["distance_m"] == 292
+    assert "geometry" not in route
     assert route["steps"] == [
         {
             "instruction": "沿测试路行进",
@@ -276,8 +290,114 @@ def test_offline_map_queries_and_routes(tmp_path: Path) -> None:
         }
     ]
 
+    route_with_geometry = service.route(
+        "31.200,121.400",
+        "31.202,121.402",
+        mode="walking",
+        include_geometry=True,
+    )
+    assert route_with_geometry["geometry"]["type"] == "LineString"
+    assert route_with_geometry["geometry"]["coordinates"] == [
+        [121.4, 31.2],
+        [121.402, 31.202],
+    ]
+
     with pytest.raises(Exception, match="not connected"):
         service.route("31.202,121.402", "31.200,121.400", mode="driving")
+
+
+def test_location_resolution_prefers_real_city_over_local_name(tmp_path: Path) -> None:
+    database_path = _database(tmp_path)
+    extra_rows = [
+        _feature(
+            6,
+            "node",
+            6,
+            "poi",
+            "老君山游客中心",
+            "tourism",
+            "information",
+            33.7484,
+            111.6609,
+            admin_context="河南省洛阳市栾川县",
+        ),
+        _feature(
+            7,
+            "node",
+            7,
+            "place",
+            "上海",
+            "place",
+            "village",
+            33.7500,
+            111.6620,
+            population=500,
+            admin_context="河南省洛阳市栾川县",
+        ),
+        _feature(
+            8,
+            "relation",
+            8,
+            "place",
+            "上海市",
+            "place",
+            "city",
+            31.2304,
+            121.4737,
+            aliases="上海",
+            population=24_000_000,
+            admin_context="中国",
+        ),
+    ]
+    database = sqlite3.connect(database_path)
+    database.executemany(
+        "INSERT INTO features VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        extra_rows,
+    )
+    database.executemany(
+        "INSERT INTO features_rtree VALUES (?,?,?,?,?)",
+        [(row[0], row[19], row[21], row[20], row[22]) for row in extra_rows],
+    )
+    database.executemany(
+        "INSERT INTO feature_fts(rowid,search_text) VALUES (?,?)",
+        [(row[0], row[25]) for row in extra_rows],
+    )
+    database.commit()
+    database.close()
+
+    service = MapService(MapSettings(database_path=database_path))
+    search = service.search_places(
+        "上海", latitude=33.7484, longitude=111.6609, limit=3
+    )
+    assert search["results"][0]["name"] == "上海市"
+    center_search = service.search_places(
+        "上海市中心", latitude=33.7484, longitude=111.6609, limit=3
+    )
+    assert center_search["results"][0]["name"] == "上海市"
+
+    candidates = service._resolve_candidates(
+        "上海市中心",
+        coordinate_system="wgs84",
+        bias_latitude=33.7484,
+        bias_longitude=111.6609,
+    )
+    assert candidates[0][2]["resolved_query"] == "上海市"
+    assert candidates[0][2]["place"]["name"] == "上海市"
+
+
+def test_map_tool_guidance_and_fruit_taxonomy() -> None:
+    tools = {tool.name: tool for tool in _tool_definitions()}
+    assert "怎么走" in tools["map.route"].description
+    assert "附近" in tools["map.nearby_search"].description
+    assert tools["map.route"].input_schema["properties"]["include_geometry"] == {
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Return route line coordinates for map rendering. Leave false for "
+            "ordinary directions so the result stays compact."
+        ),
+    }
+    assert "水果" in category_terms("shop", "greengrocer")
 
 
 def test_coordinate_conversion_round_trip() -> None:

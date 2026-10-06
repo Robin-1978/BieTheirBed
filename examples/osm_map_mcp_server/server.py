@@ -101,7 +101,9 @@ def _tool_definitions() -> list[types.Tool]:
             title="Search nearby offline places",
             description=(
                 "Find places within a true circular radius. Optional categories accept an "
-                "OSM value such as cafe or a qualified value such as amenity:cafe."
+                "OSM value such as cafe or a qualified value such as amenity:cafe. Use "
+                "for nearby/周边/附近/哪里买 requests. For fruit try shop:greengrocer, "
+                "shop:supermarket and shop:convenience together."
             ),
             input_schema=_schema(
                 {
@@ -152,7 +154,10 @@ def _tool_definitions() -> list[types.Tool]:
             title="Plan an offline route",
             description=(
                 "Plan a walking, cycling or driving route on the local OSM road graph. "
-                "origin and destination accept place text or 'latitude,longitude'."
+                "Use whenever the user asks 怎么走、路线、导航、步行、骑车 or 开车. "
+                "origin and destination accept place text or 'latitude,longitude'. Routes "
+                "over 300 km are rejected; report that limit instead of inventing roads, "
+                "travel time, tolls or fuel cost."
             ),
             input_schema=_schema(
                 {
@@ -165,6 +170,14 @@ def _tool_definitions() -> list[types.Tool]:
                     },
                     "coordinate_system": _COORDINATE_SYSTEM,
                     "output_coordinate_system": _COORDINATE_SYSTEM,
+                    "include_geometry": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Return route line coordinates for map rendering. Leave false for "
+                            "ordinary directions so the result stays compact."
+                        ),
+                    },
                 },
                 ["origin", "destination"],
             ),
@@ -244,6 +257,8 @@ class OSMMapMCPApplication:
             instructions=(
                 "Offline China map backed by OpenStreetMap. Coordinates use explicit "
                 "latitude/longitude fields; route text coordinates use latitude,longitude. "
+                "Use map.route for 怎么走/路线/导航 requests and map.nearby_search for "
+                "周边/附近 requests. "
                 "Inspect map://dataset when source age or supported capabilities matter."
             ),
             on_list_resources=self._list_resources,
@@ -362,6 +377,7 @@ class OSMMapMCPApplication:
                     output_coordinate_system=str(
                         arguments.get("output_coordinate_system") or "wgs84"
                     ),
+                    include_geometry=bool(arguments.get("include_geometry", False)),
                 )
             elif name == "map.distance":
                 result = await asyncio.to_thread(
