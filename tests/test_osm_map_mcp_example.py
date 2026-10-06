@@ -281,14 +281,20 @@ def test_offline_map_queries_and_routes(tmp_path: Path) -> None:
     )
     assert route["distance_m"] == 292
     assert "geometry" not in route
-    assert route["steps"] == [
-        {
-            "instruction": "沿测试路行进",
-            "name": "测试路",
-            "highway": "residential",
-            "distance_m": 292,
-        }
+    assert route["summary"] == {
+        "text": "步行292米，预计4分钟",
+        "mode_label": "步行",
+        "distance": "292米",
+        "duration": "4分钟",
+    }
+    assert route["steps"] == ["出发，向东北沿测试路行进292米，随后到达目的地"]
+    assert route["route_preview"]["coordinates"] == [
+        [121.4, 31.2],
+        [121.402, 31.202],
     ]
+    assert route["navigation"]["label"] == "打开高德地图导航"
+    assert "mode=walk" in route["navigation"]["url"]
+    assert "coordinate=gaode" in route["navigation"]["url"]
 
     route_with_geometry = service.route(
         "31.200,121.400",
@@ -304,6 +310,34 @@ def test_offline_map_queries_and_routes(tmp_path: Path) -> None:
 
     with pytest.raises(Exception, match="not connected"):
         service.route("31.202,121.402", "31.200,121.400", mode="driving")
+
+
+def test_route_steps_preserve_unnamed_road_types_and_turns() -> None:
+    steps = MapService._route_steps(
+        [
+            {
+                "neighbor_lat": 31.0,
+                "neighbor_lon": 121.001,
+                "name": "",
+                "highway": "unclassified",
+                "length_m": 100.0,
+            },
+            {
+                "neighbor_lat": 31.001,
+                "neighbor_lon": 121.001,
+                "name": "",
+                "highway": "path",
+                "length_m": 110.0,
+            },
+        ],
+        start_latitude=31.0,
+        start_longitude=121.0,
+    )
+
+    assert steps == [
+        "出发，向东沿普通道路行进100米",
+        "左转进入步道，向北行进110米，随后到达目的地",
+    ]
 
 
 def test_location_resolution_prefers_real_city_over_local_name(tmp_path: Path) -> None:

@@ -155,9 +155,12 @@ def _tool_definitions() -> list[types.Tool]:
             description=(
                 "Plan a walking, cycling or driving route on the local OSM road graph. "
                 "Use whenever the user asks 怎么走、路线、导航、步行、骑车 or 开车. "
-                "origin and destination accept place text or 'latitude,longitude'. Routes "
-                "over 300 km are rejected; report that limit instead of inventing roads, "
-                "travel time, tolls or fuel cost."
+                "origin and destination accept place text or 'latitude,longitude'. Present "
+                "the compact summary, numbered turn steps and navigation.url as a clickable "
+                "打开高德地图导航 link. route_preview is a compact line for UI rendering; "
+                "request include_geometry only when exact route coordinates are required. "
+                "Routes over 300 km are rejected; report that limit instead of inventing "
+                "roads, travel time, tolls or fuel cost."
             ),
             input_schema=_schema(
                 {

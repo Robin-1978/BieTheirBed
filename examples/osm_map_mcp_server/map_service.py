@@ -14,6 +14,7 @@ import struct
 import time
 from typing import Any, Iterable, Sequence
 import unicodedata
+from urllib.parse import urlencode
 
 try:
     from .taxonomy import category_inventory
@@ -520,6 +521,145 @@ def _douglas_peucker(
     left = _douglas_peucker(points[: split_index + 1], tolerance_m)
     right = _douglas_peucker(points[split_index:], tolerance_m)
     return left[:-1] + right
+
+
+_HIGHWAY_LABELS = {
+    "motorway": "高速公路",
+    "trunk": "干道",
+    "primary": "主干道",
+    "secondary": "次干道",
+    "tertiary": "地方道路",
+    "unclassified": "普通道路",
+    "residential": "居民道路",
+    "living_street": "生活道路",
+    "service": "辅路",
+    "track": "乡间道路",
+    "path": "步道",
+    "footway": "人行道",
+    "pedestrian": "步行街",
+    "cycleway": "自行车道",
+    "steps": "台阶",
+    "road": "道路",
+}
+_MODE_LABELS = {"walking": "步行", "cycling": "骑行", "driving": "驾车"}
+
+
+def _bearing_degrees(
+    start_latitude: float,
+    start_longitude: float,
+    end_latitude: float,
+    end_longitude: float,
+) -> float:
+    start_phi, end_phi = math.radians(start_latitude), math.radians(end_latitude)
+    delta_lon = math.radians(end_longitude - start_longitude)
+    y = math.sin(delta_lon) * math.cos(end_phi)
+    x = math.cos(start_phi) * math.sin(end_phi) - math.sin(start_phi) * math.cos(
+        end_phi
+    ) * math.cos(delta_lon)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def _compass_direction(bearing: float) -> str:
+    directions = ("北", "东北", "东", "东南", "南", "西南", "西", "西北")
+    return directions[int((bearing + 22.5) // 45) % len(directions)]
+
+
+def _turn_directive(previous_bearing: float, next_bearing: float) -> tuple[str, str]:
+    delta = (next_bearing - previous_bearing + 540.0) % 360.0 - 180.0
+    magnitude = abs(delta)
+    if magnitude < 20:
+        return "continue", "继续直行"
+    if magnitude < 45:
+        return (
+            ("slight_right", "稍向右转") if delta > 0 else ("slight_left", "稍向左转")
+        )
+    if magnitude < 135:
+        return ("turn_right", "右转") if delta > 0 else ("turn_left", "左转")
+    return "uturn", "掉头"
+
+
+def _format_distance_zh(distance_m: float) -> str:
+    if distance_m < 1_000:
+        return f"{max(0, round(distance_m))}米"
+    return f"{distance_m / 1_000:.1f}".rstrip("0").rstrip(".") + "公里"
+
+
+def _format_duration_zh(duration_seconds: float) -> str:
+    minutes = max(1, round(duration_seconds / 60))
+    if minutes < 60:
+        return f"{minutes}分钟"
+    hours, remaining = divmod(minutes, 60)
+    return f"{hours}小时{remaining}分钟" if remaining else f"{hours}小时"
+
+
+def _route_match_label(match: dict[str, Any], fallback: str) -> str:
+    place = match.get("place")
+    if isinstance(place, dict) and str(place.get("name") or "").strip():
+        return str(place["name"]).strip()
+    return fallback
+
+
+def _route_preview(
+    points: list[tuple[float, float]],
+    distance_m: float,
+    output_coordinate_system: str,
+    *,
+    max_points: int = 8,
+) -> dict[str, Any]:
+    if not points:
+        return {
+            "type": "LineString",
+            "coordinates": [],
+            "coordinate_system": output_coordinate_system,
+        }
+    simplified = _douglas_peucker(points, max(4.0, distance_m / 80_000))
+    if len(simplified) > max_points:
+        stride = math.ceil((len(simplified) - 1) / (max_points - 1))
+        simplified = simplified[::stride]
+    if simplified[-1] != points[-1]:
+        simplified.append(points[-1])
+    coordinates = []
+    for latitude, longitude in simplified:
+        converted_lat, converted_lon = convert_coordinate(
+            latitude, longitude, "wgs84", output_coordinate_system
+        )
+        coordinates.append([round(converted_lon, 7), round(converted_lat, 7)])
+    return {
+        "type": "LineString",
+        "coordinates": coordinates,
+        "coordinate_system": output_coordinate_system,
+    }
+
+
+def _amap_navigation_url(
+    origin_latitude: float,
+    origin_longitude: float,
+    destination_latitude: float,
+    destination_longitude: float,
+    *,
+    origin_name: str,
+    destination_name: str,
+    mode: str,
+) -> str:
+    origin_gcj = convert_coordinate(origin_latitude, origin_longitude, "wgs84", "gcj02")
+    destination_gcj = convert_coordinate(
+        destination_latitude, destination_longitude, "wgs84", "gcj02"
+    )
+    query = urlencode(
+        {
+            "from": f"{origin_gcj[1]:.7f},{origin_gcj[0]:.7f},{origin_name}",
+            "to": (
+                f"{destination_gcj[1]:.7f},{destination_gcj[0]:.7f},{destination_name}"
+            ),
+            "mode": {"walking": "walk", "cycling": "ride", "driving": "car"}[mode],
+            "policy": "1",
+            "src": "knoa",
+            "coordinate": "gaode",
+            "callnative": "1",
+        },
+        safe=",",
+    )
+    return f"https://uri.amap.com/navigation?{query}"
 
 
 class MapService:
@@ -1269,50 +1409,83 @@ class MapService:
         return nodes, edges, distance, best_cost[goal], expansions
 
     @staticmethod
-    def _route_steps(edges: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-        steps: list[dict[str, Any]] = []
+    def _route_steps(
+        edges: Sequence[dict[str, Any]],
+        *,
+        start_latitude: float,
+        start_longitude: float,
+    ) -> list[str]:
+        if not edges:
+            return ["已到达目的地"]
+        groups: list[dict[str, Any]] = []
+        latitude, longitude = start_latitude, start_longitude
         for edge in edges:
+            next_latitude = float(edge["neighbor_lat"])
+            next_longitude = float(edge["neighbor_lon"])
             raw_name = str(edge.get("name") or "").strip()
             highway = str(edge.get("highway") or "road")
-            name = raw_name or "未命名道路"
-            if steps and steps[-1]["name"] == name and steps[-1]["highway"] == highway:
-                steps[-1]["distance_m"] += float(edge["length_m"])
+            label = raw_name or _HIGHWAY_LABELS.get(highway, "道路")
+            bearing = _bearing_degrees(
+                latitude,
+                longitude,
+                next_latitude,
+                next_longitude,
+            )
+            key = (raw_name, "" if raw_name else highway)
+            if groups and groups[-1]["key"] == key:
+                groups[-1]["distance_m"] += float(edge["length_m"])
+                groups[-1]["end"] = (next_latitude, next_longitude)
+                groups[-1]["end_bearing"] = bearing
             else:
-                steps.append(
+                groups.append(
                     {
-                        "instruction": f"沿{name}行进",
-                        "name": name,
+                        "key": key,
+                        "name": label,
                         "highway": highway,
                         "distance_m": float(edge["length_m"]),
+                        "start": (latitude, longitude),
+                        "end": (next_latitude, next_longitude),
+                        "start_bearing": bearing,
+                        "end_bearing": bearing,
                     }
                 )
-        # Collapse short unnamed segments into the next named road so downtown
-        # routes do not read as "沿未命名道路行进 x N".
-        collapsed: list[dict[str, Any]] = []
-        pending_unnamed_m = 0.0
-        for step in steps:
-            if step["name"] == "未命名道路":
-                pending_unnamed_m += step["distance_m"]
-                continue
-            if pending_unnamed_m:
-                step = {**step, "distance_m": step["distance_m"] + pending_unnamed_m}
-                step["instruction"] = f"沿{step['name']}行进"
-                pending_unnamed_m = 0.0
-            collapsed.append(step)
-        if pending_unnamed_m and collapsed:
-            collapsed[-1]["distance_m"] += pending_unnamed_m
-        elif pending_unnamed_m:
-            collapsed.append(
+            latitude, longitude = next_latitude, next_longitude
+        if len(groups) > 30:
+            middle = groups[14:-14]
+            groups = [
+                *groups[:14],
                 {
-                    "instruction": "沿未命名道路行进",
-                    "name": "未命名道路",
-                    "highway": "road",
-                    "distance_m": pending_unnamed_m,
-                }
-            )
-        for step in collapsed:
-            step["distance_m"] = round(step["distance_m"])
-        return collapsed[:200]
+                    "key": ("规划路线", "mixed"),
+                    "name": "规划路线",
+                    "highway": "mixed",
+                    "distance_m": sum(item["distance_m"] for item in middle),
+                    "start": middle[0]["start"],
+                    "end": middle[-1]["end"],
+                    "start_bearing": middle[0]["start_bearing"],
+                    "end_bearing": middle[-1]["end_bearing"],
+                },
+                *groups[-14:],
+            ]
+        steps: list[str] = []
+        for index, group in enumerate(groups):
+            direction = _compass_direction(group["start_bearing"])
+            distance_text = _format_distance_zh(group["distance_m"])
+            if index == 0:
+                maneuver, prefix = "depart", f"出发，向{direction}沿{group['name']}"
+            else:
+                maneuver, directive = _turn_directive(
+                    groups[index - 1]["end_bearing"],
+                    group["start_bearing"],
+                )
+                if maneuver == "continue":
+                    prefix = f"{directive}，沿{group['name']}向{direction}"
+                else:
+                    prefix = f"{directive}进入{group['name']}，向{direction}"
+            instruction = f"{prefix}行进{distance_text}"
+            if index == len(groups) - 1:
+                instruction += "，随后到达目的地"
+            steps.append(instruction)
+        return steps
 
     def route(
         self,
@@ -1443,7 +1616,7 @@ class MapService:
                     )
                     continue
                 try:
-                    node_ids, edges, distance, duration, expansions = (
+                    _node_ids, edges, distance, duration, expansions = (
                         self._route_search(
                             database, start, goal, goal_lat, goal_lon, mode
                         )
@@ -1458,19 +1631,6 @@ class MapService:
                 raise last_error or MapError(
                     "route_not_found", "the locations are not connected for this mode"
                 )
-            coordinates: dict[int, tuple[float, float]] = {}
-            if include_geometry:
-                for offset in range(0, len(node_ids), 5_000):
-                    batch = node_ids[offset : offset + 5_000]
-                    placeholders = ",".join("?" for _ in batch)
-                    for row in database.execute(
-                        f"SELECT id,lat,lon FROM route_nodes WHERE id IN ({placeholders})",
-                        batch,
-                    ):
-                        coordinates[int(row["id"])] = (
-                            float(row["lat"]),
-                            float(row["lon"]),
-                        )
         except sqlite3.OperationalError as exc:
             if "route_" in str(exc) or "no such table" in str(exc):
                 raise MapError(
@@ -1479,17 +1639,55 @@ class MapService:
             raise
         finally:
             database.close()
+        points = [(start_lat, start_lon)]
+        points.extend(
+            (float(edge["neighbor_lat"]), float(edge["neighbor_lon"])) for edge in edges
+        )
+        origin_label = _route_match_label(origin_match, "起点")
+        destination_label = _route_match_label(dest_match, "目的地")
+        distance_text = _format_distance_zh(distance)
+        duration_text = _format_duration_zh(duration)
+        steps = self._route_steps(
+            edges,
+            start_latitude=start_lat,
+            start_longitude=start_lon,
+        )
         result = {
             "mode": mode,
             "origin": {**origin_match, "snap_distance_m": round(start_distance)},
             "destination": {**dest_match, "snap_distance_m": round(goal_distance)},
             "distance_m": round(distance),
             "duration_seconds": round(duration),
-            "steps": self._route_steps(edges),
+            "summary": {
+                "text": f"{_MODE_LABELS[mode]}{distance_text}，预计{duration_text}",
+                "mode_label": _MODE_LABELS[mode],
+                "distance": distance_text,
+                "duration": duration_text,
+            },
+            "steps": steps,
+            "route_preview": _route_preview(
+                points,
+                distance,
+                output_coordinate_system,
+            ),
+            "navigation": {
+                "provider": "amap",
+                "label": "打开高德地图导航",
+                "url": _amap_navigation_url(
+                    origin_lat,
+                    origin_lon,
+                    dest_lat,
+                    dest_lon,
+                    origin_name=origin_label,
+                    destination_name=destination_label,
+                    mode=mode,
+                ),
+                "coordinate_system": "gcj02",
+                "note": "打开后由高德地图按实时路况重新规划路线",
+            },
             "search": {"expanded_nodes": expansions},
         }
         if include_geometry:
-            points = [coordinates[node] for node in node_ids if node in coordinates]
             simplified = _douglas_peucker(points, max(2.0, distance / 50_000))
             if len(simplified) > 500:
                 stride = math.ceil(len(simplified) / 500)
