@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
+import httpx
 import pytest
 
 from knoa_platform.agent_runtime.http_provider import (
@@ -119,9 +121,7 @@ async def test_openai_provider_streams_normalized_content_and_tool_call() -> Non
             }
         ),
         "data: "
-        + json.dumps(
-            {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}
-        ),
+        + json.dumps({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}),
         "data: [DONE]",
     ]
     client = FakeClient(FakeResponse(lines))
@@ -161,17 +161,36 @@ async def test_openai_provider_streams_normalized_content_and_tool_call() -> Non
 async def test_anthropic_provider_streams_normalized_terminal_call() -> None:
     events = [
         ("content_block_start", {"index": 0, "content_block": {"type": "text"}}),
-        ("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "hi"}}),
+        (
+            "content_block_delta",
+            {"index": 0, "delta": {"type": "text_delta", "text": "hi"}},
+        ),
         (
             "content_block_start",
-            {"index": 1, "content_block": {"type": "tool_use", "id": "call-a", "name": "read_file"}},
+            {
+                "index": 1,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "call-a",
+                    "name": "read_file",
+                },
+            },
         ),
         (
             "content_block_delta",
-            {"index": 1, "delta": {"type": "input_json_delta", "partial_json": '{"path":"a.txt"}'}},
+            {
+                "index": 1,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": '{"path":"a.txt"}',
+                },
+            },
         ),
         ("content_block_stop", {"index": 1}),
-        ("message_delta", {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 2}}),
+        (
+            "message_delta",
+            {"delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 2}},
+        ),
         ("message_stop", {}),
     ]
     lines = []
@@ -223,6 +242,31 @@ async def test_provider_errors_are_redacted_and_health_is_typed() -> None:
     assert "credential" not in health.detail
 
 
+@pytest.mark.asyncio
+async def test_provider_connection_error_is_typed_without_leaking_details(
+    caplog,
+) -> None:
+    class UnreachableClient:
+        async def __aenter__(self):
+            raise httpx.ConnectError("private-host secret-token")
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+    provider = HttpModelProvider(
+        _model(),
+        client_factory=lambda **_kwargs: UnreachableClient(),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        chunks = [chunk async for chunk in provider.stream(_request(), asyncio.Event())]
+
+    assert chunks[-1].error_code == "provider_unreachable"
+    assert "private-host" not in caplog.text
+    assert "secret-token" not in caplog.text
+    assert "exception=ConnectError" in caplog.text
+
+
 class StaticProvider:
     def __init__(self, chunks: tuple[ProviderChunk, ...]):
         self.chunks = chunks
@@ -242,7 +286,9 @@ async def test_failover_never_replays_after_partial_primary_output() -> None:
     primary = StaticProvider(
         (
             ProviderChunk(content_delta="partial"),
-            ProviderChunk(finish_reason="error", terminal=True, error_code="provider_failed"),
+            ProviderChunk(
+                finish_reason="error", terminal=True, error_code="provider_failed"
+            ),
         )
     )
     fallback = StaticProvider((ProviderChunk(finish_reason="stop", terminal=True),))
@@ -250,7 +296,9 @@ async def test_failover_never_replays_after_partial_primary_output() -> None:
 
     chunks = [chunk async for chunk in provider.stream(_request(), asyncio.Event())]
 
-    assert [chunk.content_delta for chunk in chunks if chunk.content_delta] == ["partial"]
+    assert [chunk.content_delta for chunk in chunks if chunk.content_delta] == [
+        "partial"
+    ]
     assert chunks[-1].finish_reason == "error"
     assert fallback.calls == 0
 
@@ -258,7 +306,11 @@ async def test_failover_never_replays_after_partial_primary_output() -> None:
 @pytest.mark.asyncio
 async def test_failover_uses_fallback_before_any_primary_output() -> None:
     primary = StaticProvider(
-        (ProviderChunk(finish_reason="error", terminal=True, error_code="provider_failed"),)
+        (
+            ProviderChunk(
+                finish_reason="error", terminal=True, error_code="provider_failed"
+            ),
+        )
     )
     fallback = StaticProvider((ProviderChunk(finish_reason="stop", terminal=True),))
     provider = FailoverModelProvider(primary, fallback)
@@ -312,7 +364,11 @@ async def test_responses_provider_posts_input_and_streams_tool_call() -> None:
             {
                 "type": "response.output_item.added",
                 "output_index": 0,
-                "item": {"type": "function_call", "call_id": "call-a", "name": "read_file"},
+                "item": {
+                    "type": "function_call",
+                    "call_id": "call-a",
+                    "name": "read_file",
+                },
             }
         ),
         "data: "
@@ -337,7 +393,11 @@ async def test_responses_provider_posts_input_and_streams_tool_call() -> None:
                 "type": "response.completed",
                 "response": {
                     "status": "completed",
-                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                    "usage": {
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
                 },
             }
         ),
@@ -456,12 +516,13 @@ def _model_with_proxy() -> ResolvedModelConfig:
 
 @pytest.mark.asyncio
 async def test_provider_passes_proxy_to_client_factory_only_when_set() -> None:
-    lines = ["data: " + json.dumps({"choices": [{"delta": {"content": "hi"}}]}), "data: [DONE]"]
+    lines = [
+        "data: " + json.dumps({"choices": [{"delta": {"content": "hi"}}]}),
+        "data: [DONE]",
+    ]
     proxied = FakeClient(FakeResponse(list(lines)))
     proxied_factory = ClientFactory(proxied)
-    awaitable = HttpModelProvider(
-        _model_with_proxy(), client_factory=proxied_factory
-    )
+    awaitable = HttpModelProvider(_model_with_proxy(), client_factory=proxied_factory)
     chunks = [chunk async for chunk in awaitable.stream(_request(), asyncio.Event())]
     assert chunks[0].content_delta == "hi"
     factory_calls = proxied_factory.calls
@@ -480,10 +541,15 @@ def _model_with_session() -> ResolvedModelConfig:
 
 
 @pytest.mark.asyncio
-async def test_provider_sends_stable_session_and_product_ua_only_when_configured() -> None:
+async def test_provider_sends_stable_session_and_product_ua_only_when_configured() -> (
+    None
+):
     from knoa_platform import __version__
 
-    lines = ["data: " + json.dumps({"choices": [{"delta": {"content": "hi"}}]}), "data: [DONE]"]
+    lines = [
+        "data: " + json.dumps({"choices": [{"delta": {"content": "hi"}}]}),
+        "data: [DONE]",
+    ]
     sessioned = FakeClient(FakeResponse(list(lines)))
     provider = HttpModelProvider(
         _model_with_session(), client_factory=ClientFactory(sessioned)
@@ -497,7 +563,10 @@ async def test_provider_sends_stable_session_and_product_ua_only_when_configured
     second = FakeClient(FakeResponse(list(lines)))
     provider._client_factory = ClientFactory(second)
     [chunk async for chunk in provider.stream(_request(), asyncio.Event())]
-    assert second.requests[0][2]["headers"]["x-opencode-session"] == sent["x-opencode-session"]
+    assert (
+        second.requests[0][2]["headers"]["x-opencode-session"]
+        == sent["x-opencode-session"]
+    )
 
     direct = FakeClient(FakeResponse(list(lines)))
     plain = HttpModelProvider(_model(), client_factory=ClientFactory(direct))

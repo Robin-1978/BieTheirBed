@@ -16,6 +16,7 @@ from examples.osm_map_mcp_server import update_map
 from examples.osm_map_mcp_server.map_service import (
     MapService,
     MapSettings,
+    _road_name,
     convert_coordinate,
     search_document,
 )
@@ -358,7 +359,64 @@ def test_spatial_queries_render_valid_managed_pngs(tmp_path: Path) -> None:
         assert descriptor["sha256"] == hashlib.sha256(data).hexdigest()
         with Image.open(path) as image:
             assert image.format == "PNG"
-            assert image.size == (960, 600)
+            assert image.size == (1200, 750)
+
+
+def test_route_map_labels_prioritize_named_major_roads() -> None:
+    labels = MapService._route_map_labels(
+        [
+            {
+                "neighbor_lat": 31.001,
+                "neighbor_lon": 121.0,
+                "name": "墨玉路",
+                "highway": "primary",
+                "length_m": 100.0,
+            },
+            {
+                "neighbor_lat": 31.002,
+                "neighbor_lon": 121.0,
+                "name": "墨玉路",
+                "highway": "primary",
+                "length_m": 100.0,
+            },
+            {
+                "neighbor_lat": 31.002,
+                "neighbor_lon": 121.002,
+                "name": "宝安公路",
+                "highway": "trunk",
+                "length_m": 200.0,
+            },
+        ],
+        start_latitude=31.0,
+        start_longitude=121.0,
+    )
+
+    assert [label.text for label in labels] == ["宝安公路", "墨玉路"]
+    moyu = labels[1]
+    assert moyu.latitude == pytest.approx(31.001)
+    assert moyu.longitude == pytest.approx(121.0)
+
+
+def test_route_uses_local_name_when_source_way_has_no_name() -> None:
+    assert _road_name(424131502, "") == "墨玉北路"
+    assert _road_name(424131502, "未来正式名称") == "未来正式名称"
+
+    labels = MapService._route_map_labels(
+        [
+            {
+                "way_id": 424131502,
+                "neighbor_lat": 31.322,
+                "neighbor_lon": 121.162,
+                "name": "墨玉北路",
+                "highway": "primary",
+                "length_m": 200.0,
+            }
+        ],
+        start_latitude=31.321,
+        start_longitude=121.162,
+    )
+
+    assert [label.text for label in labels] == ["墨玉北路"]
 
 
 def test_route_steps_preserve_unnamed_road_types_and_turns() -> None:

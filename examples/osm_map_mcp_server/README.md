@@ -71,11 +71,13 @@ All eight tools are read-only and local:
 - `map.convert_coordinates`
 - `map.dataset_info`
 
-The first six spatial tools return structured text and attach a 960×600 PNG
-map by default. Maps are rendered locally from the same SQLite snapshot and
-show OSM roads, numbered result markers, search radii, place boundaries or
-route lines as appropriate. Set `include_map_image=false` when only structured
-data is needed. Coordinate conversion and dataset metadata remain text only.
+The first six spatial tools return structured text and attach a 1200×750 PNG
+map by default. Maps use a high-contrast road hierarchy, distribute road data
+across the complete viewport, prioritize major road names, and keep roads used
+by a route labeled above the route line. They also show numbered result
+markers, search radii, place boundaries or route lines as appropriate. Set
+`include_map_image=false` when only structured data is needed. Coordinate
+conversion and dataset metadata remain text only.
 
 `map://dataset` exposes the source replication timestamp, sequence, bounds,
 counts and capability status. `map://categories` exposes common bilingual OSM

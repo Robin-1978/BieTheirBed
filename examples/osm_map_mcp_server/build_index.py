@@ -568,7 +568,8 @@ class MapImportHandler(osmium.SimpleHandler):
             except (RuntimeError, ValueError):
                 geometry = None
         highway = _tag(tags, "highway")
-        if highway and (_tag(tags, "name") or _tag(tags, "ref")):
+        road_name = _names(tags)[0] or _tag(tags, "ref")
+        if highway and road_name:
             self._feature(
                 osm_type="way",
                 osm_id=way.id,
@@ -580,7 +581,7 @@ class MapImportHandler(osmium.SimpleHandler):
                 geometry=geometry,
                 category="highway",
                 subcategory=highway,
-                name_override=_tag(tags, "name") or _tag(tags, "ref"),
+                name_override=road_name,
             )
         category, subcategory = _primary_category(tags)
         if category:

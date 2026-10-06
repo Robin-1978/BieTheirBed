@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 try:
     from .map_visual import (
         MapCircle,
+        MapLabel,
         MapLine,
         MapMarker,
         RoadSegment,
@@ -30,6 +31,7 @@ try:
 except ImportError:  # pragma: no cover - direct script execution
     from map_visual import (
         MapCircle,
+        MapLabel,
         MapLine,
         MapMarker,
         RoadSegment,
@@ -49,6 +51,36 @@ _COORDINATE_RE = re.compile(
 )
 _SEARCH_PART_RE = re.compile(r"[\u3400-\u9fff]+|[a-z0-9]+", re.IGNORECASE)
 logger = logging.getLogger("osm-map-service")
+
+# Local corrections for OSM ways whose current source tags contain a highway
+# class but no name. Source names always win when a later replication adds one.
+_ROAD_NAME_OVERRIDES = {
+    27583036: "墨玉路",
+    379526884: "墨玉路",
+    1338590373: "墨玉路",
+    1338590376: "墨玉路",
+    340586353: "墨玉路",
+    340586333: "墨玉北路",
+    340586335: "墨玉北路",
+    340586339: "墨玉北路",
+    340586341: "墨玉北路",
+    340586351: "墨玉北路",
+    340586352: "墨玉北路",
+    424131498: "墨玉北路",
+    424131502: "墨玉北路",
+    424131505: "墨玉北路",
+    605963698: "墨玉北路",
+    605963700: "墨玉北路",
+    605975230: "墨玉北路",
+    605975231: "墨玉北路",
+    1299162292: "墨玉北路",
+    1299162328: "墨玉北路",
+}
+
+
+def _road_name(way_id: int, source_name: object) -> str:
+    name = str(source_name or "").strip()
+    return name or _ROAD_NAME_OVERRIDES.get(way_id, "")
 
 
 class MapError(RuntimeError):
@@ -737,30 +769,75 @@ class MapService:
         min_lat, min_lon, max_lat, max_lon = bounds
         if _haversine_m(min_lat, min_lon, max_lat, max_lon) > 80_000:
             return []
+        grid_size = 8
+        cells = grid_size * grid_size
+        major_per_cell = max(200, limit // cells)
+        detail_per_cell = max(60, limit // cells // 2)
+        query = (
+            "SELECT s.lat AS start_lat,s.lon AS start_lon,"
+            "t.lat AS end_lat,t.lon AS end_lon,e.way_id,e.highway,e.name "
+            "FROM route_nodes_rtree r "
+            "JOIN route_nodes s ON s.id=r.id "
+            "JOIN route_edges e ON e.source=s.id "
+            "JOIN route_nodes t ON t.id=e.target "
+            "WHERE r.min_lat BETWEEN ? AND ? AND r.min_lon BETWEEN ? AND ? "
+            "{filter_sql} LIMIT ?"
+        )
+        major_filter = (
+            "AND e.highway IN ('motorway','trunk','primary','secondary','tertiary') "
+        )
+        rows: list[sqlite3.Row] = []
         database = self._connect()
         try:
-            rows = database.execute(
-                "SELECT s.lat AS start_lat,s.lon AS start_lon,"
-                "t.lat AS end_lat,t.lon AS end_lon,e.highway,e.name "
-                "FROM route_nodes_rtree r "
-                "JOIN route_nodes s ON s.id=r.id "
-                "JOIN route_edges e ON e.source=s.id "
-                "JOIN route_nodes t ON t.id=e.target "
-                "WHERE r.min_lat BETWEEN ? AND ? AND r.min_lon BETWEEN ? AND ? "
-                "LIMIT ?",
-                (min_lat, max_lat, min_lon, max_lon, limit),
-            ).fetchall()
+            for latitude_index in range(grid_size):
+                cell_min_lat = (
+                    min_lat + (max_lat - min_lat) * latitude_index / grid_size
+                )
+                cell_max_lat = (
+                    min_lat + (max_lat - min_lat) * (latitude_index + 1) / grid_size
+                )
+                for longitude_index in range(grid_size):
+                    cell_min_lon = (
+                        min_lon + (max_lon - min_lon) * longitude_index / grid_size
+                    )
+                    cell_max_lon = (
+                        min_lon
+                        + (max_lon - min_lon) * (longitude_index + 1) / grid_size
+                    )
+                    parameters = (
+                        cell_min_lat,
+                        cell_max_lat,
+                        cell_min_lon,
+                        cell_max_lon,
+                    )
+                    rows.extend(
+                        database.execute(
+                            query.format(filter_sql=major_filter),
+                            (*parameters, major_per_cell),
+                        ).fetchall()
+                    )
+                    rows.extend(
+                        database.execute(
+                            query.format(filter_sql=""),
+                            (*parameters, detail_per_cell),
+                        ).fetchall()
+                    )
         finally:
             database.close()
-        return [
-            RoadSegment(
-                start=(float(row["start_lat"]), float(row["start_lon"])),
-                end=(float(row["end_lat"]), float(row["end_lon"])),
-                highway=str(row["highway"] or "road"),
-                name=str(row["name"] or ""),
-            )
-            for row in rows
-        ]
+        roads: list[RoadSegment] = []
+        seen: set[tuple[object, ...]] = set()
+        for row in rows:
+            start = (float(row["start_lat"]), float(row["start_lon"]))
+            end = (float(row["end_lat"]), float(row["end_lon"]))
+            highway = str(row["highway"] or "road")
+            name = _road_name(int(row["way_id"]), row["name"])
+            edge = tuple(sorted((start, end)))
+            key = (*edge, highway, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            roads.append(RoadSegment(start=start, end=end, highway=highway, name=name))
+        return roads
 
     def _attach_visual(
         self,
@@ -771,6 +848,7 @@ class MapService:
         subtitle: str,
         markers: Sequence[MapMarker],
         lines: Sequence[MapLine] = (),
+        labels: Sequence[MapLabel] = (),
         circle: MapCircle | None = None,
         bounds: tuple[float, float, float, float] | None = None,
         name: str = "地图.png",
@@ -790,6 +868,7 @@ class MapService:
                 markers=markers,
                 lines=lines,
                 roads=self._background_roads(fitted_bounds),
+                labels=labels,
                 circle=circle,
                 bounds=fitted_bounds,
                 name=name,
@@ -1619,6 +1698,8 @@ class MapService:
             current = previous
         nodes.reverse()
         edges.reverse()
+        for edge in edges:
+            edge["name"] = _road_name(int(edge["way_id"]), edge.get("name"))
         distance = sum(float(edge["length_m"]) for edge in edges)
         return nodes, edges, distance, best_cost[goal], expansions
 
@@ -1721,6 +1802,101 @@ class MapService:
         if len(groups) > 30:
             groups = [*groups[:14], groups[14], *groups[-14:]]
         return [point for _key, point in groups]
+
+    @staticmethod
+    def _route_map_labels(
+        edges: Sequence[dict[str, Any]],
+        *,
+        start_latitude: float,
+        start_longitude: float,
+        limit: int = 12,
+    ) -> list[MapLabel]:
+        """Place labels at the distance midpoint of named route sections."""
+        groups: list[dict[str, Any]] = []
+        latitude, longitude = start_latitude, start_longitude
+        for edge in edges:
+            next_latitude = float(edge["neighbor_lat"])
+            next_longitude = float(edge["neighbor_lon"])
+            name = str(edge.get("name") or "").strip()
+            if name:
+                segment = (
+                    latitude,
+                    longitude,
+                    next_latitude,
+                    next_longitude,
+                    max(0.0, float(edge["length_m"])),
+                )
+                if groups and groups[-1]["name"] == name:
+                    groups[-1]["segments"].append(segment)
+                    groups[-1]["distance_m"] += segment[-1]
+                else:
+                    groups.append(
+                        {
+                            "name": name,
+                            "highway": str(edge.get("highway") or "road"),
+                            "distance_m": segment[-1],
+                            "segments": [segment],
+                        }
+                    )
+            latitude, longitude = next_latitude, next_longitude
+
+        road_rank = {
+            "motorway": 0,
+            "trunk": 1,
+            "primary": 2,
+            "secondary": 3,
+            "tertiary": 4,
+            "unclassified": 5,
+            "residential": 6,
+            "living_street": 7,
+            "service": 8,
+        }
+        candidates: list[tuple[int, float, int, MapLabel]] = []
+        for index, group in enumerate(groups):
+            midpoint_distance = group["distance_m"] / 2
+            traversed = 0.0
+            anchor = None
+            for (
+                start_lat,
+                start_lon,
+                end_lat,
+                end_lon,
+                segment_distance,
+            ) in group["segments"]:
+                if traversed + segment_distance >= midpoint_distance:
+                    ratio = (
+                        (midpoint_distance - traversed) / segment_distance
+                        if segment_distance
+                        else 0.5
+                    )
+                    anchor = (
+                        start_lat + (end_lat - start_lat) * ratio,
+                        start_lon + (end_lon - start_lon) * ratio,
+                    )
+                    break
+                traversed += segment_distance
+            if anchor is None:
+                segment = group["segments"][-1]
+                anchor = (segment[2], segment[3])
+            candidates.append(
+                (
+                    road_rank.get(group["highway"], 8),
+                    -group["distance_m"],
+                    index,
+                    MapLabel(anchor[0], anchor[1], group["name"]),
+                )
+            )
+
+        labels: list[MapLabel] = []
+        seen: set[str] = set()
+        for _rank, _distance, _index, label in sorted(candidates):
+            if label.text in seen:
+                continue
+            seen.add(label.text)
+            labels.append(label)
+            if len(labels) >= limit:
+                break
+        return labels
 
     def route(
         self,
@@ -1952,6 +2128,11 @@ class MapService:
             start_latitude=start_lat,
             start_longitude=start_lon,
         )
+        route_labels = self._route_map_labels(
+            edges,
+            start_latitude=start_lat,
+            start_longitude=start_lon,
+        )
         numbered_points = list(enumerate(step_points[1:], start=2))
         if len(numbered_points) > 12:
             numbered_points = [*numbered_points[:6], *numbered_points[-6:]]
@@ -1972,6 +2153,7 @@ class MapService:
             lines=[
                 MapLine(tuple(image_points), color="#1677ff", width=7, outline=True)
             ],
+            labels=route_labels,
             name="路线图.png",
         )
 

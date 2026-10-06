@@ -709,8 +709,8 @@ pending_ = 0;
  try { geometry = wkb_.create_linestring(way); } catch (const osmium::geometry_error&) {}
  }
  const std::string highway = tag(way.tags(), "highway");
- const std::string road_name = tag(way.tags(), "name").empty() ?
- tag(way.tags(), "ref") : tag(way.tags(), "name");
+ std::string road_name = names(way.tags()).first;
+ if (road_name.empty()) road_name = tag(way.tags(), "ref");
  if (!highway.empty() && !road_name.empty()) {
  add_feature({"way", way.id(), "road", &way.tags(), lat, lon, min_lat, min_lon,
  max_lat, max_lon, geometry, "highway", highway, road_name});

@@ -1,8 +1,10 @@
 """Direct HTTP implementations of the target-state ModelProviderPort."""
+
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -40,6 +42,22 @@ from knoa_platform.tools.http_limits import iter_limited_lines
 
 _MAX_STREAM_LINE_BYTES = 2 * 1024 * 1024
 _MAX_MODEL_STREAM_BYTES = 16 * 1024 * 1024
+logger = logging.getLogger(__name__)
+
+
+def _provider_error_code(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if 100 <= status <= 599:
+            return f"provider_http_{status}"
+        return "provider_failed"
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return "provider_timeout"
+    if isinstance(exc, httpx.ConnectError):
+        return "provider_unreachable"
+    if isinstance(exc, (httpx.ProtocolError, json.JSONDecodeError)):
+        return "provider_protocol_error"
+    return "provider_failed"
 
 
 def _openai_tool_definitions(
@@ -266,16 +284,24 @@ class HttpModelProvider(ModelProviderPort):
                 return
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             if cancellation.is_set():
                 return
-        if not emitted_terminal:
-            yield ProviderChunk(
-                finish_reason="error",
-                terminal=True,
-                error_code="provider_failed",
-                provider_model=self.model_alias,
-            )
+            if not emitted_terminal:
+                error_code = _provider_error_code(exc)
+                logger.warning(
+                    "Model provider request failed alias=%s operation=chat "
+                    "code=%s exception=%s",
+                    self.model_alias,
+                    error_code,
+                    type(exc).__name__,
+                )
+                yield ProviderChunk(
+                    finish_reason="error",
+                    terminal=True,
+                    error_code=error_code,
+                    provider_model=self.model_alias,
+                )
 
     async def _stream_anthropic(
         self,
@@ -371,16 +397,24 @@ class HttpModelProvider(ModelProviderPort):
                         await asyncio.gather(closer, return_exceptions=True)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             if cancellation.is_set():
                 return
-        if not emitted_terminal:
-            yield ProviderChunk(
-                finish_reason="error",
-                terminal=True,
-                error_code="provider_failed",
-                provider_model=self.model_alias,
-            )
+            if not emitted_terminal:
+                error_code = _provider_error_code(exc)
+                logger.warning(
+                    "Model provider request failed alias=%s operation=anthropic "
+                    "code=%s exception=%s",
+                    self.model_alias,
+                    error_code,
+                    type(exc).__name__,
+                )
+                yield ProviderChunk(
+                    finish_reason="error",
+                    terminal=True,
+                    error_code=error_code,
+                    provider_model=self.model_alias,
+                )
 
     async def _stream_responses(
         self,
@@ -481,16 +515,24 @@ class HttpModelProvider(ModelProviderPort):
                         await asyncio.gather(closer, return_exceptions=True)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             if cancellation.is_set():
                 return
-        if not emitted_terminal:
-            yield ProviderChunk(
-                finish_reason="error",
-                terminal=True,
-                error_code="provider_failed",
-                provider_model=self.model_alias,
-            )
+            if not emitted_terminal:
+                error_code = _provider_error_code(exc)
+                logger.warning(
+                    "Model provider request failed alias=%s operation=responses "
+                    "code=%s exception=%s",
+                    self.model_alias,
+                    error_code,
+                    type(exc).__name__,
+                )
+                yield ProviderChunk(
+                    finish_reason="error",
+                    terminal=True,
+                    error_code=error_code,
+                    provider_model=self.model_alias,
+                )
 
     def _terminal_chunk(
         self,
@@ -515,9 +557,7 @@ class HttpModelProvider(ModelProviderPort):
             finish_reason=normalized_reason,
             usage=usage,
             terminal=True,
-            error_code=(
-                "provider_failed" if normalized_reason == "error" else ""
-            ),
+            error_code=("provider_failed" if normalized_reason == "error" else ""),
             provider_model=self.model_alias,
         )
 
