@@ -14,7 +14,11 @@ from PIL import ImageDraw
 import yaml
 
 from examples.osm_map_mcp_server import update_map
-from examples.osm_map_mcp_server.map_visual import RoadSegment, _draw_roads
+from examples.osm_map_mcp_server.map_visual import (
+    RoadSegment,
+    _draw_roads,
+    _road_style,
+)
 from examples.osm_map_mcp_server.map_service import (
     MapService,
     MapSettings,
@@ -383,6 +387,26 @@ def test_background_areas_load_from_legacy_feature_layer(tmp_path: Path) -> None
     assert areas[0].rings[0][0] == (31.19, 121.39)
 
 
+def test_background_roads_load_optional_render_levels(tmp_path: Path) -> None:
+    database_path = _database(tmp_path)
+    database = sqlite3.connect(database_path)
+    database.execute(
+        "ALTER TABLE route_edges ADD COLUMN layer INTEGER NOT NULL DEFAULT 0"
+    )
+    database.execute(
+        "ALTER TABLE route_edges ADD COLUMN structure INTEGER NOT NULL DEFAULT 0"
+    )
+    database.execute("UPDATE route_edges SET layer=-1,structure=-1 WHERE way_id=100")
+    database.commit()
+    database.close()
+
+    service = MapService(MapSettings(database_path=database_path))
+    roads = service._background_roads((31.199, 121.399, 31.203, 121.403))
+
+    assert roads
+    assert {(road.layer, road.structure) for road in roads} == {(-1, -1)}
+
+
 def test_joined_road_segments_do_not_leave_casing_seams() -> None:
     class PixelViewport:
         @staticmethod
@@ -401,6 +425,29 @@ def test_joined_road_segments_do_not_leave_casing_seams() -> None:
     # segment's casing. Drawing each segment casing and surface as a pair leaves
     # a dark block here; class-wide casing and surface passes keep the join clear.
     assert image.getpixel((41, 53)) == (248, 221, 160)
+
+
+def test_surface_roads_render_above_tunnels() -> None:
+    class PixelViewport:
+        @staticmethod
+        def point(x: float, y: float) -> tuple[int, int]:
+            return round(x), round(y)
+
+    image = Image.new("RGB", (100, 100), "#ffffff")
+    roads = (
+        RoadSegment((10, 50), (90, 50), "motorway", structure=-1, layer=-1),
+        RoadSegment((50, 10), (50, 90), "residential"),
+    )
+
+    _draw_roads(ImageDraw.Draw(image), PixelViewport(), roads, scale=1)
+
+    assert image.getpixel((50, 50)) == (255, 254, 253)
+
+
+def test_road_width_tracks_map_zoom() -> None:
+    assert _road_style("primary", zoom=14)[2] == 3
+    assert _road_style("primary", zoom=16)[2] == 5
+    assert _road_style("primary", zoom=18)[2] == 7
 
 
 def test_route_map_labels_prioritize_named_major_roads() -> None:

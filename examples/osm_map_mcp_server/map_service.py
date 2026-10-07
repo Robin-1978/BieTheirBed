@@ -788,10 +788,20 @@ class MapService:
         cells = grid_size * grid_size
         major_per_cell = max(200, limit // cells)
         detail_per_cell = max(60, limit // cells // 2)
+        database = self._connect()
+        edge_columns = {
+            str(row[1]) for row in database.execute("PRAGMA table_info(route_edges)")
+        }
+        render_fields = (
+            ",e.layer,e.structure "
+            if {"layer", "structure"}.issubset(edge_columns)
+            else ",0 AS layer,0 AS structure "
+        )
         query = (
             "SELECT s.lat AS start_lat,s.lon AS start_lon,"
-            "t.lat AS end_lat,t.lon AS end_lon,e.way_id,e.highway,e.name "
-            "FROM route_nodes_rtree r "
+            "t.lat AS end_lat,t.lon AS end_lon,e.way_id,e.highway,e.name"
+            + render_fields
+            + "FROM route_nodes_rtree r "
             "JOIN route_nodes s ON s.id=r.id "
             "JOIN route_edges e ON e.source=s.id "
             "JOIN route_nodes t ON t.id=e.target "
@@ -802,7 +812,6 @@ class MapService:
             "AND e.highway IN ('motorway','trunk','primary','secondary','tertiary') "
         )
         rows: list[sqlite3.Row] = []
-        database = self._connect()
         try:
             for latitude_index in range(grid_size):
                 cell_min_lat = (
@@ -847,11 +856,22 @@ class MapService:
             highway = str(row["highway"] or "road")
             name = _road_name(int(row["way_id"]), row["name"])
             edge = tuple(sorted((start, end)))
-            key = (*edge, highway, name)
+            layer = int(row["layer"] or 0)
+            structure = int(row["structure"] or 0)
+            key = (*edge, highway, name, layer, structure)
             if key in seen:
                 continue
             seen.add(key)
-            roads.append(RoadSegment(start=start, end=end, highway=highway, name=name))
+            roads.append(
+                RoadSegment(
+                    start=start,
+                    end=end,
+                    highway=highway,
+                    name=name,
+                    layer=layer,
+                    structure=structure,
+                )
+            )
         return roads
 
     def _background_areas(

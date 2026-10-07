@@ -100,6 +100,8 @@ CREATE TABLE IF NOT EXISTS route_edges(
     name TEXT NOT NULL DEFAULT '',
     highway TEXT NOT NULL DEFAULT '',
     speed_kph REAL NOT NULL DEFAULT 0,
+    layer INTEGER NOT NULL DEFAULT 0,
+    structure INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(way_id, seq)
 ) WITHOUT ROWID;
 """
@@ -209,6 +211,10 @@ TAG_EXPORT_KEYS = frozenset(
         "website",
         "contact:website",
         "population",
+        "bridge",
+        "tunnel",
+        "layer",
+        "oneway",
     }
 )
 
@@ -523,11 +529,13 @@ class MapImportHandler(osmium.SimpleHandler):
             if self.route_edges:
                 self.database.executemany(
                     "INSERT INTO route_edges(way_id,seq,source,target,length_m,forward_modes,"
-                    "backward_modes,name,highway,speed_kph) VALUES (?,?,?,?,?,?,?,?,?,?) "
+                    "backward_modes,name,highway,speed_kph,layer,structure) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(way_id,seq) DO UPDATE SET source=excluded.source,"
                     "target=excluded.target,length_m=excluded.length_m,"
                     "forward_modes=excluded.forward_modes,backward_modes=excluded.backward_modes,"
-                    "name=excluded.name,highway=excluded.highway,speed_kph=excluded.speed_kph",
+                    "name=excluded.name,highway=excluded.highway,speed_kph=excluded.speed_kph,"
+                    "layer=excluded.layer,structure=excluded.structure",
                     self.route_edges,
                 )
             self.database.commit()
@@ -645,6 +653,16 @@ class MapImportHandler(osmium.SimpleHandler):
         if (forward_modes or backward_modes) and len(locations) >= 2:
             name = _tag(tags, "name") or _tag(tags, "ref")
             speed = _parse_speed(_tag(tags, "maxspeed"))
+            layer = _integer(_tag(tags, "layer"))
+            tunnel = _tag(tags, "tunnel").lower()
+            bridge = _tag(tags, "bridge").lower()
+            structure = (
+                -1
+                if tunnel and tunnel not in {"no", "false", "0"}
+                else 1
+                if bridge and bridge not in {"no", "false", "0"}
+                else 0
+            )
             for sequence, (source, target) in enumerate(zip(locations, locations[1:])):
                 if source.ref == target.ref:
                     continue
@@ -675,6 +693,8 @@ class MapImportHandler(osmium.SimpleHandler):
                         name,
                         highway,
                         speed,
+                        layer,
+                        structure,
                     )
                 )
         if (

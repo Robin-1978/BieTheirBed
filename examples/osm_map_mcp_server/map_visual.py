@@ -41,6 +41,8 @@ class RoadSegment:
     end: tuple[float, float]
     highway: str
     name: str = ""
+    layer: int = 0
+    structure: int = 0
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,12 @@ class _Viewport:
         self.margin = margin
         self.top = top
 
+    def zoom(self, supersampling: int = 1) -> float:
+        """Return the equivalent Web Mercator zoom for output pixels."""
+
+        output_pixels_per_degree = self.scale / max(1, supersampling)
+        return math.log2(output_pixels_per_degree * 360 / 256)
+
     def point(self, latitude: float, longitude: float) -> tuple[int, int]:
         x, y = _mercator(latitude, longitude)
         return (
@@ -195,20 +203,79 @@ def _road_rank(highway: str) -> int:
     return _ROAD_RANK.get(highway, 8)
 
 
-def _road_style(highway: str) -> tuple[str, str, int]:
-    if highway == "motorway":
-        return "#f5b35d", "#d98935", 9
-    if highway == "trunk":
-        return "#f7c879", "#dca553", 8
-    if highway == "primary":
-        return "#f8dda0", "#d3b56e", 7
-    if highway == "secondary":
-        return "#fffdf8", "#c8c1b6", 6
-    if highway == "tertiary":
-        return "#fffefb", "#d6d0c7", 5
+def _interpolate_width(
+    zoom: float,
+    stops: Sequence[tuple[float, float]],
+) -> int:
+    if zoom <= stops[0][0]:
+        return max(1, math.floor(stops[0][1] + 0.5))
+    for (start_zoom, start_width), (end_zoom, end_width) in zip(stops, stops[1:]):
+        if zoom <= end_zoom:
+            ratio = (zoom - start_zoom) / (end_zoom - start_zoom)
+            width = start_width + (end_width - start_width) * ratio
+            return max(1, math.floor(width + 0.5))
+    return max(1, math.floor(stops[-1][1] + 0.5))
+
+
+_ROAD_WIDTH_STOPS = {
+    "motorway": ((12, 2.5), (14, 4), (16, 6), (18, 9)),
+    "trunk": ((12, 2), (14, 3), (16, 5), (18, 8)),
+    "primary": ((12, 1.5), (14, 2.5), (16, 4.5), (18, 7)),
+    "secondary": ((13, 1.5), (14, 2), (16, 3.5), (18, 6)),
+    "tertiary": ((14, 1), (16, 2.5), (18, 5)),
+    "minor": ((15, 1), (16, 1.5), (18, 3)),
+    "path": ((16, 1), (18, 2)),
+}
+
+
+def _road_style(
+    highway: str,
+    *,
+    zoom: float | None = None,
+) -> tuple[str, str, int]:
+    width_key = highway
     if highway in {"footway", "path", "pedestrian", "steps"}:
-        return "#f6f1e8", "#d9d2c7", 2
-    return "#fffefd", "#ddd8d0", 3
+        width_key = "path"
+    elif highway not in _ROAD_WIDTH_STOPS:
+        width_key = "minor"
+    width = (
+        _interpolate_width(zoom, _ROAD_WIDTH_STOPS[width_key])
+        if zoom is not None
+        else None
+    )
+    if highway == "motorway":
+        return "#f5b35d", "#d98935", width or 9
+    if highway == "trunk":
+        return "#f7c879", "#dca553", width or 8
+    if highway == "primary":
+        return "#f8dda0", "#d3b56e", width or 7
+    if highway == "secondary":
+        return "#fffdf8", "#c8c1b6", width or 6
+    if highway == "tertiary":
+        return "#fffefb", "#d6d0c7", width or 5
+    if highway in {"footway", "path", "pedestrian", "steps"}:
+        return "#f6f1e8", "#d9d2c7", width or 2
+    return "#fffefd", "#ddd8d0", width or 3
+
+
+def _road_level(road: RoadSegment) -> tuple[int, int]:
+    if road.structure < 0:
+        return 0, road.layer
+    if road.structure > 0:
+        return 2, road.layer
+    return 1, road.layer
+
+
+def _road_paint(
+    road: RoadSegment,
+    *,
+    zoom: float | None,
+) -> tuple[str, str, int]:
+    fill, casing, width = _road_style(road.highway, zoom=zoom)
+    if road.structure < 0:
+        fill = "#ffead1" if road.highway == "motorway" else "#fff4c6"
+        casing = "#d8c5a0"
+    return fill, casing, width
 
 
 def _draw_roads(
@@ -216,27 +283,34 @@ def _draw_roads(
 ) -> None:
     """Draw roads by class so segment casings cannot cover joined road surfaces."""
 
-    roads_by_rank: dict[int, list[RoadSegment]] = {}
+    zoom = viewport.zoom(scale) if hasattr(viewport, "zoom") else None
+    roads_by_rank: dict[tuple[int, int, int], list[RoadSegment]] = {}
     for road in roads:
-        roads_by_rank.setdefault(_road_rank(road.highway), []).append(road)
+        level, layer = _road_level(road)
+        key = (level, layer, _road_rank(road.highway))
+        roads_by_rank.setdefault(key, []).append(road)
 
-    # Less important roads go down first. Within each class, draw every casing
-    # before any surface so adjacent segments join without dark casing seams.
-    for rank in sorted(roads_by_rank, reverse=True):
-        ranked_roads = roads_by_rank[rank]
+    # Tunnels go below surface roads and bridges go above them. Within one
+    # level, less important roads go down first. Every casing is completed
+    # before its surfaces so adjacent segments join without dark seams.
+    for key in sorted(
+        roads_by_rank,
+        key=lambda item: (item[0], item[1], -item[2]),
+    ):
+        ranked_roads = roads_by_rank[key]
         for road in ranked_roads:
             start = viewport.point(*road.start)
             end = viewport.point(*road.end)
-            _fill, casing, road_width = _road_style(road.highway)
+            _fill, casing, road_width = _road_paint(road, zoom=zoom)
             draw.line(
                 (start, end),
                 fill=casing,
-                width=(road_width + 3) * scale,
+                width=(road_width + 2) * scale,
             )
         for road in ranked_roads:
             start = viewport.point(*road.start)
             end = viewport.point(*road.end)
-            fill, _casing, road_width = _road_style(road.highway)
+            fill, _casing, road_width = _road_paint(road, zoom=zoom)
             draw.line(
                 (start, end),
                 fill=fill,

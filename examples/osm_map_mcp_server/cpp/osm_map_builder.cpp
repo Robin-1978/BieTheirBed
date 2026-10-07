@@ -72,7 +72,7 @@ const std::set<std::string> kExportTagKeys = {
  "name:zh", "natural", "office",
  "opening_hours", "official_name", "old_name", "phone", "place", "population",
  "public_transport", "railway", "shop", "short_name", "alt_name", "tourism",
- "website"};
+ "website", "bridge", "tunnel", "layer", "oneway"};
 
 const std::unordered_map<std::string, std::string> kCategoryAliases = {
  {"amenity|restaurant", "餐厅 餐馆 饭店 restaurant"},
@@ -528,7 +528,8 @@ CREATE TABLE route_nodes(
 CREATE TABLE route_edges(
  way_id INTEGER NOT NULL,seq INTEGER NOT NULL,source INTEGER NOT NULL,target INTEGER NOT NULL,
  length_m REAL NOT NULL,forward_modes INTEGER NOT NULL,backward_modes INTEGER NOT NULL,
- name TEXT NOT NULL DEFAULT '',highway TEXT NOT NULL DEFAULT '',speed_kph REAL NOT NULL DEFAULT 0);
+ name TEXT NOT NULL DEFAULT '',highway TEXT NOT NULL DEFAULT '',speed_kph REAL NOT NULL DEFAULT 0,
+ layer INTEGER NOT NULL DEFAULT 0,structure INTEGER NOT NULL DEFAULT 0);
 )SQL";
 
 struct FeatureInput {
@@ -589,7 +590,8 @@ feature_(database, "INSERT INTO features(osm_type,osm_id,feature_type,name,alias
  render_area_(database, "INSERT INTO render_areas(osm_type,osm_id,category,subcategory,"
  "min_lat,min_lon,max_lat,max_lon,geom) VALUES(?,?,?,?,?,?,?,?,?)"),
  route_edge_(database, "INSERT INTO route_edges(way_id,seq,source,target,length_m,"
- "forward_modes,backward_modes,name,highway,speed_kph) VALUES(?,?,?,?,?,?,?,?,?,?)"),
+ "forward_modes,backward_modes,name,highway,speed_kph,layer,structure) "
+ "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"),
  batch_size_(batch_size) {
  database_.exec("BEGIN");
  }
@@ -755,7 +757,13 @@ const int modes = forward | backward;
  route_modes_.reserve(50000000);
  route_modes_reserved_ = true;
  }
-const double speed = parse_speed(tag(way.tags(), "maxspeed"));
+ const double speed = parse_speed(tag(way.tags(), "maxspeed"));
+ const int layer = parse_integer(tag(way.tags(), "layer"));
+ auto enabled_tag = [&](const char* key) {
+  const std::string value = tag(way.tags(), key);
+  return !value.empty() && value != "no" && value != "false" && value != "0";
+ };
+ const int structure = enabled_tag("tunnel") ? -1 : (enabled_tag("bridge") ? 1 : 0);
  for (std::size_t sequence = 0; sequence + 1 < way.nodes().size(); ++sequence) {
  const auto& source = way.nodes()[sequence];
  const auto& target = way.nodes()[sequence + 1];
@@ -780,6 +788,8 @@ const double speed = parse_speed(tag(way.tags(), "maxspeed"));
  route_edge_.text(8, road_name);
  route_edge_.text(9, highway);
  route_edge_.real(10, speed);
+ route_edge_.integer(11, layer);
+ route_edge_.integer(12, structure);
  route_edge_.run();
  ++edge_count_;
  touch();
