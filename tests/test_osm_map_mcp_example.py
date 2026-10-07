@@ -719,3 +719,61 @@ def test_update_can_bootstrap_a_new_replication_source(
     assert source.read_bytes() == b"mirror-pbf"
     assert source.with_name("source.osm.pbf.previous").read_bytes() == b"old-pbf"
     assert database.read_bytes() == b"mirror-database"
+
+
+def test_update_resumes_completed_pbf_after_database_build_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.osm.pbf"
+    source.write_bytes(b"old-pbf")
+    database = tmp_path / "live" / "china.sqlite"
+    database.parent.mkdir()
+    database.write_bytes(b"old-database")
+    work = tmp_path / "work"
+
+    def failing_build(command: list[str]) -> int:
+        if "--outfile" in command:
+            output = Path(command[command.index("--outfile") + 1])
+            output.write_bytes(b"new-pbf")
+            return 0
+        return 1
+
+    monkeypatch.setattr(update_map, "_run", failing_build)
+    arguments = Namespace(
+        source=source,
+        database=database,
+        work_dir=work,
+        database_build_dir=tmp_path / "fast-build",
+        updater=Path("updater"),
+        server="",
+        diff_batch_mb=1,
+        socket_timeout=10,
+        max_update_batches=2,
+        builder_python=Path(sys.executable),
+        builder=Path("builder"),
+        index_temp_dir=tmp_path / "index",
+        build_batch_size=1_000,
+    )
+
+    with pytest.raises(SystemExit, match="map database build failed"):
+        update_map.update(arguments)
+
+    checkpoint = work / "updated-ready.osm.pbf"
+    assert checkpoint.read_bytes() == b"new-pbf"
+    assert source.read_bytes() == b"old-pbf"
+    assert database.read_bytes() == b"old-database"
+
+    def successful_retry(command: list[str]) -> int:
+        if "--outfile" in command:
+            assert Path(command[1]) == checkpoint.resolve()
+            return 0
+        assert Path(command[1]) == checkpoint.resolve()
+        Path(command[2]).write_bytes(b"new-database")
+        return 0
+
+    monkeypatch.setattr(update_map, "_run", successful_retry)
+    assert update_map.update(arguments) == 0
+    assert source.read_bytes() == b"new-pbf"
+    assert database.read_bytes() == b"new-database"
+    assert not checkpoint.exists()

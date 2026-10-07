@@ -108,9 +108,12 @@ def _update_locked(
     bootstrap_pbf: Path | None = None,
 ) -> int:
     candidates = [work / "updated-a.osm.pbf", work / "updated-b.osm.pbf"]
+    checkpoint = work / "updated-ready.osm.pbf"
     for path in candidates:
         _remove(path)
-    current_input = bootstrap_pbf or source
+    if bootstrap_pbf is not None:
+        _remove(checkpoint)
+    current_input = bootstrap_pbf or (checkpoint if checkpoint.is_file() else source)
     updated: Path | None = None
     for attempt in range(args.max_update_batches):
         output = candidates[attempt % 2]
@@ -134,7 +137,7 @@ def _update_locked(
             raise SystemExit(f"PBF update failed with exit code {result}")
         if not output.exists():
             if updated is None:
-                if bootstrap_pbf is not None:
+                if bootstrap_pbf is not None or current_input == checkpoint:
                     updated = current_input
                     break
                 print("PBF is already current; database was not rebuilt", flush=True)
@@ -149,6 +152,9 @@ def _update_locked(
         raise SystemExit("PBF update exceeded the configured batch limit")
 
     assert updated is not None
+    if updated in candidates:
+        os.replace(updated, checkpoint)
+        updated = checkpoint
     build_database = database_build_dir / f"{database.name}.{os.getpid()}.building"
     staged_database = database.with_name(f".{database.name}.next")
     staged_source = source.with_name(f".{source.name}.next")
@@ -188,8 +194,9 @@ def _update_locked(
         _remove(build_database)
         _remove(staged_database)
         _remove(staged_source)
-        for path in candidates:
-            _remove(path)
+    for path in candidates:
+        _remove(path)
+    _remove(checkpoint)
 
     print(f"updated_pbf={source}", flush=True)
     print(f"updated_database={database}", flush=True)

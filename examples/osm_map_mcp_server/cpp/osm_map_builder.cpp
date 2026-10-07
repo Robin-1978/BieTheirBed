@@ -728,8 +728,10 @@ if (!node.location().valid()) return;
  const double lat = lat_sum / static_cast<double>(valid);
  const double lon = lon_sum / static_cast<double>(valid);
  std::string geometry;
- if (valid >= 2) {
- try { geometry = wkb_.create_linestring(way); } catch (const osmium::geometry_error&) {}
+ if (valid >= 2 && valid == way.nodes().size()) {
+ try { geometry = wkb_.create_linestring(way); }
+ catch (const osmium::geometry_error&) {}
+ catch (const osmium::invalid_location&) {}
  }
  const std::string highway = tag(way.tags(), "highway");
  std::string road_name = names(way.tags()).first;
@@ -801,9 +803,13 @@ const double speed = parse_speed(tag(way.tags(), "maxspeed"));
  double max_lat = -90;
  double max_lon = -180;
  std::size_t count = 0;
+ bool complete_geometry = true;
  for (const auto& ring : area.outer_rings()) {
  for (const auto& node : ring) {
- if (!node.location().valid()) continue;
+ if (!node.location().valid()) {
+ complete_geometry = false;
+ continue;
+ }
  const double lat = node.location().lat();
  const double lon = node.location().lon();
  lat_sum += lat;
@@ -815,10 +821,11 @@ const double speed = parse_speed(tag(way.tags(), "maxspeed"));
  ++count;
  }
  }
- if (count == 0) return;
+ if (count == 0 || !complete_geometry) return;
  std::string geometry;
  try { geometry = wkb_.create_multipolygon(area); }
  catch (const osmium::geometry_error&) { return; }
+ catch (const osmium::invalid_location&) { return; }
  if (!category.empty()) {
  int index = 1;
  render_area_.text(index++, area.from_way() ? "way" : "relation");

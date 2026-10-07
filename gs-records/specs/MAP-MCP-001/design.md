@@ -132,3 +132,11 @@ MCP Tools 固定为 `map.search_places`、`map.reverse_geocode`、`map.nearby_se
 真实数据验收覆盖北京故宫搜索、广州塔和深圳北站搜索、上海人民广场附近逆地理与周边查询，以及上海城区步行和驾车路线。上海样例的逆地理耗时 35 ms、周边查询 7 ms、1.1 km 步行路线 14 ms、1.5 km 驾车路线 8 ms。MCP stdio 验收返回 8 个 Tool、2 个 Resource，并成功执行 `map.dataset_info`、北京区域搜索和上海逆地理。
 
 生产库已经复制到 `/disk/dev/osm-map-live/china.sqlite`，复制后 SHA-256 与 NVMe 构建产物一致；Knoa 后台服务已发现 `map://dataset` 与 `map://categories`。每日 03:20 的更新任务已安装。当前主机访问 `download.geofabrik.de` 超时，因此自动更新会保留 replication sequence 4922 并记录失败；网络恢复后下一次任务会继续追平差分并原子发布。
+
+### 2026-10-07 增量追平与详细底图重建
+
+Geofabrik 链路持续不可用后，生产数据源切换到 openstreetmap.fr 中国镜像及其区域 minute replication。PBF 已追平到 replication sequence `7318681`、timestamp `2026-10-07T10:45:47Z`，成品大小为 1,753,892,809 字节，SHA-256 为 `9c47284c65758e497aaaf0f5caa999a48b3d66f915abe9866727f9a9ff46ab60`。生产 PBF 移至可原子写入的 `/disk/dev/osm-map-live/china-latest.osm.pbf`，`/disk/osm` 原始快照继续保留。
+
+修复缺失节点引用触发 libosmium `invalid location` 后，C++ builder 从 10:48:48Z 构建到 11:32:05Z，共 43 分 17 秒。新 SQLite 为 25,452,748,800 字节，SHA-256 为 `3339e806762a0f31a6008cca538fc5e0939c7263bfbec82ec9053e7a03a6a4be`，状态为 `ready`，包含 4,792,111 个 feature、7,279,868 个 render area、99,325,994 个 route node 和 103,892,423 个 route edge。其中 place 578,650、POI 1,403,600、road 1,885,330、boundary 34,865、address 190,995。`PRAGMA quick_check`、FTS/RTree 行数对齐和中文代表查询均在激活前通过。
+
+生产验收在安亭坐标完成逆地理和 2.2 km 驾车路线：逆地理识别嘉定区安亭镇及附近 POI，路线正确经过墨玉南路、墨玉路和和静路；当前位置图显示墨玉北路、宝安公路、曹安公路等主要道路以及建筑、水域、绿地和工业用地。静态图继续使用 1600×1000 输出和 2 倍超采样。继续提高像素只改善放大查看的锐度；聊天缩略图的路线可读性主要受固定横屏画布和缺少交互影响。后续体验升级应在 Knoa 客户端增加可全屏打开的 MapLibre 地图页，直接消费现有 MCP 返回的 bounds、marker 和 route polyline，无需改变离线查询与路由核心。

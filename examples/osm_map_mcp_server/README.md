@@ -94,8 +94,8 @@ One previous PBF and database are retained with a `.previous` suffix.
 
 ```bash
 /usr/bin/python3 examples/osm_map_mcp_server/update_map.py \
- --source /disk/osm/extracts/china-latest.osm.pbf \
- --database ~/.local/share/knoa/osm-map/china.sqlite \
+ --source /disk/dev/osm-map-live/china-latest.osm.pbf \
+ --database /disk/dev/osm-map-live/china.sqlite \
  --work-dir /disk/dev/osm-map-update \
  --database-build-dir /tmp/osm-map-database-build \
  --index-temp-dir /disk/dev/osm-map-index
@@ -108,6 +108,12 @@ validation leaves the active database unchanged. The host must be able to
 reach the PBF header's replication URL; a network failure is logged and the
 next scheduled run can safely retry.
 
+After a successful PBF merge, the updater atomically moves the result to
+`updated-ready.osm.pbf` in the work directory before starting SQLite. If the
+database build fails, the next run resumes from that complete checkpoint
+instead of downloading and merging the same changes again. The checkpoint is
+removed only after both production artifacts have been published.
+
 If the original replication service is permanently unreachable, bootstrap once
 from a complete compatible snapshot. `--bootstrap-pbf` uses that file as the
 update input and publishes it only after the replacement SQLite build passes.
@@ -117,7 +123,7 @@ The current PBF and database remain active until then:
 curl -fL --retry 5 -o /disk/dev/osm-map-update/china-mirror.osm.pbf \
  https://download.openstreetmap.fr/extracts/asia/china-latest.osm.pbf
 /usr/bin/python3 examples/osm_map_mcp_server/update_map.py \
- --source /disk/osm/extracts/china-latest.osm.pbf \
+ --source /disk/dev/osm-map-live/china-latest.osm.pbf \
  --bootstrap-pbf /disk/dev/osm-map-update/china-mirror.osm.pbf \
  --database /disk/dev/osm-map-live/china.sqlite \
  --work-dir /disk/dev/osm-map-update \
@@ -131,7 +137,7 @@ URL, so later scheduled runs return to small incremental PBF downloads.
 Example cron entry for a daily 03:20 update:
 
 ```cron
-20 3 * * * /usr/bin/python3 /absolute/path/examples/osm_map_mcp_server/update_map.py --source /disk/osm/extracts/china-latest.osm.pbf --database /home/USER/.local/share/knoa/osm-map/china.sqlite --work-dir /disk/dev/osm-map-update --database-build-dir /tmp/osm-map-database-build --index-temp-dir /disk/dev/osm-map-index >> /home/USER/.local/share/knoa/osm-map/update.log 2>&1
+20 3 * * * cd /absolute/path && /usr/bin/python3 examples/osm_map_mcp_server/update_map.py --source /disk/dev/osm-map-live/china-latest.osm.pbf --database /disk/dev/osm-map-live/china.sqlite --work-dir /disk/dev/osm-map-update --database-build-dir /tmp/osm-map-database-build --index-temp-dir /disk/dev/osm-map-index >> /disk/dev/osm-map-update/daily-update.log 2>&1
 ```
 
 OSM does not contain authoritative public transit timetables, live traffic or
