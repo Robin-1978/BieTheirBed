@@ -211,6 +211,39 @@ def _road_style(highway: str) -> tuple[str, str, int]:
     return "#fffefd", "#ddd8d0", 3
 
 
+def _draw_roads(
+    draw, viewport: _Viewport, roads: Sequence[RoadSegment], scale: int
+) -> None:
+    """Draw roads by class so segment casings cannot cover joined road surfaces."""
+
+    roads_by_rank: dict[int, list[RoadSegment]] = {}
+    for road in roads:
+        roads_by_rank.setdefault(_road_rank(road.highway), []).append(road)
+
+    # Less important roads go down first. Within each class, draw every casing
+    # before any surface so adjacent segments join without dark casing seams.
+    for rank in sorted(roads_by_rank, reverse=True):
+        ranked_roads = roads_by_rank[rank]
+        for road in ranked_roads:
+            start = viewport.point(*road.start)
+            end = viewport.point(*road.end)
+            _fill, casing, road_width = _road_style(road.highway)
+            draw.line(
+                (start, end),
+                fill=casing,
+                width=(road_width + 3) * scale,
+            )
+        for road in ranked_roads:
+            start = viewport.point(*road.start)
+            end = viewport.point(*road.end)
+            fill, _casing, road_width = _road_style(road.highway)
+            draw.line(
+                (start, end),
+                fill=fill,
+                width=road_width * scale,
+            )
+
+
 def _area_style(category: str, subcategory: str) -> tuple[int, str, str]:
     """Return draw order, fill and outline for an OSM area."""
 
@@ -528,12 +561,7 @@ def render_static_map(
 
     _draw_areas(draw, viewport, areas, scale)
 
-    for road in sorted(roads, key=lambda item: _road_rank(item.highway), reverse=True):
-        start = viewport.point(*road.start)
-        end = viewport.point(*road.end)
-        fill, casing, road_width = _road_style(road.highway)
-        draw.line((start, end), fill=casing, width=(road_width + 3) * scale)
-        draw.line((start, end), fill=fill, width=road_width * scale)
+    _draw_roads(draw, viewport, roads, scale)
 
     draw.rectangle((0, 0, width, header), fill="#ffffff")
     draw.line(

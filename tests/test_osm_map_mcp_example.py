@@ -10,9 +10,11 @@ import sys
 
 import pytest
 from PIL import Image
+from PIL import ImageDraw
 import yaml
 
 from examples.osm_map_mcp_server import update_map
+from examples.osm_map_mcp_server.map_visual import RoadSegment, _draw_roads
 from examples.osm_map_mcp_server.map_service import (
     MapService,
     MapSettings,
@@ -379,6 +381,26 @@ def test_background_areas_load_from_legacy_feature_layer(tmp_path: Path) -> None
     assert areas[0].category == "natural"
     assert areas[0].subcategory == "water"
     assert areas[0].rings[0][0] == (31.19, 121.39)
+
+
+def test_joined_road_segments_do_not_leave_casing_seams() -> None:
+    class PixelViewport:
+        @staticmethod
+        def point(x: float, y: float) -> tuple[int, int]:
+            return round(x), round(y)
+
+    image = Image.new("RGB", (100, 100), "#ffffff")
+    roads = (
+        RoadSegment((10, 50), (50, 50), "primary", "测试路"),
+        RoadSegment((50, 50), (50, 90), "primary", "测试路"),
+    )
+
+    _draw_roads(ImageDraw.Draw(image), PixelViewport(), roads, scale=2)
+
+    # This pixel belongs to the horizontal surface but is also inside the next
+    # segment's casing. Drawing each segment casing and surface as a pair leaves
+    # a dark block here; class-wide casing and surface passes keep the join clear.
+    assert image.getpixel((41, 53)) == (248, 221, 160)
 
 
 def test_route_map_labels_prioritize_named_major_roads() -> None:
