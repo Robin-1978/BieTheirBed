@@ -341,7 +341,18 @@ double point_distance_m(double a_lat, double a_lon, double b_lat, double b_lon) 
  const double mean_lat = (a_lat + b_lat) * M_PI / 360.0;
  const double dx = (b_lon - a_lon) * M_PI / 180.0 * std::cos(mean_lat);
  const double dy = (b_lat - a_lat) * M_PI / 180.0;
- return kEarthRadiusM * std::hypot(dx, dy);
+return kEarthRadiusM * std::hypot(dx, dy);
+}
+
+std::string box_json(const osmium::Box& box) {
+ if (!box.valid()) return "{}";
+ std::ostringstream output;
+ output << std::setprecision(10)
+ << "{\"min_latitude\":" << box.bottom_left().lat()
+ << ",\"min_longitude\":" << box.bottom_left().lon()
+ << ",\"max_latitude\":" << box.top_right().lat()
+ << ",\"max_longitude\":" << box.top_right().lon() << '}';
+ return output.str();
 }
 
 std::pair<int, int> route_modes(const osmium::TagList& tags) {
@@ -543,6 +554,7 @@ Statement feature_;
  Statement render_area_;
 Statement route_edge_;
 osmium::geom::WKBFactory<> wkb_;
+ osmium::Box bounds_;
  std::unordered_map<std::int64_t, std::uint8_t> route_modes_;
  bool route_modes_reserved_ = false;
  std::size_t batch_size_;
@@ -624,7 +636,8 @@ pending_ = 0;
  std::cout << "route node phase: complete nodes=" << written << '\n' << std::flush;
  }
 
- std::uint64_t object_count() const { return objects_; }
+std::uint64_t object_count() const { return objects_; }
+ std::string bounds_json() const { return box_json(bounds_); }
 
  void add_feature(FeatureInput input) {
  auto [name, aliases] = names(*input.tags);
@@ -671,9 +684,10 @@ pending_ = 0;
  touch();
  }
 
- void node(const osmium::Node& node) {
- progress();
- if (!node.location().valid()) return;
+void node(const osmium::Node& node) {
+progress();
+if (!node.location().valid()) return;
+ bounds_.extend(node.location());
  const double lat = node.location().lat();
  const double lon = node.location().lon();
  const std::string place = tag(node.tags(), "place");
@@ -847,12 +861,7 @@ std::map<std::string, std::string> source_metadata(const fs::path& source) {
  const osmium::Box box = header.box();
  struct stat status{};
  if (::stat(source.c_str(), &status) != 0) throw std::system_error(errno, std::generic_category());
- std::ostringstream bounds;
- bounds << std::setprecision(10) << "{\"min_latitude\":" << box.bottom_left().lat()
- << ",\"min_longitude\":" << box.bottom_left().lon()
- << ",\"max_latitude\":" << box.top_right().lat()
- << ",\"max_longitude\":" << box.top_right().lon() << '}';
- return {
+return {
  {"source_name", fs::absolute(source).string()},
  {"source_size", std::to_string(status.st_size)},
  {"source_mtime_ns", std::to_string(status.st_mtim.tv_sec * 1000000000LL + status.st_mtim.tv_nsec)},
@@ -860,7 +869,7 @@ std::map<std::string, std::string> source_metadata(const fs::path& source) {
  {"replication_timestamp", header.get("osmosis_replication_timestamp")},
  {"replication_sequence", header.get("osmosis_replication_sequence_number")},
  {"replication_base_url", header.get("osmosis_replication_base_url")},
- {"bounds", bounds.str()},
+ {"bounds", box_json(box)},
  };
 }
 
@@ -1009,7 +1018,8 @@ int run(const Arguments& arguments) {
 osmium::apply(reader, location_handler, import_handler, area_handler);
 reader.close();
 import_handler.finish();
- set_metadata(database, {{"build_phase", "route_nodes"}});
+ set_metadata(database, {{"bounds", import_handler.bounds_json()}});
+set_metadata(database, {{"build_phase", "route_nodes"}});
  import_handler.write_route_nodes(location_index);
 set_metadata(database, {{"build_phase", "indexes"}});
  build_indexes(database);

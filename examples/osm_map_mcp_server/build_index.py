@@ -350,6 +350,15 @@ def _source_metadata(path: Path) -> dict[str, str]:
     try:
         header = reader.header()
         box = header.box()
+        try:
+            bounds = {
+                "min_latitude": box.bottom_left.lat,
+                "min_longitude": box.bottom_left.lon,
+                "max_latitude": box.top_right.lat,
+                "max_longitude": box.top_right.lon,
+            }
+        except (RuntimeError, ValueError):
+            bounds = {}
         metadata = {
             "source_name": str(path.resolve()),
             "source_size": str(path.stat().st_size),
@@ -358,15 +367,7 @@ def _source_metadata(path: Path) -> dict[str, str]:
             "replication_sequence": header.get("osmosis_replication_sequence_number")
             or "",
             "replication_base_url": header.get("osmosis_replication_base_url") or "",
-            "bounds": json.dumps(
-                {
-                    "min_latitude": box.bottom_left.lat,
-                    "min_longitude": box.bottom_left.lon,
-                    "max_latitude": box.top_right.lat,
-                    "max_longitude": box.top_right.lon,
-                },
-                separators=(",", ":"),
-            ),
+            "bounds": json.dumps(bounds, separators=(",", ":")),
         }
     finally:
         reader.close()
