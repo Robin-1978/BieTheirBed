@@ -72,6 +72,11 @@ def update(args: argparse.Namespace) -> int:
     database_build_dir = args.database_build_dir.resolve()
     if not source.is_file():
         raise SystemExit(f"source PBF does not exist: {source}")
+    bootstrap_pbf = getattr(args, "bootstrap_pbf", None)
+    if bootstrap_pbf is not None:
+        bootstrap_pbf = bootstrap_pbf.resolve()
+        if not bootstrap_pbf.is_file():
+            raise SystemExit(f"bootstrap PBF does not exist: {bootstrap_pbf}")
     work.mkdir(parents=True, exist_ok=True)
     database.parent.mkdir(parents=True, exist_ok=True)
     database_build_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +88,14 @@ def update(args: argparse.Namespace) -> int:
             raise SystemExit("another map update is already running") from None
         lock.write(f"pid={os.getpid()} started={time.time()}\n")
         lock.flush()
-        return _update_locked(args, source, database, work, database_build_dir)
+        return _update_locked(
+            args,
+            source,
+            database,
+            work,
+            database_build_dir,
+            bootstrap_pbf=bootstrap_pbf,
+        )
 
 
 def _update_locked(
@@ -92,11 +104,13 @@ def _update_locked(
     database: Path,
     work: Path,
     database_build_dir: Path,
+    *,
+    bootstrap_pbf: Path | None = None,
 ) -> int:
     candidates = [work / "updated-a.osm.pbf", work / "updated-b.osm.pbf"]
     for path in candidates:
         _remove(path)
-    current_input: Path = source
+    current_input = bootstrap_pbf or source
     updated: Path | None = None
     for attempt in range(args.max_update_batches):
         output = candidates[attempt % 2]
@@ -120,6 +134,9 @@ def _update_locked(
             raise SystemExit(f"PBF update failed with exit code {result}")
         if not output.exists():
             if updated is None:
+                if bootstrap_pbf is not None:
+                    updated = current_input
+                    break
                 print("PBF is already current; database was not rebuilt", flush=True)
                 return 0
             break
@@ -187,6 +204,14 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--database", required=True, type=Path)
+    parser.add_argument(
+        "--bootstrap-pbf",
+        type=Path,
+        help=(
+            "use a complete replacement PBF as the update input, then atomically "
+            "publish it at --source after the database build succeeds"
+        ),
+    )
     parser.add_argument("--work-dir", type=Path, default=Path("/tmp/osm-map-update"))
     parser.add_argument(
         "--database-build-dir",

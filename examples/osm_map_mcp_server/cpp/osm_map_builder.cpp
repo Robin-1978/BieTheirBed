@@ -506,6 +506,12 @@ CREATE TABLE features(
  lat REAL NOT NULL,lon REAL NOT NULL,min_lat REAL NOT NULL,min_lon REAL NOT NULL,
  max_lat REAL NOT NULL,max_lon REAL NOT NULL,geom BLOB,tags_json TEXT NOT NULL DEFAULT '{}',
  search_text TEXT NOT NULL);
+CREATE TABLE render_areas(
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ osm_type TEXT NOT NULL,osm_id INTEGER NOT NULL,
+ category TEXT NOT NULL,subcategory TEXT NOT NULL DEFAULT '',
+ min_lat REAL NOT NULL,min_lon REAL NOT NULL,max_lat REAL NOT NULL,max_lon REAL NOT NULL,
+ geom BLOB NOT NULL,UNIQUE(osm_type,osm_id));
 CREATE TABLE route_nodes(
  id INTEGER PRIMARY KEY,lat REAL NOT NULL,lon REAL NOT NULL,modes INTEGER NOT NULL);
 CREATE TABLE route_edges(
@@ -534,6 +540,7 @@ struct FeatureInput {
 class ImportHandler : public osmium::handler::Handler {
  Database& database_;
 Statement feature_;
+ Statement render_area_;
 Statement route_edge_;
 osmium::geom::WKBFactory<> wkb_;
  std::unordered_map<std::int64_t, std::uint8_t> route_modes_;
@@ -567,6 +574,8 @@ feature_(database, "INSERT INTO features(osm_type,osm_id,feature_type,name,alias
  "category,subcategory,admin_level,population,address,admin_context,postcode,phone,website,"
  "opening_hours,lat,lon,min_lat,min_lon,max_lat,max_lon,geom,tags_json,search_text)"
  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+ render_area_(database, "INSERT INTO render_areas(osm_type,osm_id,category,subcategory,"
+ "min_lat,min_lon,max_lat,max_lon,geom) VALUES(?,?,?,?,?,?,?,?,?)"),
  route_edge_(database, "INSERT INTO route_edges(way_id,seq,source,target,length_m,"
  "forward_modes,backward_modes,name,highway,speed_kph) VALUES(?,?,?,?,?,?,?,?,?,?)"),
  batch_size_(batch_size) {
@@ -764,14 +773,13 @@ const double speed = parse_speed(tag(way.tags(), "maxspeed"));
  void area(const osmium::Area& area) {
  progress();
  const bool boundary = tag(area.tags(), "boundary") == "administrative";
- const auto area_names = names(area.tags());
  std::string category;
  std::string subcategory;
  for (const char* key : kAreaCategoryKeys) {
  const std::string value = tag(area.tags(), key);
  if (!value.empty()) { category = key; subcategory = (value == "yes" || value == "no" || value == "true" || value == "false") ? key : value; break; }
  }
- if (!boundary && (area_names.first.empty() || category.empty())) return;
+ if (!boundary && category.empty()) return;
  double lat_sum = 0;
  double lon_sum = 0;
  double min_lat = 90;
@@ -797,6 +805,20 @@ const double speed = parse_speed(tag(way.tags(), "maxspeed"));
  std::string geometry;
  try { geometry = wkb_.create_multipolygon(area); }
  catch (const osmium::geometry_error&) { return; }
+ if (!category.empty()) {
+ int index = 1;
+ render_area_.text(index++, area.from_way() ? "way" : "relation");
+ render_area_.integer(index++, area.orig_id());
+ render_area_.text(index++, category);
+ render_area_.text(index++, subcategory);
+ render_area_.real(index++, min_lat);
+ render_area_.real(index++, min_lon);
+ render_area_.real(index++, max_lat);
+ render_area_.real(index++, max_lon);
+ render_area_.blob(index++, geometry);
+ render_area_.run();
+ touch();
+ }
  if (boundary) {
  category = "boundary";
  subcategory = "admin_level_" + std::to_string(parse_integer(tag(area.tags(), "admin_level")));
@@ -846,10 +868,13 @@ void build_indexes(Database& database) {
  const std::vector<std::string> statements = {
  "CREATE UNIQUE INDEX feature_identity ON features(osm_type,osm_id,feature_type)",
  "CREATE INDEX feature_kind ON features(feature_type,category,subcategory)",
+ "CREATE INDEX render_area_kind ON render_areas(category,subcategory)",
 "CREATE INDEX route_edges_source ON route_edges(source)",
  "CREATE INDEX route_edges_target ON route_edges(target)",
  "CREATE VIRTUAL TABLE features_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon)",
  "INSERT INTO features_rtree SELECT id,min_lat,max_lat,min_lon,max_lon FROM features",
+ "CREATE VIRTUAL TABLE render_areas_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon)",
+ "INSERT INTO render_areas_rtree SELECT id,min_lat,max_lat,min_lon,max_lon FROM render_areas",
  "CREATE VIRTUAL TABLE feature_fts USING fts5(search_text,tokenize='unicode61 remove_diacritics 2')",
  "INSERT INTO feature_fts(rowid,search_text) SELECT id,search_text FROM features",
  "CREATE VIRTUAL TABLE route_nodes_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon)",
@@ -877,6 +902,7 @@ std::map<std::string, std::string> validate(Database& database) {
  }
  const std::vector<std::pair<std::string, std::string>> queries = {
  {"feature_count", "SELECT count(*) FROM features"},
+ {"render_area_count", "SELECT count(*) FROM render_areas"},
  {"route_node_count", "SELECT count(*) FROM route_nodes"},
  {"route_edge_count", "SELECT count(*) FROM route_edges"},
  {"boundary_count", "SELECT count(*) FROM features WHERE feature_type='boundary'"},
@@ -889,12 +915,16 @@ std::map<std::string, std::string> validate(Database& database) {
  for (const auto& [name, sql] : queries) {
  const auto count = database.scalar_integer(sql);
  counts[name] = std::to_string(count);
- if (name != "address_count" && count <= 0) throw std::runtime_error("required layer is empty: " + name);
+ if (name != "address_count" && name != "render_area_count" && count <= 0) {
+ throw std::runtime_error("required layer is empty: " + name);
+ }
  }
  if (database.scalar_integer("SELECT count(*) FROM features_rtree") !=
  std::stoll(counts["feature_count"]) ||
  database.scalar_integer("SELECT count(*) FROM feature_fts") !=
  std::stoll(counts["feature_count"]) ||
+ database.scalar_integer("SELECT count(*) FROM render_areas_rtree") !=
+ std::stoll(counts["render_area_count"]) ||
  database.scalar_integer("SELECT count(*) FROM route_nodes_rtree") !=
  std::stoll(counts["route_node_count"])) {
  throw std::runtime_error("index row counts do not match base tables");

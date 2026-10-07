@@ -359,7 +359,26 @@ def test_spatial_queries_render_valid_managed_pngs(tmp_path: Path) -> None:
         assert descriptor["sha256"] == hashlib.sha256(data).hexdigest()
         with Image.open(path) as image:
             assert image.format == "PNG"
-            assert image.size == (1200, 750)
+            assert image.size == (1600, 1000)
+
+
+def test_background_areas_load_from_legacy_feature_layer(tmp_path: Path) -> None:
+    database_path = _database(tmp_path)
+    database = sqlite3.connect(database_path)
+    database.execute(
+        "UPDATE features SET feature_type='area',category='natural',"
+        "subcategory='water' WHERE id=5"
+    )
+    database.commit()
+    database.close()
+
+    service = MapService(MapSettings(database_path=database_path))
+    areas = service._background_areas((31.19, 121.39, 31.23, 121.44))
+
+    assert len(areas) == 1
+    assert areas[0].category == "natural"
+    assert areas[0].subcategory == "water"
+    assert areas[0].rings[0][0] == (31.19, 121.39)
 
 
 def test_route_map_labels_prioritize_named_major_roads() -> None:
@@ -657,3 +676,46 @@ def test_update_builds_off_disk_then_rotates_both_artifacts(
     assert database.read_bytes() == b"new-database"
     assert database.with_name("china.sqlite.previous").read_bytes() == b"old-database"
     assert not list(fast_build.glob("*.building"))
+
+
+def test_update_can_bootstrap_a_new_replication_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.osm.pbf"
+    source.write_bytes(b"old-pbf")
+    bootstrap = tmp_path / "mirror.osm.pbf"
+    bootstrap.write_bytes(b"mirror-pbf")
+    database = tmp_path / "live" / "china.sqlite"
+    database.parent.mkdir()
+    database.write_bytes(b"old-database")
+    fast_build = tmp_path / "fast-build"
+
+    def fake_run(command: list[str]) -> int:
+        if "--outfile" not in command:
+            assert Path(command[1]) == bootstrap.resolve()
+            Path(command[2]).write_bytes(b"mirror-database")
+        return 0
+
+    monkeypatch.setattr(update_map, "_run", fake_run)
+    arguments = Namespace(
+        source=source,
+        database=database,
+        bootstrap_pbf=bootstrap,
+        work_dir=tmp_path / "work",
+        database_build_dir=fast_build,
+        updater=Path("updater"),
+        server="",
+        diff_batch_mb=1,
+        socket_timeout=10,
+        max_update_batches=2,
+        builder_python=Path(sys.executable),
+        builder=Path("builder"),
+        index_temp_dir=tmp_path / "index",
+        build_batch_size=1_000,
+    )
+
+    assert update_map.update(arguments) == 0
+    assert source.read_bytes() == b"mirror-pbf"
+    assert source.with_name("source.osm.pbf.previous").read_bytes() == b"old-pbf"
+    assert database.read_bytes() == b"mirror-database"

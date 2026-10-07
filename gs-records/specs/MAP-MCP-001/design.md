@@ -82,6 +82,10 @@ PBF 长期保留为本地权威快照，SQLite 仅是可丢弃的查询派生物
 
 更新后的 PBF 在工作目录生成，随后在 NVMe 构建目录触发旁路全量索引构建。新数据库通过完整验证后，更新器把 PBF 和 SQLite 分别顺序复制到各自目标目录的 `.next` 文件，再原子轮换；上一版分别保留为 `.previous`。数据库激活失败时自动恢复上一版 PBF，避免源数据与查询库版本不一致。MCP 每次查询只读打开当前 SQLite，不扫描 PBF，更新期间继续服务上一版数据库。每日执行一次更新可把正常数据时延控制在 24 小时以内；PBF 已是最新版本时不重复建库。
 
+渲染数据使用独立的 `render_areas` 与 `render_areas_rtree`，保存无名建筑、水域、绿地和土地利用多边形，不写入全文检索。旧数据库没有该表时，服务从 `features` 中已有的命名 area 兼容读取；新数据库完成全量重建后自动获得完整底图层。静态图输出为 1600×1000，并以 2 倍画布绘制后使用 LANCZOS 缩小。
+
+当 Geofabrik 链路不可达时，可以用 `--bootstrap-pbf` 从 openstreetmap.fr 的完整中国快照切换复制源。该快照携带区域 minute replication URL；首次切换仍在旁路完成全量构建和验证，激活后每日任务继续只下载 `.osc.gz` 增量。
+
 SQLite 不直接消费 `.osc.gz`。OSM 对 way、relation、删除和节点移动的依赖传播需要重新组装几何和路网，直接增量修改查询库容易留下悬空边与旧边界；当前 1.5 GiB 中国快照采用旁路重建，以构建时间换取可验证的一致性。验收以新 PBF replication sequence 增长、新 SQLite 的 replication timestamp 与其一致、旧版本仍可回滚为成功标准。
 
 ### 查询模型

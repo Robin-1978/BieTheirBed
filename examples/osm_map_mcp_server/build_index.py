@@ -70,6 +70,19 @@ CREATE TABLE IF NOT EXISTS features(
     search_text TEXT NOT NULL,
     UNIQUE(osm_type, osm_id, feature_type)
 );
+CREATE TABLE IF NOT EXISTS render_areas(
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ osm_type TEXT NOT NULL,
+ osm_id INTEGER NOT NULL,
+ category TEXT NOT NULL,
+ subcategory TEXT NOT NULL DEFAULT '',
+ min_lat REAL NOT NULL,
+ min_lon REAL NOT NULL,
+ max_lat REAL NOT NULL,
+ max_lon REAL NOT NULL,
+ geom BLOB NOT NULL,
+ UNIQUE(osm_type, osm_id)
+);
 CREATE TABLE IF NOT EXISTS route_nodes(
     id INTEGER PRIMARY KEY,
     lat REAL NOT NULL,
@@ -97,6 +110,9 @@ INDEX_STATEMENTS = (
     "INSERT INTO features_rtree SELECT id,min_lat,max_lat,min_lon,max_lon FROM features",
     "CREATE VIRTUAL TABLE feature_fts USING fts5(search_text, tokenize='unicode61 remove_diacritics 2')",
     "INSERT INTO feature_fts(rowid,search_text) SELECT id,search_text FROM features",
+    "CREATE INDEX render_area_kind ON render_areas(category,subcategory)",
+    "CREATE VIRTUAL TABLE render_areas_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon)",
+    "INSERT INTO render_areas_rtree SELECT id,min_lat,max_lat,min_lon,max_lon FROM render_areas",
     "CREATE INDEX route_edges_source ON route_edges(source)",
     "CREATE INDEX route_edges_target ON route_edges(target)",
     "CREATE VIRTUAL TABLE route_nodes_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon)",
@@ -108,6 +124,8 @@ DROP_INDEX_STATEMENTS = (
     "DROP INDEX IF EXISTS feature_kind",
     "DROP TABLE IF EXISTS features_rtree",
     "DROP TABLE IF EXISTS feature_fts",
+    "DROP INDEX IF EXISTS render_area_kind",
+    "DROP TABLE IF EXISTS render_areas_rtree",
     "DROP INDEX IF EXISTS route_edges_source",
     "DROP INDEX IF EXISTS route_edges_target",
     "DROP TABLE IF EXISTS route_nodes_rtree",
@@ -373,6 +391,7 @@ class MapImportHandler(osmium.SimpleHandler):
         self.batch_size = batch_size
         self.wkb = osmium.geom.WKBFactory()
         self.features: list[tuple[Any, ...]] = []
+        self.render_areas: list[tuple[Any, ...]] = []
         self.route_nodes: list[tuple[Any, ...]] = []
         self.route_edges: list[tuple[Any, ...]] = []
         self.seen = 0
@@ -458,7 +477,9 @@ class MapImportHandler(osmium.SimpleHandler):
             )
 
     def flush(self) -> None:
-        if not (self.features or self.route_nodes or self.route_edges):
+        if not (
+            self.features or self.render_areas or self.route_nodes or self.route_edges
+        ):
             return
         self.database.execute("BEGIN")
         try:
@@ -480,6 +501,16 @@ class MapImportHandler(osmium.SimpleHandler):
                     "max_lon=excluded.max_lon,geom=excluded.geom,tags_json=excluded.tags_json,"
                     "search_text=excluded.search_text",
                     self.features,
+                )
+            if self.render_areas:
+                self.database.executemany(
+                    "INSERT INTO render_areas(osm_type,osm_id,category,subcategory,"
+                    "min_lat,min_lon,max_lat,max_lon,geom) VALUES (?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(osm_type,osm_id) DO UPDATE SET "
+                    "category=excluded.category,subcategory=excluded.subcategory,"
+                    "min_lat=excluded.min_lat,min_lon=excluded.min_lon,"
+                    "max_lat=excluded.max_lat,max_lon=excluded.max_lon,geom=excluded.geom",
+                    self.render_areas,
                 )
             if self.route_nodes:
                 self.database.executemany(
@@ -503,6 +534,7 @@ class MapImportHandler(osmium.SimpleHandler):
             self.database.rollback()
             raise
         self.features.clear()
+        self.render_areas.clear()
         self.route_nodes.clear()
         self.route_edges.clear()
 
@@ -654,7 +686,6 @@ class MapImportHandler(osmium.SimpleHandler):
         self._progress()
         tags = area.tags
         boundary = _tag(tags, "boundary") == "administrative"
-        name, _ = _names(tags)
         area_category = area_subcategory = ""
         for key in AREA_CATEGORY_KEYS:
             if _tag(tags, key):
@@ -662,7 +693,7 @@ class MapImportHandler(osmium.SimpleHandler):
                     key, _tag(tags, key)
                 )
                 break
-        if not boundary and (not name or not area_category):
+        if not boundary and not area_category:
             return
         points = [(node.lon, node.lat) for ring in area.outer_rings() for node in ring]
         if not points:
@@ -677,8 +708,23 @@ class MapImportHandler(osmium.SimpleHandler):
             geometry = bytes.fromhex(self.wkb.create_multipolygon(area))
         except (RuntimeError, ValueError):
             return
+        osm_type = "way" if area.from_way() else "relation"
+        if area_category:
+            self.render_areas.append(
+                (
+                    osm_type,
+                    int(area.orig_id()),
+                    area_category,
+                    area_subcategory,
+                    min_lat,
+                    min_lon,
+                    max_lat,
+                    max_lon,
+                    geometry,
+                )
+            )
         self._feature(
-            osm_type="way" if area.from_way() else "relation",
+            osm_type=osm_type,
             osm_id=int(area.orig_id()),
             feature_type="boundary" if boundary else "area",
             tags=tags,
@@ -693,7 +739,7 @@ class MapImportHandler(osmium.SimpleHandler):
                 else area_subcategory
             ),
         )
-        if len(self.features) >= self.batch_size:
+        if max(len(self.features), len(self.render_areas)) >= self.batch_size:
             self.flush()
 
 
@@ -760,6 +806,9 @@ def validate_database(database: sqlite3.Connection) -> dict[str, int]:
         "feature_count": database.execute("SELECT count(*) FROM features").fetchone()[
             0
         ],
+        "render_area_count": database.execute(
+            "SELECT count(*) FROM render_areas"
+        ).fetchone()[0],
         "route_node_count": database.execute(
             "SELECT count(*) FROM route_nodes"
         ).fetchone()[0],
@@ -795,11 +844,16 @@ def validate_database(database: sqlite3.Connection) -> dict[str, int]:
         raise RuntimeError(f"database is missing required map layers: {counts}")
     rtree_count = database.execute("SELECT count(*) FROM features_rtree").fetchone()[0]
     fts_count = database.execute("SELECT count(*) FROM feature_fts").fetchone()[0]
+    render_rtree_count = database.execute(
+        "SELECT count(*) FROM render_areas_rtree"
+    ).fetchone()[0]
     route_rtree_count = database.execute(
         "SELECT count(*) FROM route_nodes_rtree"
     ).fetchone()[0]
     if rtree_count != counts["feature_count"] or fts_count != counts["feature_count"]:
         raise RuntimeError("feature index row counts do not match the feature table")
+    if render_rtree_count != counts["render_area_count"]:
+        raise RuntimeError("render area RTree row count does not match render_areas")
     if route_rtree_count != counts["route_node_count"]:
         raise RuntimeError("route node RTree row count does not match route_nodes")
     shanghai = database.execute(

@@ -23,6 +23,7 @@ try:
         MapLabel,
         MapLine,
         MapMarker,
+        MapPolygon,
         RoadSegment,
         render_static_map,
         scene_bounds,
@@ -34,6 +35,7 @@ except ImportError:  # pragma: no cover - direct script execution
         MapLabel,
         MapLine,
         MapMarker,
+        MapPolygon,
         RoadSegment,
         render_static_map,
         scene_bounds,
@@ -480,6 +482,19 @@ def _iter_lines(geometry: tuple[str, Any] | None) -> Iterable[Sequence[Any]]:
             yield from _iter_lines(child)
 
 
+def _iter_polygons(
+    geometry: tuple[str, Any] | None,
+) -> Iterable[Sequence[Sequence[Any]]]:
+    if geometry is None:
+        return
+    kind, value = geometry
+    if kind == "Polygon":
+        yield value
+    elif kind in {"MultiPolygon", "GeometryCollection"}:
+        for child in value:
+            yield from _iter_polygons(child)
+
+
 def _point_segment_distance_m(
     lat: float, lon: float, a: Sequence[float], b: Sequence[float]
 ) -> float:
@@ -839,6 +854,70 @@ class MapService:
             roads.append(RoadSegment(start=start, end=end, highway=highway, name=name))
         return roads
 
+    def _background_areas(
+        self,
+        bounds: tuple[float, float, float, float],
+        *,
+        limit: int = 1_500,
+    ) -> list[MapPolygon]:
+        min_lat, min_lon, max_lat, max_lon = bounds
+        if _haversine_m(min_lat, min_lon, max_lat, max_lon) > 50_000:
+            return []
+        database = self._connect()
+        try:
+            has_render_layer = database.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='render_areas'"
+            ).fetchone()
+            if has_render_layer:
+                rows = database.execute(
+                    "SELECT a.category,a.subcategory,'' AS name,a.geom "
+                    "FROM render_areas_rtree r JOIN render_areas a ON a.id=r.id "
+                    "WHERE r.max_lat>=? AND r.min_lat<=? "
+                    "AND r.max_lon>=? AND r.min_lon<=? "
+                    "ORDER BY ((a.max_lat-a.min_lat)*(a.max_lon-a.min_lon)) DESC "
+                    "LIMIT ?",
+                    (min_lat, max_lat, min_lon, max_lon, limit),
+                ).fetchall()
+            else:
+                rows = database.execute(
+                    "SELECT f.category,f.subcategory,f.name,f.geom "
+                    "FROM features_rtree r JOIN features f ON f.id=r.id "
+                    "WHERE r.max_lat>=? AND r.min_lat<=? "
+                    "AND r.max_lon>=? AND r.min_lon<=? "
+                    "AND f.feature_type='area' AND f.geom IS NOT NULL "
+                    "AND f.category IN ('building','landuse','natural','leisure','water','waterway') "
+                    "ORDER BY ((f.max_lat-f.min_lat)*(f.max_lon-f.min_lon)) DESC "
+                    "LIMIT ?",
+                    (min_lat, max_lat, min_lon, max_lon, limit),
+                ).fetchall()
+        finally:
+            database.close()
+
+        areas: list[MapPolygon] = []
+        for row in rows:
+            try:
+                geometry = _read_wkb(row["geom"])
+                for raw_rings in _iter_polygons(geometry):
+                    rings = tuple(
+                        tuple((float(point[1]), float(point[0])) for point in raw_ring)
+                        for raw_ring in raw_rings
+                        if len(raw_ring) >= 3
+                    )
+                    if rings:
+                        areas.append(
+                            MapPolygon(
+                                rings=rings,
+                                category=str(row["category"] or ""),
+                                subcategory=str(row["subcategory"] or ""),
+                                name=str(row["name"] or ""),
+                            )
+                        )
+                    if len(areas) >= limit:
+                        return areas
+            except (ValueError, struct.error, TypeError):
+                continue
+        return areas
+
     def _attach_visual(
         self,
         result: dict[str, Any],
@@ -867,6 +946,7 @@ class MapService:
                 subtitle=subtitle,
                 markers=markers,
                 lines=lines,
+                areas=self._background_areas(fitted_bounds),
                 roads=self._background_roads(fitted_bounds),
                 labels=labels,
                 circle=circle,

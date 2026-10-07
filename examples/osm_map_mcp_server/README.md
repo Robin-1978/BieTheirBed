@@ -71,11 +71,13 @@ All eight tools are read-only and local:
 - `map.convert_coordinates`
 - `map.dataset_info`
 
-The first six spatial tools return structured text and attach a 1200×750 PNG
-map by default. Maps use a high-contrast road hierarchy, distribute road data
-across the complete viewport, prioritize major road names, and keep roads used
-by a route labeled above the route line. They also show numbered result
-markers, search radii, place boundaries or route lines as appropriate. Set
+The first six spatial tools return structured text and attach a 1600×1000 PNG
+map by default. Maps are drawn at twice the output resolution and downsampled
+for clean road and text edges. Water, green space, residential, industrial and
+building polygons form the base map; roads use a clear hierarchy, major road
+names are prioritized, and roads used by a route stay labeled above the route
+line. Numbered result markers, search radii, place boundaries and route lines
+are added as appropriate. Set
 `include_map_image=false` when only structured data is needed. Coordinate
 conversion and dataset metadata remain text only.
 
@@ -85,8 +87,8 @@ category names.
 
 ## Keep the data current
 
-The PBF header points to Geofabrik's China replication service. The updater
-downloads only `.osc.gz` changes, generates a new PBF beside the live one,
+The PBF header identifies its replication service. The updater downloads only
+`.osc.gz` changes from that service, generates a new PBF beside the live one,
 builds and validates a new SQLite database, then atomically rotates both files.
 One previous PBF and database are retained with a `.previous` suffix.
 
@@ -103,8 +105,28 @@ Run this command daily after the initial build. If the PBF is already current,
 the updater exits without rebuilding SQLite. During a rebuild the MCP keeps
 serving the previous complete database. A failed download, merge, build or
 validation leaves the active database unchanged. The host must be able to
-reach the PBF header's Geofabrik replication URL; a network failure is logged
-and the next scheduled run can safely retry.
+reach the PBF header's replication URL; a network failure is logged and the
+next scheduled run can safely retry.
+
+If the original replication service is permanently unreachable, bootstrap once
+from a complete compatible snapshot. `--bootstrap-pbf` uses that file as the
+update input and publishes it only after the replacement SQLite build passes.
+The current PBF and database remain active until then:
+
+```bash
+curl -fL --retry 5 -o /disk/dev/osm-map-update/china-mirror.osm.pbf \
+ https://download.openstreetmap.fr/extracts/asia/china-latest.osm.pbf
+/usr/bin/python3 examples/osm_map_mcp_server/update_map.py \
+ --source /disk/osm/extracts/china-latest.osm.pbf \
+ --bootstrap-pbf /disk/dev/osm-map-update/china-mirror.osm.pbf \
+ --database /disk/dev/osm-map-live/china.sqlite \
+ --work-dir /disk/dev/osm-map-update \
+ --database-build-dir /tmp/osm-map-database-build \
+ --index-temp-dir /disk/dev/osm-map-index
+```
+
+The openstreetmap.fr China snapshot carries its own regional minute replication
+URL, so later scheduled runs return to small incremental PBF downloads.
 
 Example cron entry for a daily 03:20 update:
 

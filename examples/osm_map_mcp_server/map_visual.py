@@ -28,6 +28,14 @@ class MapLine:
 
 
 @dataclass(frozen=True)
+class MapPolygon:
+    rings: tuple[tuple[tuple[float, float], ...], ...]
+    category: str
+    subcategory: str = ""
+    name: str = ""
+
+
+@dataclass(frozen=True)
 class RoadSegment:
     start: tuple[float, float]
     end: tuple[float, float]
@@ -189,33 +197,118 @@ def _road_rank(highway: str) -> int:
 
 def _road_style(highway: str) -> tuple[str, str, int]:
     if highway == "motorway":
-        return "#f59e0b", "#fff1c7", 8
+        return "#f5b35d", "#d98935", 9
     if highway == "trunk":
-        return "#f7b955", "#fff4d8", 7
+        return "#f7c879", "#dca553", 8
     if highway == "primary":
-        return "#ffd166", "#ffffff", 7
+        return "#f8dda0", "#d3b56e", 7
     if highway == "secondary":
-        return "#ffffff", "#cbd5e1", 6
+        return "#fffdf8", "#c8c1b6", 6
     if highway == "tertiary":
-        return "#ffffff", "#d7dee8", 5
+        return "#fffefb", "#d6d0c7", 5
     if highway in {"footway", "path", "pedestrian", "steps"}:
-        return "#dbe4ee", "#f8fafc", 2
-    return "#ffffff", "#e2e8f0", 3
+        return "#f6f1e8", "#d9d2c7", 2
+    return "#fffefd", "#ddd8d0", 3
 
 
-def _draw_centered_text(draw, xy, text: str, font, fill: str) -> None:
+def _area_style(category: str, subcategory: str) -> tuple[int, str, str]:
+    """Return draw order, fill and outline for an OSM area."""
+
+    if (
+        category in {"water", "waterway"}
+        or (category == "natural" and subcategory in {"water", "bay", "wetland"})
+        or (category == "landuse" and subcategory in {"reservoir", "basin"})
+    ):
+        return 40, "#c9e7f4", "#9fcbdc"
+    if category == "leisure" and subcategory in {
+        "park",
+        "garden",
+        "nature_reserve",
+        "golf_course",
+        "pitch",
+    }:
+        return 30, "#dcefd4", "#bfdcaf"
+    if category == "natural" and subcategory in {
+        "wood",
+        "grassland",
+        "scrub",
+        "heath",
+    }:
+        return 25, "#d9ebce", "#bfd8ae"
+    if category == "landuse" and subcategory in {
+        "forest",
+        "grass",
+        "meadow",
+        "orchard",
+        "farmland",
+        "village_green",
+    }:
+        return 25, "#e2edd2", "#ccdcb9"
+    if category == "landuse" and subcategory in {
+        "industrial",
+        "commercial",
+        "retail",
+        "railway",
+    }:
+        return 20, "#e9e2ea", "#d7cbd9"
+    if category == "landuse" and subcategory in {"residential", "construction"}:
+        return 15, "#eeeae5", "#ded8d0"
+    if category == "building":
+        return 50, "#ded9d2", "#c6beb4"
+    return 10, "#ebe9e3", "#d9d5cd"
+
+
+def _draw_areas(
+    draw, viewport: _Viewport, areas: Sequence[MapPolygon], scale: int
+) -> None:
+    for area in sorted(
+        areas,
+        key=lambda item: _area_style(item.category, item.subcategory)[0],
+    ):
+        _order, fill, outline = _area_style(area.category, area.subcategory)
+        if not area.rings:
+            continue
+        pixel_rings: list[list[tuple[int, int]]] = []
+        for ring in area.rings:
+            if len(ring) < 3:
+                continue
+            stride = max(1, math.ceil(len(ring) / 1_200))
+            pixels = [viewport.point(*point) for point in ring[::stride]]
+            endpoint = viewport.point(*ring[-1])
+            if pixels[-1] != endpoint:
+                pixels.append(endpoint)
+            if len(pixels) >= 3:
+                pixel_rings.append(pixels)
+        if not pixel_rings:
+            continue
+        draw.polygon(pixel_rings[0], fill=fill, outline=outline, width=scale)
+        # Pillow has no direct even-odd fill. Clearing inner rings is a close
+        # approximation for the uncommon holes in these background layers.
+        for hole in pixel_rings[1:]:
+            draw.polygon(hole, fill="#f7f6f2", outline=outline, width=scale)
+
+
+def _draw_centered_text(draw, xy, text: str, font, fill: str, scale: int) -> None:
     draw.text(
         xy,
         text,
         font=font,
         fill=fill,
         anchor="mm",
-        stroke_width=2,
+        stroke_width=2 * scale,
         stroke_fill="#ffffff",
     )
 
 
-def _label_box(draw, xy, text: str, font, *, stroke_width: int = 0):
+def _label_box(
+    draw,
+    xy,
+    text: str,
+    font,
+    *,
+    scale: int,
+    stroke_width: int = 0,
+):
     left, top, right, bottom = draw.textbbox(
         xy,
         text,
@@ -223,7 +316,12 @@ def _label_box(draw, xy, text: str, font, *, stroke_width: int = 0):
         anchor="mm",
         stroke_width=stroke_width,
     )
-    return (left - 5, top - 3, right + 5, bottom + 3)
+    return (
+        left - 5 * scale,
+        top - 3 * scale,
+        right + 5 * scale,
+        bottom + 3 * scale,
+    )
 
 
 def _boxes_overlap(first, second, *, gap: int = 4) -> bool:
@@ -245,9 +343,20 @@ def _draw_route_labels(
     height: int,
     header: int,
     margin: int,
+    scale: int,
 ) -> list[tuple[int, int, int, int]]:
     occupied: list[tuple[int, int, int, int]] = []
-    offsets = ((0, -23), (23, 0), (-23, 0), (0, 23), (32, -22), (-32, -22))
+    offsets = tuple(
+        (x * scale, y * scale)
+        for x, y in (
+            (0, -23),
+            (23, 0),
+            (-23, 0),
+            (0, 23),
+            (32, -22),
+            (-32, -22),
+        )
+    )
     seen: set[str] = set()
     for label in labels:
         text = label.text.strip()[:16]
@@ -258,14 +367,16 @@ def _draw_route_labels(
         selected = None
         for offset_x, offset_y in offsets:
             xy = (origin_x + offset_x, origin_y + offset_y)
-            box = _label_box(draw, xy, text, font, stroke_width=1)
+            box = _label_box(draw, xy, text, font, scale=scale, stroke_width=scale)
             inside = (
                 margin <= box[0]
                 and box[2] <= width - margin
                 and header + 4 <= box[1]
                 and box[3] <= height - margin
             )
-            if inside and not any(_boxes_overlap(box, item) for item in occupied):
+            if inside and not any(
+                _boxes_overlap(box, item, gap=4 * scale) for item in occupied
+            ):
                 selected = (xy, box)
                 break
         if selected is None:
@@ -273,10 +384,10 @@ def _draw_route_labels(
         xy, box = selected
         draw.rounded_rectangle(
             box,
-            radius=6,
+            radius=6 * scale,
             fill="#ffffff",
             outline="#60a5fa",
-            width=1,
+            width=scale,
         )
         draw.text(xy, text, font=font, fill="#0f3b68", anchor="mm")
         occupied.append(box)
@@ -295,6 +406,7 @@ def _draw_background_labels(
     margin: int,
     excluded_names: set[str],
     occupied: list[tuple[int, int, int, int]],
+    scale: int,
 ) -> None:
     grouped: dict[str, list[RoadSegment]] = {}
     for road in roads:
@@ -321,7 +433,7 @@ def _draw_background_labels(
             distance = math.hypot(midpoint[0] - center[0], midpoint[1] - center[1])
             rendered.append((length, distance, midpoint))
         total_length = sum(item[0] for item in rendered)
-        if total_length < 18:
+        if total_length < 18 * scale:
             continue
         ranked_anchors = sorted(
             rendered,
@@ -331,8 +443,8 @@ def _draw_background_labels(
         anchor = ranked_anchors[0]
         score = (
             importance.get(best_rank, 0)
-            + min(total_length, 500) * 0.12
-            - anchor[1] * 0.08
+            + min(total_length / scale, 500) * 0.12
+            - (anchor[1] / scale) * 0.08
         )
         candidates.append(
             (score, name[:16], tuple(item[2] for item in ranked_anchors[:12]))
@@ -343,7 +455,14 @@ def _draw_background_labels(
     )[:32]:
         selected = None
         for xy in anchors:
-            box = _label_box(draw, xy, text, font, stroke_width=3)
+            box = _label_box(
+                draw,
+                xy,
+                text,
+                font,
+                scale=scale,
+                stroke_width=3 * scale,
+            )
             inside = (
                 margin <= box[0]
                 and box[2] <= width - margin
@@ -351,14 +470,14 @@ def _draw_background_labels(
                 and box[3] <= height - margin
             )
             if inside and not any(
-                _boxes_overlap(box, item, gap=8) for item in occupied
+                _boxes_overlap(box, item, gap=8 * scale) for item in occupied
             ):
                 selected = (xy, box)
                 break
         if selected is None:
             continue
         xy, box = selected
-        _draw_centered_text(draw, xy, text, font, "#334155")
+        _draw_centered_text(draw, xy, text, font, "#334155", scale)
         occupied.append(box)
         if len(occupied) >= len(excluded_names) + 18:
             break
@@ -371,6 +490,7 @@ def render_static_map(
     subtitle: str,
     markers: Sequence[MapMarker],
     lines: Sequence[MapLine] = (),
+    areas: Sequence[MapPolygon] = (),
     roads: Sequence[RoadSegment] = (),
     labels: Sequence[MapLabel] = (),
     circle: MapCircle | None = None,
@@ -387,7 +507,10 @@ def render_static_map(
     if bounds is None:
         bounds = scene_bounds(all_points, circle=circle)
 
-    width, height, header, margin = 1200, 750, 96, 44
+    output_width, output_height = 1600, 1000
+    scale = 2
+    width, height = output_width * scale, output_height * scale
+    header, margin = 112 * scale, 48 * scale
     viewport = _Viewport(
         bounds,
         width=width,
@@ -395,25 +518,31 @@ def render_static_map(
         top=header,
         margin=margin,
     )
-    image = Image.new("RGB", (width, height), "#f8fafc")
+    image = Image.new("RGB", (width, height), "#f7f6f2")
     draw = ImageDraw.Draw(image)
-    title_font = _font(30, bold=True)
-    subtitle_font = _font(19)
-    label_font = _font(17)
-    route_label_font = _font(17, bold=True)
-    marker_font = _font(18, bold=True)
+    title_font = _font(34 * scale, bold=True)
+    subtitle_font = _font(20 * scale)
+    label_font = _font(17 * scale)
+    route_label_font = _font(17 * scale, bold=True)
+    marker_font = _font(18 * scale, bold=True)
+
+    _draw_areas(draw, viewport, areas, scale)
 
     for road in sorted(roads, key=lambda item: _road_rank(item.highway), reverse=True):
         start = viewport.point(*road.start)
         end = viewport.point(*road.end)
         fill, casing, road_width = _road_style(road.highway)
-        draw.line((start, end), fill=casing, width=road_width + 3)
-        draw.line((start, end), fill=fill, width=road_width)
+        draw.line((start, end), fill=casing, width=(road_width + 3) * scale)
+        draw.line((start, end), fill=fill, width=road_width * scale)
 
     draw.rectangle((0, 0, width, header), fill="#ffffff")
-    draw.line((0, header - 1, width, header - 1), fill="#dbe3ed", width=1)
-    draw.text((margin, 16), title[:64], font=title_font, fill="#0f172a")
-    draw.text((margin, 57), subtitle[:96], font=subtitle_font, fill="#475569")
+    draw.line(
+        (0, header - scale, width, header - scale),
+        fill="#d7d2ca",
+        width=scale,
+    )
+    draw.text((margin, 16 * scale), title[:64], font=title_font, fill="#172033")
+    draw.text((margin, 65 * scale), subtitle[:96], font=subtitle_font, fill="#526071")
 
     if circle is not None:
         d_lat = circle.radius_m / 110_540
@@ -432,7 +561,7 @@ def render_static_map(
         draw.ellipse(
             (left, top, right, bottom),
             outline="#3b82f6",
-            width=3,
+            width=3 * scale,
         )
 
     for line in lines:
@@ -440,8 +569,18 @@ def render_static_map(
             continue
         pixels = [viewport.point(*point) for point in line.points]
         if line.outline:
-            draw.line(pixels, fill="#ffffff", width=line.width + 6, joint="curve")
-        draw.line(pixels, fill=line.color, width=line.width, joint="curve")
+            draw.line(
+                pixels,
+                fill="#ffffff",
+                width=(line.width + 6) * scale,
+                joint="curve",
+            )
+        draw.line(
+            pixels,
+            fill=line.color,
+            width=line.width * scale,
+            joint="curve",
+        )
 
     excluded_names = {label.text.strip() for label in labels if label.text.strip()}
     occupied_labels = _draw_route_labels(
@@ -453,6 +592,7 @@ def render_static_map(
         height=height,
         header=header,
         margin=margin,
+        scale=scale,
     )
     _draw_background_labels(
         draw,
@@ -465,6 +605,7 @@ def render_static_map(
         margin=margin,
         excluded_names=excluded_names,
         occupied=occupied_labels,
+        scale=scale,
     )
 
     occupied_markers: list[tuple[int, int, int]] = []
@@ -487,9 +628,10 @@ def render_static_map(
         (-60, 60),
         (-60, -60),
     )
+    marker_offsets = tuple((x * scale, y * scale) for x, y in marker_offsets)
     for marker in markers:
         origin_x, origin_y = viewport.point(marker.latitude, marker.longitude)
-        radius = 17 if len(marker.label) <= 2 else 14
+        radius = (17 if len(marker.label) <= 2 else 14) * scale
         x, y = origin_x, origin_y
         for offset_x, offset_y in marker_offsets:
             candidate_x = origin_x + offset_x
@@ -499,38 +641,47 @@ def render_static_map(
                 and header + radius <= candidate_y <= height - margin - radius
             )
             clear = all(
-                radius + other_radius + 6
+                radius + other_radius + 6 * scale
                 <= math.hypot(candidate_x - other_x, candidate_y - other_y)
                 for other_x, other_y, other_radius in occupied_markers
             )
             marker_box = (
-                candidate_x - radius - 4,
-                candidate_y - radius - 4,
-                candidate_x + radius + 4,
-                candidate_y + radius + 4,
+                candidate_x - radius - 4 * scale,
+                candidate_y - radius - 4 * scale,
+                candidate_x + radius + 4 * scale,
+                candidate_y + radius + 4 * scale,
             )
             clear_labels = not any(
-                _boxes_overlap(marker_box, label_box, gap=5)
+                _boxes_overlap(marker_box, label_box, gap=5 * scale)
                 for label_box in occupied_labels
             )
             if inside_plot and clear and clear_labels:
                 x, y = candidate_x, candidate_y
                 break
         if (x, y) != (origin_x, origin_y):
-            draw.line((origin_x, origin_y, x, y), fill=marker.color, width=2)
+            draw.line(
+                (origin_x, origin_y, x, y),
+                fill=marker.color,
+                width=2 * scale,
+            )
         draw.ellipse(
-            (x - radius - 3, y - radius - 3, x + radius + 3, y + radius + 3),
+            (
+                x - radius - 3 * scale,
+                y - radius - 3 * scale,
+                x + radius + 3 * scale,
+                y + radius + 3 * scale,
+            ),
             fill="#ffffff",
         )
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),
             fill=marker.color,
             outline="#ffffff",
-            width=2,
+            width=2 * scale,
         )
         if marker.label:
             draw.text(
-                (x, y - 1),
+                (x, y - scale),
                 marker.label[:3],
                 font=marker_font,
                 fill="#ffffff",
@@ -540,26 +691,28 @@ def render_static_map(
 
     draw.polygon(
         (
-            (width - 58, header + 12),
-            (width - 67, header + 36),
-            (width - 49, header + 36),
+            (width - 58 * scale, header + 12 * scale),
+            (width - 67 * scale, header + 36 * scale),
+            (width - 49 * scale, header + 36 * scale),
         ),
         fill="#344054",
     )
     draw.text(
-        (width - 58, header + 51),
+        (width - 58 * scale, header + 51 * scale),
         "N",
         font=label_font,
         fill="#344054",
         anchor="mm",
     )
     draw.text(
-        (width - margin, height - 20),
+        (width - margin, height - 20 * scale),
         "© OpenStreetMap contributors",
-        font=_font(14),
+        font=_font(14 * scale),
         fill="#64748b",
         anchor="ra",
     )
+
+    image = image.resize((output_width, output_height), Image.Resampling.LANCZOS)
 
     root = root.expanduser().resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
