@@ -113,7 +113,8 @@ def _tool_definitions() -> list[types.Tool]:
                 "OSM value such as cafe or a qualified value such as amenity:cafe. Use "
                 "for nearby/周边/附近/哪里买 requests. For fruit try shop:greengrocer, "
                 "shop:supermarket and shop:convenience together. Returns a numbered radius "
-                "map image by default."
+                "map image by default. Do not use this tool for 导航/路线 requests; call "
+                "map.route directly for those requests."
             ),
             input_schema=_schema(
                 {
@@ -170,6 +171,7 @@ def _tool_definitions() -> list[types.Tool]:
             description=(
                 "Plan a walking, cycling or driving route on the local OSM road graph. "
                 "Use whenever the user asks 怎么走、路线、导航、步行、骑车 or 开车. "
+                "Call this tool directly for navigation instead of map.nearby_search. "
                 "origin and destination accept place text or 'latitude,longitude'. Present "
                 "the compact summary, numbered turn steps and navigation.url as a clickable "
                 "打开高德地图导航 link. route_preview is a compact line for UI rendering; "

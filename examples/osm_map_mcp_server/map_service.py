@@ -924,12 +924,20 @@ class MapService:
         limit: int = 8_000,
     ) -> list[RoadSegment]:
         min_lat, min_lon, max_lat, max_lon = bounds
-        if _haversine_m(min_lat, min_lon, max_lat, max_lon) > 80_000:
+        diagonal_m = _haversine_m(min_lat, min_lon, max_lat, max_lon)
+        if diagonal_m > 80_000:
             return []
-        grid_size = 8
-        cells = grid_size * grid_size
+        # Complete feature geometries already cover the whole buffered viewport.
+        # Sampling route edges is useful for bridge/tunnel detail at close zooms,
+        # but its 128 graph queries become expensive for a large radius map.
+        grid_size = 8 if diagonal_m <= 12_000 else 0
+        cells = max(1, grid_size * grid_size)
         major_per_cell = max(200, limit // cells)
         detail_per_cell = max(60, limit // cells // 2)
+        feature_limit = min(
+            limit,
+            4_000 if diagonal_m > 20_000 else 6_000 if diagonal_m > 12_000 else limit,
+        )
         database = self._connect()
         edge_columns = {
             str(row[1]) for row in database.execute("PRAGMA table_info(route_edges)")
@@ -999,7 +1007,7 @@ class MapService:
                 "WHEN 'motorway' THEN 0 WHEN 'trunk' THEN 1 "
                 "WHEN 'primary' THEN 2 WHEN 'secondary' THEN 3 "
                 "WHEN 'tertiary' THEN 4 ELSE 5 END,f.osm_id LIMIT ?",
-                (min_lat, max_lat, min_lon, max_lon, limit),
+                (min_lat, max_lat, min_lon, max_lon, feature_limit),
             ).fetchall()
         finally:
             database.close()

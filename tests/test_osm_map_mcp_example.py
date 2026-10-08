@@ -428,6 +428,22 @@ def test_background_roads_load_complete_intersecting_way_geometry(
     )
 
 
+def test_background_roads_large_view_uses_complete_feature_geometry(
+    tmp_path: Path,
+) -> None:
+    database_path = _database(tmp_path)
+    database = sqlite3.connect(database_path)
+    database.execute("DROP TABLE route_nodes_rtree")
+    database.commit()
+    database.close()
+    service = MapService(MapSettings(database_path=database_path))
+
+    roads = service._background_roads((31.1, 121.2, 31.3, 121.6))
+
+    named = [road for road in roads if road.name == "测试路"]
+    assert len(named) == 2
+
+
 def test_background_lines_load_complete_intersecting_geometry(
     tmp_path: Path,
 ) -> None:
@@ -860,6 +876,10 @@ def test_map_tool_guidance_and_fruit_taxonomy() -> None:
     tools = {tool.name: tool for tool in _tool_definitions()}
     assert "怎么走" in tools["map.route"].description
     assert "附近" in tools["map.nearby_search"].description
+    assert "instead of map.nearby_search" in tools["map.route"].description
+    assert (
+        "Do not use this tool for 导航/路线" in tools["map.nearby_search"].description
+    )
     assert tools["map.route"].input_schema["properties"]["include_geometry"] == {
         "type": "boolean",
         "default": False,

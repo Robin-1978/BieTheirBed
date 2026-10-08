@@ -1278,3 +1278,31 @@ async def test_mcp_client_call_tool_auto_reconnects_on_connection_closed() -> No
     assert attempts == 2
     assert restarted is True
     assert result.content[0].text == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_call_tool_timeout_does_not_restart_or_retry() -> None:
+    client = StreamableHTTPMCPClient("https://example.test/mcp", timeout_seconds=0.01)
+    attempts = 0
+
+    class MockSession:
+        async def call_tool(self, name, arguments, **_kwargs):
+            nonlocal attempts
+            del name, arguments
+            attempts += 1
+            await asyncio.sleep(1)
+
+    client._session = MockSession()
+    restarted = False
+
+    async def mock_restart():
+        nonlocal restarted
+        restarted = True
+
+    client._restart_owner = mock_restart
+
+    with pytest.raises(TimeoutError):
+        await client.call_tool("slow_tool", {})
+
+    assert attempts == 1
+    assert restarted is False

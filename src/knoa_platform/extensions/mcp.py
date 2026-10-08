@@ -724,6 +724,10 @@ class _SessionClientMixin:
                 except Exception as exc:
                     if isinstance(exc, asyncio.CancelledError):
                         raise
+                    # asyncio.TimeoutError aliases built-in TimeoutError, which is an
+                    # OSError subclass. A slow tool is not a broken MCP transport.
+                    if isinstance(exc, TimeoutError):
+                        raise
                     is_transport_err = isinstance(
                         exc,
                         (
@@ -1168,6 +1172,8 @@ class MCPTool(ToolBase):
                 )
         except asyncio.CancelledError:
             raise
+        except TimeoutError:
+            return {"error": "MCP tool call timed out"}
         except Exception:  # noqa: BLE001 - remote provider failures become tool results
             return {"error": "MCP tool call failed"}
         rendered = _render_mcp_result(result)
