@@ -60,8 +60,8 @@ _COORDINATE_RE = re.compile(
 _SEARCH_PART_RE = re.compile(r"[\u3400-\u9fff]+|[a-z0-9]+", re.IGNORECASE)
 logger = logging.getLogger("osm-map-service")
 
-# Local corrections for OSM ways whose current source tags contain a highway
-# class but no name. Source names always win when a later replication adds one.
+# Local corrections for OSM ways whose current source tags omit the local name
+# or expose only an English fallback.
 _ROAD_NAME_OVERRIDES = {
     27583036: "墨玉路",
     379526884: "墨玉路",
@@ -83,12 +83,23 @@ _ROAD_NAME_OVERRIDES = {
     605975231: "墨玉北路",
     1299162292: "墨玉北路",
     1299162328: "墨玉北路",
+    848004000: "曹安公路",
+    844552657: "曹安公路",
 }
 
 
 def _road_name(way_id: int, source_name: object) -> str:
     name = str(source_name or "").strip()
-    return name or _ROAD_NAME_OVERRIDES.get(way_id, "")
+    override = _ROAD_NAME_OVERRIDES.get(way_id, "")
+    has_local_script = any("\u3400" <= character <= "\u9fff" for character in name)
+    return override if override and not has_local_script else name
+
+
+def _feature_name(row: sqlite3.Row) -> str:
+    name = str(row["name"] or "").strip()
+    if row["feature_type"] == "road" and row["osm_type"] == "way":
+        return _road_name(int(row["osm_id"]), name)
+    return name
 
 
 def _road_render_name(
@@ -316,6 +327,25 @@ def _location_search_query(value: str) -> str:
                 return cleaned[:-1]
             return cleaned[: -len(suffix)]
     return cleaned
+
+
+def _location_search_queries(value: str) -> list[str]:
+    """Return the literal location query plus useful station-name variants."""
+    primary = _location_search_query(value)
+    queries = [primary]
+    station_query = _station_search_query(primary)
+    if station_query:
+        queries.append(station_query)
+    return list(dict.fromkeys(query for query in queries if query))
+
+
+def _station_search_query(value: str) -> str:
+    """Return the name part of an explicit public-transport station query."""
+    primary = _location_search_query(value)
+    for suffix in ("地铁站", "火车站", "车站", "站"):
+        if primary.endswith(suffix) and len(primary) > len(suffix):
+            return primary[: -len(suffix)]
+    return ""
 
 
 def _bounds_area(bounds: tuple[float, float, float, float]) -> float:
@@ -598,7 +628,7 @@ def _feature_result(
     category, subcategory = _normalize_category(row["category"], row["subcategory"])
     result: dict[str, Any] = {
         "place_id": _place_id(row),
-        "name": row["name"],
+        "name": _feature_name(row),
         "feature_type": row["feature_type"],
         "category": category,
         "subcategory": subcategory,
@@ -805,7 +835,7 @@ class MapService:
         if not path.is_file():
             raise MapError("dataset_missing", f"map database does not exist: {path}")
         database = sqlite3.connect(
-            f"file:{path.resolve()}?mode=ro&immutable=1",
+            f"file:{path.resolve()}?mode=ro",
             uri=True,
             timeout=5.0,
         )
@@ -1170,6 +1200,10 @@ class MapService:
                 "path": metadata.get("source_name", ""),
                 "replication_timestamp": metadata.get("replication_timestamp", ""),
                 "replication_sequence": metadata.get("replication_sequence", ""),
+                "pbf_checkpoint_sequence": metadata.get(
+                    "source_checkpoint_sequence",
+                    metadata.get("replication_sequence", ""),
+                ),
                 "sha256": metadata.get("source_sha256", ""),
             },
             "bounds_wgs84": json.loads(metadata.get("bounds", "{}")),
@@ -1189,6 +1223,44 @@ class MapService:
             "license": "OpenStreetMap contributors, ODbL 1.0",
         }
 
+    def _road_override_rows(
+        self,
+        database: sqlite3.Connection,
+        query: str,
+        *,
+        limit: int,
+        feature_types: Sequence[str],
+        bounds: tuple[float, float, float, float] | None,
+    ) -> list[sqlite3.Row]:
+        if feature_types and "road" not in feature_types:
+            return []
+        normalized_query = _normalize_text(query)
+        override_ids = [
+            way_id
+            for way_id, name in _ROAD_NAME_OVERRIDES.items()
+            if normalized_query in _normalize_text(name)
+            or _normalize_text(name) in normalized_query
+        ]
+        if not override_ids:
+            return []
+        placeholders = ",".join("?" for _ in override_ids)
+        sql = (
+            "SELECT f.*,0.0 AS text_rank FROM features f "
+            + ("JOIN features_rtree r ON r.id=f.id " if bounds is not None else "")
+            + "WHERE f.osm_type='way' AND f.feature_type='road' "
+            + f"AND f.osm_id IN ({placeholders}) "
+        )
+        parameters: list[Any] = list(override_ids)
+        if bounds is not None:
+            min_lat, min_lon, max_lat, max_lon = bounds
+            sql += (
+                "AND r.max_lat>=? AND r.min_lat<=? AND r.max_lon>=? AND r.min_lon<=? "
+            )
+            parameters.extend((min_lat, max_lat, min_lon, max_lon))
+        return database.execute(
+            sql + "LIMIT ?", [*parameters, min(500, max(1, limit))]
+        ).fetchall()
+
     def _search_rows(
         self,
         database: sqlite3.Connection,
@@ -1197,7 +1269,21 @@ class MapService:
         limit: int,
         feature_types: Sequence[str] = (),
         bounds: tuple[float, float, float, float] | None = None,
+        station_only: bool = False,
     ) -> list[sqlite3.Row]:
+        override_rows = self._road_override_rows(
+            database,
+            query,
+            limit=limit,
+            feature_types=feature_types,
+            bounds=bounds,
+        )
+        normalized_query = _normalize_text(query)
+        if override_rows and any(
+            normalized_query == _normalize_text(name)
+            for name in _ROAD_NAME_OVERRIDES.values()
+        ):
+            return override_rows
         tokens = search_tokens(query)
         strict = _fts_expression(query)
         relaxed = None
@@ -1219,6 +1305,13 @@ class MapService:
         if bounds is not None:
             sql_base += "JOIN features_rtree r ON r.id=f.id "
         sql_base += "WHERE feature_fts MATCH ? "
+        if station_only:
+            sql_base += (
+                "AND ((f.category='railway' AND f.subcategory IN "
+                "('station','halt','tram_stop','subway_entrance')) OR "
+                "(f.category='public_transport' AND f.subcategory='station') OR "
+                "(f.category='amenity' AND f.subcategory='bus_station')) "
+            )
         if feature_types:
             sql_base += "AND f.feature_type IN (%s) " % ",".join(
                 "?" for _ in feature_types
@@ -1238,6 +1331,8 @@ class MapService:
             rows = database.execute(
                 sql_base, [relaxed, *parameters_base, min(500, max(1, limit))]
             ).fetchall()
+        seen_ids = {int(row["id"]) for row in rows}
+        rows.extend(row for row in override_rows if int(row["id"]) not in seen_ids)
         return rows
 
     def _region_bounds(
@@ -1295,6 +1390,8 @@ class MapService:
         if not query or len(query) > 200:
             raise MapError("invalid_query", "query must contain 1 to 200 characters")
         search_query = _location_search_query(query)
+        station_query = _station_search_query(search_query)
+        rank_query = search_query
         limit = max(1, min(int(limit), 30))
         if (latitude is None) != (longitude is None):
             raise MapError(
@@ -1324,10 +1421,26 @@ class MapService:
                     bias[0] + d_lat,
                     bias[1] + d_lon,
                 )
-                nearby_rows = self._search_rows(
-                    database, search_query, limit=300, bounds=near_bounds
-                )
-                global_rows = self._search_rows(database, search_query, limit=300)
+                nearby_rows: list[sqlite3.Row] = []
+                global_rows: list[sqlite3.Row] = []
+                if station_query:
+                    nearby_rows = self._search_rows(
+                        database,
+                        station_query,
+                        limit=300,
+                        bounds=near_bounds,
+                        station_only=True,
+                    )
+                    global_rows = self._search_rows(
+                        database, station_query, limit=300, station_only=True
+                    )
+                    if nearby_rows or global_rows:
+                        rank_query = station_query
+                if not nearby_rows and not global_rows:
+                    nearby_rows = self._search_rows(
+                        database, search_query, limit=300, bounds=near_bounds
+                    )
+                    global_rows = self._search_rows(database, search_query, limit=300)
                 seen_row_ids: set[int] = set()
                 rows = []
                 for row in (*nearby_rows, *global_rows):
@@ -1337,13 +1450,25 @@ class MapService:
                     seen_row_ids.add(row_id)
                     rows.append(row)
             else:
-                rows = self._search_rows(
-                    database, search_query, limit=300, bounds=bounds
-                )
+                rows = []
+                if station_query:
+                    rows = self._search_rows(
+                        database,
+                        station_query,
+                        limit=300,
+                        bounds=bounds,
+                        station_only=True,
+                    )
+                    if rows:
+                        rank_query = station_query
+                if not rows:
+                    rows = self._search_rows(
+                        database, search_query, limit=300, bounds=bounds
+                    )
         finally:
             database.close()
-        normalized = _normalize_text(search_query)
-        query_tokens = frozenset(search_tokens(search_query))
+        normalized = _normalize_text(rank_query)
+        query_tokens = frozenset(search_tokens(rank_query))
 
         _PLACE_SUBRANK = {
             "city": 0,
@@ -1361,7 +1486,7 @@ class MapService:
         }
 
         def rank(row: sqlite3.Row) -> tuple[Any, ...]:
-            name = _normalize_text(row["name"])
+            name = _normalize_text(_feature_name(row))
             aliases = {
                 _normalize_text(value) for value in row["aliases"].split("|") if value
             }
@@ -1798,17 +1923,60 @@ class MapService:
                 "longitude": bias_longitude,
                 "coordinate_system": coordinate_system,
             }
-        resolved_query = _location_search_query(cleaned)
-        result = self.search_places(resolved_query, limit=limit, **kwargs)
-        if not result["results"]:
+        search_queries = _location_search_queries(cleaned)
+        station_intent = len(search_queries) > 1
+        result_groups = []
+        for query in search_queries:
+            result = self.search_places(query, limit=limit, **kwargs)
+            result_groups.append(result)
+            if station_intent and any(
+                (place.get("category") == "railway")
+                or (
+                    place.get("category") == "public_transport"
+                    and place.get("subcategory") == "station"
+                )
+                for place in result["results"]
+            ):
+                break
+        search_queries = search_queries[: len(result_groups)]
+        if not any(result["results"] for result in result_groups):
             raise MapError(
                 "location_not_found", f"location could not be resolved: {cleaned}"
             )
-        candidates = []
-        for place in result["results"]:
-            location = place["location"]
-            candidates.append(
-                (
+        ranked: list[tuple[int, int, int, tuple[float, float, dict[str, Any]]]] = []
+        seen_places: set[str] = set()
+        for query_index, (resolved_query, result) in enumerate(
+            zip(search_queries, result_groups, strict=True)
+        ):
+            for result_index, place in enumerate(result["results"]):
+                place_id = str(place.get("place_id", ""))
+                if place_id in seen_places:
+                    continue
+                seen_places.add(place_id)
+                location = place["location"]
+                category = str(place.get("category", ""))
+                subcategory = str(place.get("subcategory", ""))
+                station_rank = 0
+                if station_intent:
+                    if category == "railway" and subcategory in {
+                        "station",
+                        "halt",
+                        "tram_stop",
+                        "subway_entrance",
+                    }:
+                        station_rank = 0
+                    elif category == "public_transport" and subcategory == "station":
+                        station_rank = 1
+                    elif category == "amenity" and subcategory == "bus_station":
+                        station_rank = 2
+                    elif category == "public_transport" and subcategory in {
+                        "stop_position",
+                        "platform",
+                    }:
+                        station_rank = 3
+                    else:
+                        station_rank = 4
+                candidate = (
                     float(location["latitude"]),
                     float(location["longitude"]),
                     {
@@ -1818,8 +1986,9 @@ class MapService:
                         "place": place,
                     },
                 )
-            )
-        return candidates
+                ranked.append((station_rank, query_index, result_index, candidate))
+        ranked.sort(key=lambda item: item[:3])
+        return [item[3] for item in ranked[:limit]]
 
     def _resolve_location(
         self,

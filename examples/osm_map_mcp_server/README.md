@@ -4,8 +4,10 @@ This package provides offline place search, reverse geocoding, nearby search,
 place details, walking/cycling/driving routes, distance calculation and
 WGS84/GCJ-02/BD-09 conversion through a standard MCP stdio server.
 
-The source PBF remains the authoritative snapshot. The MCP process only reads
-the generated SQLite database; it never scans the PBF while serving queries.
+The retained PBF is a disaster-recovery checkpoint. The complete OSM object
+SQLite database is the current normalized state, and the MCP process reads only
+the derived service SQLite database. Serving and daily updates never scan the
+country PBF.
 
 ## Build the first database
 
@@ -15,35 +17,33 @@ the Debian development packages into the build directory without using sudo.
 
 ```bash
 ./examples/osm_map_mcp_server/build_cpp_builder.sh /disk/dev/osm-map-cpp-build
-mkdir -p /tmp/osm-map-database-build /disk/dev/osm-map-index
+mkdir -p /disk/dev/osm-map-build /disk/dev/osm-map-index
 
 examples/osm_map_mcp_server/bin/osm_map_builder \
  /disk/osm/extracts/china-latest.osm.pbf \
- /tmp/osm-map-database-build/china.sqlite \
+ /disk/dev/osm-map-build/china.sqlite.building \
  --temp-dir /disk/dev/osm-map-index
 ```
 
-Build SQLite on fast local storage. `/disk` is suitable for the sparse location
-index and SQLite sort spill files, but its random write performance makes it a
-poor database build target. The builder writes route tables sequentially and
-creates all B-tree, FTS5 and RTree indexes after the base data is complete. It
-uses bounded samples for query-planner statistics, then marks the database
-`ready` only after SQLite integrity, layer count, FTS and RTree checks pass. An
-interrupted build remains unavailable and can be safely deleted and rebuilt
-from the retained PBF.
+The build database, sparse location index and SQLite sort spill files stay on
+`/disk`; the developer home and NVMe are not used for large persistent or
+temporary map data. The builder writes route tables sequentially and creates
+all B-tree, FTS5 and RTree indexes after the base data is complete. It uses
+bounded samples for query-planner statistics, then marks the database `ready`
+only after SQLite integrity, layer count, FTS and RTree checks pass. An
+interrupted `.building` file remains unavailable and can be safely deleted and
+rebuilt from the PBF checkpoint.
 
 The 2026-09-27 China snapshot built in 47 minutes 52 seconds. The 1.60 GB PBF
 produced a 21.59 GB SQLite database with 4,745,908 searchable features,
 98,241,267 route nodes and 102,784,644 route edges.
 
-After validation, copy the file sequentially to the large disk and expose it at
+After validation, atomically publish the file on the same large disk and expose
 the default runtime path:
 
 ```bash
 mkdir -p /disk/dev/osm-map-live ~/.local/share/knoa/osm-map
-cp --reflink=auto /tmp/osm-map-database-build/china.sqlite \
- /disk/dev/osm-map-live/.china.sqlite.next
-mv /disk/dev/osm-map-live/.china.sqlite.next \
+mv /disk/dev/osm-map-build/china.sqlite.building \
  /disk/dev/osm-map-live/china.sqlite
 ln -sfn /disk/dev/osm-map-live/china.sqlite \
  ~/.local/share/knoa/osm-map/china.sqlite
@@ -87,63 +87,65 @@ image edge and queries intersecting full OSM geometries. Roads, waterways,
 railways, coastlines and polygons therefore continue through the viewport
 instead of ending where a sampled routing edge or database grid cell ends.
 
-`map://dataset` exposes the source replication timestamp, sequence, bounds,
-counts and capability status. `map://categories` exposes common bilingual OSM
-category names.
+`map://dataset` exposes the current database replication timestamp and sequence,
+the retained PBF checkpoint sequence, bounds, counts and capability status.
+`map://categories` exposes common bilingual OSM category names.
 
 ## Keep the data current
 
-The PBF header identifies its replication service. The updater downloads only
-`.osc.gz` changes from that service, generates a new PBF beside the live one,
-builds and validates a new SQLite database, then atomically rotates both files.
-One previous PBF and database are retained with a `.previous` suffix.
+The updater reads the replication URL from metadata and downloads only the
+standard `.osc.gz` changes after the object database sequence. It applies
+complete node, way and relation versions by OSM ID, uses the reverse member
+indexes to find affected parents before and after the change, and stores that
+scope in a durable pending journal.
+
+The C++ delta builder reads the selected objects directly from
+`china-osm-objects.sqlite` and writes a small derived delta SQLite database. It
+does not produce an intermediate PBF. The service delta is merged into
+`china.sqlite` in one WAL transaction, including FTS, RTree, areas, route edges
+and route-node modes. A crash between the two database commits is recovered
+from the pending journal on the next run.
+
+The retained PBF is a checkpoint and is not rewritten by daily updates. Applied
+compressed diffs are moved to `WORK_DIR/applied`, so the checkpoint plus the
+archive can reconstruct the current object state. A maintenance window can
+occasionally compact those diffs into a newer PBF checkpoint. Keep archived
+diffs until that checkpoint has been validated.
+
+Older service databases need a one-time `route_edges_way` index migration.
+After it exists, every update scales with the changed objects and their actual
+parent/reference closure.
 
 ```bash
 /usr/bin/python3 examples/osm_map_mcp_server/update_map.py \
  --source /disk/dev/osm-map-live/china-latest.osm.pbf \
  --database /disk/dev/osm-map-live/china.sqlite \
- --work-dir /disk/dev/osm-map-update \
- --database-build-dir /tmp/osm-map-database-build \
- --index-temp-dir /disk/dev/osm-map-index
+ --dependency-database /disk/dev/osm-map-live/china-osm-objects.sqlite \
+ --work-dir /disk/dev/osm-map-incremental \
+ --index-temp-dir /disk/dev/osm-map-incremental/sqlite-tmp
 ```
 
-Run this command daily after the initial build. If the PBF is already current,
-the updater exits without rebuilding SQLite. During a rebuild the MCP keeps
-serving the previous complete database. A failed download, merge, build or
-validation leaves the active database unchanged. The host must be able to
-reach the PBF header's replication URL; a network failure is logged and the
-next scheduled run can safely retry.
+Run the updater frequently to keep batches small. Network failures and failed
+service merges are safe to retry. All databases, archived diffs and SQLite
+spill files remain under `/disk`.
 
-After a successful PBF merge, the updater atomically moves the result to
-`updated-ready.osm.pbf` in the work directory before starting SQLite. If the
-database build fails, the next run resumes from that complete checkpoint
-instead of downloading and merging the same changes again. The checkpoint is
-removed only after both production artifacts have been published.
-
-If the original replication service is permanently unreachable, bootstrap once
-from a complete compatible snapshot. `--bootstrap-pbf` uses that file as the
-update input and publishes it only after the replacement SQLite build passes.
-The current PBF and database remain active until then:
+If the object database is lost, recreate it from the retained compatible PBF
+with `osm_dependency_builder`, then replay the archived diffs. A full service
+database rebuild remains the last-resort recovery path:
 
 ```bash
-curl -fL --retry 5 -o /disk/dev/osm-map-update/china-mirror.osm.pbf \
- https://download.openstreetmap.fr/extracts/asia/china-latest.osm.pbf
-/usr/bin/python3 examples/osm_map_mcp_server/update_map.py \
+/usr/bin/python3 examples/osm_map_mcp_server/rebuild_map.py \
  --source /disk/dev/osm-map-live/china-latest.osm.pbf \
- --bootstrap-pbf /disk/dev/osm-map-update/china-mirror.osm.pbf \
  --database /disk/dev/osm-map-live/china.sqlite \
- --work-dir /disk/dev/osm-map-update \
- --database-build-dir /tmp/osm-map-database-build \
+ --work-dir /disk/dev/osm-map-rebuild \
+ --database-build-dir /disk/dev/osm-map-build \
  --index-temp-dir /disk/dev/osm-map-index
 ```
 
-The openstreetmap.fr China snapshot carries its own regional minute replication
-URL, so later scheduled runs return to small incremental PBF downloads.
-
-Example cron entry for a daily 03:20 update:
+Example cron entry for a 15-minute update cadence:
 
 ```cron
-20 3 * * * cd /absolute/path && /usr/bin/python3 examples/osm_map_mcp_server/update_map.py --source /disk/dev/osm-map-live/china-latest.osm.pbf --database /disk/dev/osm-map-live/china.sqlite --work-dir /disk/dev/osm-map-update --database-build-dir /tmp/osm-map-database-build --index-temp-dir /disk/dev/osm-map-index >> /disk/dev/osm-map-update/daily-update.log 2>&1
+*/15 * * * * cd /absolute/path && /usr/bin/flock -n /disk/dev/osm-map-incremental/cron-update.lock /usr/bin/nice -n 15 /usr/bin/ionice -c2 -n7 /usr/bin/python3 examples/osm_map_mcp_server/update_map.py --source /disk/dev/osm-map-live/china-latest.osm.pbf --database /disk/dev/osm-map-live/china.sqlite --dependency-database /disk/dev/osm-map-live/china-osm-objects.sqlite --work-dir /disk/dev/osm-map-incremental --index-temp-dir /disk/dev/osm-map-incremental/sqlite-tmp >> /disk/dev/osm-map-incremental/daily-update.log 2>&1
 ```
 
 OSM does not contain authoritative public transit timetables, live traffic or

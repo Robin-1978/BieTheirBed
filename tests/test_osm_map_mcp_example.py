@@ -13,7 +13,8 @@ from PIL import Image
 from PIL import ImageDraw
 import yaml
 
-from examples.osm_map_mcp_server import update_map
+from examples.osm_map_mcp_server import rebuild_map
+from examples.osm_map_mcp_server import incremental_update
 from examples.osm_map_mcp_server.map_visual import (
     RoadSegment,
     _draw_roads,
@@ -157,6 +158,7 @@ def _database(tmp_path: Path) -> Path:
         "source_sha256": "abc",
         "replication_timestamp": "2026-09-30T00:00:00Z",
         "replication_sequence": "42",
+        "source_checkpoint_sequence": "40",
         "bounds": json.dumps(
             {
                 "min_latitude": 31.19,
@@ -585,6 +587,122 @@ def test_route_uses_local_name_when_source_way_has_no_name() -> None:
     assert [label.text for label in labels] == ["墨玉北路"]
 
 
+def test_local_road_name_override_participates_in_search(tmp_path: Path) -> None:
+    database_path = _database(tmp_path)
+    row = _feature(
+        6,
+        "way",
+        424131502,
+        "road",
+        "",
+        "highway",
+        "primary",
+        31.322,
+        121.162,
+        geometry=_line_wkb([(121.161, 31.321), (121.163, 31.323)]),
+        bounds=(31.321, 121.161, 31.323, 121.163),
+    )
+    database = sqlite3.connect(database_path)
+    database.execute(
+        "INSERT INTO features VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        row,
+    )
+    database.execute(
+        "INSERT INTO features_rtree VALUES (?,?,?,?,?)",
+        (row[0], row[19], row[21], row[20], row[22]),
+    )
+    database.execute(
+        "INSERT INTO feature_fts(rowid,search_text) VALUES (?,?)", (row[0], row[25])
+    )
+    database.commit()
+    database.close()
+
+    service = MapService(MapSettings(database_path=database_path))
+    result = service.search_places("墨玉北路")
+
+    assert result["results"][0]["name"] == "墨玉北路"
+    assert result["results"][0]["place_id"] == "osm:way:424131502:road"
+
+
+def test_station_suffix_uses_station_category_search(tmp_path: Path) -> None:
+    database_path = _database(tmp_path)
+    database = sqlite3.connect(database_path)
+    row = _feature(
+        6,
+        "node",
+        6,
+        "poi",
+        "上海汽车城",
+        "railway",
+        "station",
+        31.2873,
+        121.1762,
+    )
+    database.execute(
+        "INSERT INTO features VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        row,
+    )
+    database.execute(
+        "INSERT INTO features_rtree VALUES (?,?,?,?,?)",
+        (row[0], row[19], row[21], row[20], row[22]),
+    )
+    database.execute(
+        "INSERT INTO feature_fts(rowid,search_text) VALUES (?,?)",
+        (row[0], row[25]),
+    )
+    database.commit()
+    database.close()
+
+    service = MapService(MapSettings(database_path=database_path))
+    result = service.search_places("上海汽车城地铁站")
+
+    assert result["results"][0]["name"] == "上海汽车城"
+    assert result["results"][0]["category"] == "railway"
+    assert result["results"][0]["subcategory"] == "station"
+
+
+def test_station_resolution_prefers_rail_station_name_variant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = MapService(MapSettings(database_path=tmp_path / "unused.sqlite"))
+
+    def fake_search(query: str, **_kwargs: object) -> dict[str, object]:
+        if query == "安亭站":
+            places = [
+                {
+                    "place_id": "osm:node:1:poi",
+                    "name": "公交安亭站",
+                    "feature_type": "poi",
+                    "category": "public_transport",
+                    "subcategory": "stop_position",
+                    "location": {"latitude": 31.29, "longitude": 121.155},
+                }
+            ]
+        else:
+            places = [
+                {
+                    "place_id": "osm:way:2:line",
+                    "name": "安亭",
+                    "feature_type": "line",
+                    "category": "railway",
+                    "subcategory": "station",
+                    "location": {"latitude": 31.298, "longitude": 121.162},
+                }
+            ]
+        return {"results": places}
+
+    monkeypatch.setattr(service, "search_places", fake_search)
+    candidates = service._resolve_candidates("安亭站", coordinate_system="wgs84")
+
+    assert candidates[0][2]["resolved_query"] == "安亭"
+    assert candidates[0][2]["place"]["name"] == "安亭"
+
+
+def test_road_name_replaces_known_english_only_caoan_segments() -> None:
+    assert _road_name(848004000, "Caoan Highway") == "曹安公路"
+    assert _road_name(844552657, "Caoan Highway") == "曹安公路"
+
+
 def test_road_render_name_suppresses_english_only_fallback() -> None:
     assert (
         _road_render_name(
@@ -744,6 +862,17 @@ def test_coordinate_conversion_round_trip() -> None:
     assert restored == pytest.approx((31.2304, 121.4737), abs=1e-6)
 
 
+def test_dataset_info_separates_current_and_checkpoint_sequences(
+    tmp_path: Path,
+) -> None:
+    service = MapService(MapSettings(database_path=_database(tmp_path)))
+
+    source = service.dataset_info()["source"]
+
+    assert source["replication_sequence"] == "42"
+    assert source["pbf_checkpoint_sequence"] == "40"
+
+
 def test_manifest_matches_read_only_tool_inventory() -> None:
     package = Path(__file__).resolve().parents[1] / "examples/osm_map_mcp_server"
     manifest = yaml.safe_load((package / "mcp.yaml").read_text(encoding="utf-8"))
@@ -819,7 +948,7 @@ def test_update_builds_off_disk_then_rotates_both_artifacts(
             build_output.write_bytes(b"new-database")
         return 0
 
-    monkeypatch.setattr(update_map, "_run", fake_run)
+    monkeypatch.setattr(rebuild_map, "_run", fake_run)
     arguments = Namespace(
         source=source,
         database=database,
@@ -836,7 +965,7 @@ def test_update_builds_off_disk_then_rotates_both_artifacts(
         build_batch_size=1_000,
     )
 
-    assert update_map.update(arguments) == 0
+    assert rebuild_map.update(arguments) == 0
     assert source.read_bytes() == b"old-pbf-updated"
     assert source.with_name("source.osm.pbf.previous").read_bytes() == b"old-pbf"
     assert database.read_bytes() == b"new-database"
@@ -863,7 +992,7 @@ def test_update_can_bootstrap_a_new_replication_source(
             Path(command[2]).write_bytes(b"mirror-database")
         return 0
 
-    monkeypatch.setattr(update_map, "_run", fake_run)
+    monkeypatch.setattr(rebuild_map, "_run", fake_run)
     arguments = Namespace(
         source=source,
         database=database,
@@ -881,7 +1010,7 @@ def test_update_can_bootstrap_a_new_replication_source(
         build_batch_size=1_000,
     )
 
-    assert update_map.update(arguments) == 0
+    assert rebuild_map.update(arguments) == 0
     assert source.read_bytes() == b"mirror-pbf"
     assert source.with_name("source.osm.pbf.previous").read_bytes() == b"old-pbf"
     assert database.read_bytes() == b"mirror-database"
@@ -905,7 +1034,7 @@ def test_update_resumes_completed_pbf_after_database_build_failure(
             return 0
         return 1
 
-    monkeypatch.setattr(update_map, "_run", failing_build)
+    monkeypatch.setattr(rebuild_map, "_run", failing_build)
     arguments = Namespace(
         source=source,
         database=database,
@@ -923,7 +1052,7 @@ def test_update_resumes_completed_pbf_after_database_build_failure(
     )
 
     with pytest.raises(SystemExit, match="map database build failed"):
-        update_map.update(arguments)
+        rebuild_map.update(arguments)
 
     checkpoint = work / "updated-ready.osm.pbf"
     assert checkpoint.read_bytes() == b"new-pbf"
@@ -938,8 +1067,195 @@ def test_update_resumes_completed_pbf_after_database_build_failure(
         Path(command[2]).write_bytes(b"new-database")
         return 0
 
-    monkeypatch.setattr(update_map, "_run", successful_retry)
-    assert update_map.update(arguments) == 0
+    monkeypatch.setattr(rebuild_map, "_run", successful_retry)
+    assert rebuild_map.update(arguments) == 0
     assert source.read_bytes() == b"new-pbf"
     assert database.read_bytes() == b"new-database"
     assert not checkpoint.exists()
+
+
+def test_incremental_merge_replaces_only_affected_objects(tmp_path: Path) -> None:
+    base = tmp_path / "base.sqlite"
+    delta = tmp_path / "delta.sqlite"
+    source = tmp_path / "updated.osm.pbf"
+    source.write_bytes(b"updated-pbf")
+    base_schema = """
+ CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+ CREATE TABLE features(
+ id INTEGER PRIMARY KEY AUTOINCREMENT,osm_type TEXT NOT NULL,osm_id INTEGER NOT NULL,
+ feature_type TEXT NOT NULL,name TEXT NOT NULL DEFAULT '',aliases TEXT NOT NULL DEFAULT '',
+ brand TEXT NOT NULL DEFAULT '',category TEXT NOT NULL DEFAULT '',
+ subcategory TEXT NOT NULL DEFAULT '',admin_level INTEGER NOT NULL DEFAULT 0,
+ population INTEGER NOT NULL DEFAULT 0,address TEXT NOT NULL DEFAULT '',
+ admin_context TEXT NOT NULL DEFAULT '',postcode TEXT NOT NULL DEFAULT '',
+ phone TEXT NOT NULL DEFAULT '',website TEXT NOT NULL DEFAULT '',
+ opening_hours TEXT NOT NULL DEFAULT '',lat REAL NOT NULL,lon REAL NOT NULL,
+ min_lat REAL NOT NULL,min_lon REAL NOT NULL,max_lat REAL NOT NULL,max_lon REAL NOT NULL,
+ geom BLOB,tags_json TEXT NOT NULL DEFAULT '{}',search_text TEXT NOT NULL,
+ UNIQUE(osm_type,osm_id,feature_type));
+ CREATE TABLE render_areas(
+ id INTEGER PRIMARY KEY AUTOINCREMENT,osm_type TEXT NOT NULL,osm_id INTEGER NOT NULL,
+ category TEXT NOT NULL,subcategory TEXT NOT NULL DEFAULT '',min_lat REAL NOT NULL,
+ min_lon REAL NOT NULL,max_lat REAL NOT NULL,max_lon REAL NOT NULL,geom BLOB NOT NULL,
+ UNIQUE(osm_type,osm_id));
+ CREATE TABLE route_nodes(
+ id INTEGER PRIMARY KEY,lat REAL NOT NULL,lon REAL NOT NULL,modes INTEGER NOT NULL);
+ CREATE TABLE route_edges(
+ way_id INTEGER NOT NULL,seq INTEGER NOT NULL,source INTEGER NOT NULL,target INTEGER NOT NULL,
+ length_m REAL NOT NULL,forward_modes INTEGER NOT NULL,backward_modes INTEGER NOT NULL,
+ name TEXT NOT NULL DEFAULT '',highway TEXT NOT NULL DEFAULT '',
+ speed_kph REAL NOT NULL DEFAULT 0,layer INTEGER NOT NULL DEFAULT 0,
+ structure INTEGER NOT NULL DEFAULT 0);
+ """
+    live = sqlite3.connect(base)
+    live.executescript(
+        base_schema
+        + """
+ CREATE UNIQUE INDEX feature_identity ON features(osm_type,osm_id,feature_type);
+ CREATE INDEX route_edges_source ON route_edges(source);
+ CREATE INDEX route_edges_target ON route_edges(target);
+ CREATE VIRTUAL TABLE features_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon);
+ CREATE VIRTUAL TABLE render_areas_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon);
+ CREATE VIRTUAL TABLE feature_fts USING fts5(search_text);
+ CREATE VIRTUAL TABLE route_nodes_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon);
+ """
+    )
+    metadata = {
+        "schema_version": "1",
+        "build_state": "ready",
+        "replication_sequence": "10",
+        "feature_count": "2",
+        "address_count": "0",
+        "boundary_count": "0",
+        "line_count": "0",
+        "place_count": "0",
+        "poi_count": "1",
+        "road_count": "1",
+        "render_area_count": "1",
+        "route_edge_count": "2",
+        "route_node_count": "3",
+    }
+    live.executemany("INSERT INTO metadata VALUES(?,?)", metadata.items())
+    feature_values = (
+        "osm_type,osm_id,feature_type,name,category,subcategory,lat,lon,min_lat,min_lon,"
+        "max_lat,max_lon,search_text"
+    )
+    live.execute(
+        f"INSERT INTO features({feature_values}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("way", 10, "road", "旧路", "highway", "residential", 1, 1, 1, 1, 1, 1, "旧路"),
+    )
+    live.execute(
+        f"INSERT INTO features({feature_values}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("node", 100, "poi", "保留点", "amenity", "cafe", 2, 2, 2, 2, 2, 2, "保留点"),
+    )
+    live.execute(
+        "INSERT INTO render_areas(osm_type,osm_id,category,min_lat,min_lon,max_lat,max_lon,geom) "
+        "VALUES('way',20,'building',0,0,1,1,x'00')"
+    )
+    live.executemany(
+        "INSERT INTO route_edges VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (10, 0, 1, 2, 1, 1, 1, "旧路", "residential", 20, 0, 0),
+            (99, 0, 2, 3, 1, 4, 4, "保留路", "primary", 40, 0, 0),
+        ],
+    )
+    live.executemany(
+        "INSERT INTO route_nodes VALUES(?,?,?,?)",
+        [(1, 1, 1, 1), (2, 2, 2, 5), (3, 3, 3, 4)],
+    )
+    live.execute(
+        "INSERT INTO features_rtree SELECT id,min_lat,max_lat,min_lon,max_lon FROM features"
+    )
+    live.execute(
+        "INSERT INTO feature_fts(rowid,search_text) SELECT id,search_text FROM features"
+    )
+    live.execute(
+        "INSERT INTO render_areas_rtree SELECT id,min_lat,max_lat,min_lon,max_lon FROM render_areas"
+    )
+    live.execute(
+        "INSERT INTO route_nodes_rtree SELECT id,lat,lat,lon,lon FROM route_nodes"
+    )
+    live.commit()
+    live.close()
+
+    changed = sqlite3.connect(delta)
+    changed.executescript(base_schema)
+    changed.execute(
+        f"INSERT INTO features({feature_values}) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("way", 10, "road", "新路", "highway", "secondary", 1, 1, 1, 1, 1, 1, "新路"),
+    )
+    changed.execute(
+        "INSERT INTO route_edges VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        (10, 0, 1, 2, 1, 2, 2, "新路", "secondary", 30, 0, 0),
+    )
+    changed.executemany(
+        "INSERT INTO route_nodes VALUES(?,?,?,?)", [(1, 1.1, 1.1, 2), (2, 2.1, 2.1, 2)]
+    )
+    changed.commit()
+    changed.close()
+
+    incremental_update.ensure_incremental_schema(base)
+    result = incremental_update.merge_delta(
+        base,
+        delta,
+        incremental_update.Scope(ways={10, 20}),
+        source,
+        incremental_update.PbfMetadata(11, "2026-10-08T00:00:00Z", "test"),
+    )
+
+    live = sqlite3.connect(base)
+    assert live.execute(
+        "SELECT osm_id,name FROM features ORDER BY osm_id"
+    ).fetchall() == [(10, "新路"), (100, "保留点")]
+    assert live.execute("SELECT count(*) FROM render_areas").fetchone()[0] == 0
+    assert live.execute(
+        "SELECT way_id,forward_modes FROM route_edges ORDER BY way_id"
+    ).fetchall() == [(10, 2), (99, 4)]
+    assert live.execute("SELECT id,modes FROM route_nodes ORDER BY id").fetchall() == [
+        (1, 2),
+        (2, 6),
+        (3, 4),
+    ]
+    assert (
+        live.execute(
+            "SELECT value FROM metadata WHERE key='replication_sequence'"
+        ).fetchone()[0]
+        == "11"
+    )
+    assert live.execute("SELECT count(*) FROM features_rtree").fetchone()[0] == 2
+    assert live.execute("SELECT count(*) FROM feature_fts").fetchone()[0] == 2
+    assert result["old_edges"] == result["new_edges"] == 1
+    live.close()
+
+
+def test_dependency_pending_journal_roundtrip(tmp_path: Path) -> None:
+    database = tmp_path / "objects.sqlite"
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)"
+    )
+    connection.execute("INSERT INTO metadata VALUES('replication_sequence','10')")
+    connection.commit()
+    connection.execute("BEGIN IMMEDIATE")
+    scope = incremental_update.Scope(nodes={1, 2}, ways={10}, relations={20})
+    incremental_update.stage_dependency_update(
+        connection,
+        incremental_update.PbfMetadata(11, "2026-10-08T00:00:00Z", "test"),
+        10,
+        scope,
+    )
+
+    pending = incremental_update.pending_dependency_update(database)
+    assert pending is not None
+    base_sequence, target_sequence, restored_scope = pending
+    assert (base_sequence, target_sequence) == (10, 11)
+    assert restored_scope == scope
+    metadata = incremental_update.dependency_metadata(database)
+    assert metadata["replication_sequence"] == "11"
+    assert metadata["replication_base_url"] == "test"
+
+    incremental_update.clear_pending_dependency_update(database)
+    assert incremental_update.pending_dependency_update(database) is None
+    assert (
+        incremental_update.dependency_metadata(database)["replication_sequence"] == "11"
+    )

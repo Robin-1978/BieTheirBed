@@ -1,11 +1,13 @@
 #include <osmium/area/assembler.hpp>
 #include <osmium/area/multipolygon_manager.hpp>
+#include <osmium/builder/osm_object_builder.hpp>
 #include <osmium/geom/wkb.hpp>
 #include <osmium/handler.hpp>
 #include <osmium/handler/node_locations_for_ways.hpp>
 #include <osmium/index/map/sparse_file_array.hpp>
 #include <osmium/io/any_input.hpp>
 #include <osmium/io/reader.hpp>
+#include <osmium/memory/buffer.hpp>
 #include <osmium/relations/manager_util.hpp>
 #include <osmium/tags/tags_filter.hpp>
 #include <osmium/visitor.hpp>
@@ -49,6 +51,44 @@ namespace {
 
 constexpr const char *kSchemaVersion = "1";
 constexpr double kEarthRadiusM = 6371000.0;
+
+struct ObjectScope {
+  bool enabled = false;
+  std::unordered_set<std::int64_t> nodes;
+  std::unordered_set<std::int64_t> ways;
+  std::unordered_set<std::int64_t> relations;
+
+  bool contains_node(std::int64_t id) const { return !enabled || nodes.find(id) != nodes.end(); }
+  bool contains_way(std::int64_t id) const { return !enabled || ways.find(id) != ways.end(); }
+  bool contains_relation(std::int64_t id) const {
+    return !enabled || relations.find(id) != relations.end();
+  }
+};
+
+ObjectScope read_scope(const fs::path &path) {
+  std::ifstream input{path};
+  if (!input)
+    throw std::runtime_error("cannot open delta scope: " + path.string());
+  ObjectScope scope;
+  scope.enabled = true;
+  char type = '\0';
+  std::int64_t id = 0;
+  while (input >> type >> id) {
+    if (id <= 0)
+      throw std::runtime_error("delta scope contains a non-positive object ID");
+    if (type == 'n')
+      scope.nodes.insert(id);
+    else if (type == 'w')
+      scope.ways.insert(id);
+    else if (type == 'r')
+      scope.relations.insert(id);
+    else
+      throw std::runtime_error("delta scope contains an unknown object type");
+  }
+  if (!input.eof())
+    throw std::runtime_error("delta scope is malformed");
+  return scope;
+}
 
 const std::array<const char *, 14> kPrimaryCategoryKeys = {
     "amenity",    "shop",     "tourism",   "leisure",          "office",
@@ -605,6 +645,337 @@ void Statement::run() {
   sqlite3_clear_bindings(statement_);
 }
 
+class ObjectDatabase {
+  sqlite3 *database_ = nullptr;
+
+public:
+  explicit ObjectDatabase(const fs::path &path) {
+    if (sqlite3_open_v2(path.c_str(), &database_, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+      const std::string message =
+          database_ == nullptr ? "unknown SQLite error" : sqlite3_errmsg(database_);
+      if (database_ != nullptr)
+        sqlite3_close(database_);
+      throw std::runtime_error("cannot open OSM object database: " + message);
+    }
+    sqlite3_busy_timeout(database_, 30000);
+    exec("PRAGMA cache_size=-262144;"
+         "PRAGMA mmap_size=1073741824;PRAGMA temp_store=MEMORY");
+  }
+  ObjectDatabase(const ObjectDatabase &) = delete;
+  ObjectDatabase &operator=(const ObjectDatabase &) = delete;
+  ~ObjectDatabase() {
+    if (database_ != nullptr)
+      sqlite3_close(database_);
+  }
+
+  sqlite3 *get() { return database_; }
+  void exec(const std::string &sql) {
+    char *error = nullptr;
+    if (sqlite3_exec(database_, sql.c_str(), nullptr, nullptr, &error) != SQLITE_OK) {
+      const std::string message = error == nullptr ? sqlite3_errmsg(database_) : error;
+      sqlite3_free(error);
+      throw std::runtime_error("OSM object database error: " + message + " SQL=" + sql);
+    }
+  }
+  std::int64_t scalar_integer(const std::string &sql) {
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(database_, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
+      throw std::runtime_error("cannot prepare OSM object scalar query");
+    const int result = sqlite3_step(statement);
+    if (result != SQLITE_ROW) {
+      sqlite3_finalize(statement);
+      throw std::runtime_error("OSM object scalar query failed");
+    }
+    const auto value = sqlite3_column_int64(statement, 0);
+    sqlite3_finalize(statement);
+    return value;
+  }
+  std::string scalar_text(const std::string &sql) {
+    sqlite3_stmt *statement = nullptr;
+    if (sqlite3_prepare_v2(database_, sql.c_str(), -1, &statement, nullptr) != SQLITE_OK)
+      throw std::runtime_error("cannot prepare OSM object text query");
+    const int result = sqlite3_step(statement);
+    if (result != SQLITE_ROW) {
+      sqlite3_finalize(statement);
+      throw std::runtime_error("OSM object text query failed");
+    }
+    const auto *value = sqlite3_column_text(statement, 0);
+    const std::string output =
+        value == nullptr ? std::string{} : reinterpret_cast<const char *>(value);
+    sqlite3_finalize(statement);
+    return output;
+  }
+};
+
+class ObjectStatement {
+  sqlite3_stmt *statement_ = nullptr;
+  sqlite3 *database_ = nullptr;
+
+public:
+  ObjectStatement(ObjectDatabase &database, const char *sql) : database_(database.get()) {
+    if (sqlite3_prepare_v2(database_, sql, -1, &statement_, nullptr) != SQLITE_OK)
+      throw std::runtime_error("cannot prepare OSM object query: " +
+                               std::string(sqlite3_errmsg(database_)));
+  }
+  ObjectStatement(const ObjectStatement &) = delete;
+  ObjectStatement &operator=(const ObjectStatement &) = delete;
+  ~ObjectStatement() { sqlite3_finalize(statement_); }
+  sqlite3_stmt *get() { return statement_; }
+  bool next() {
+    const int result = sqlite3_step(statement_);
+    if (result == SQLITE_ROW)
+      return true;
+    if (result == SQLITE_DONE)
+      return false;
+    throw std::runtime_error("OSM object query failed: " + std::string(sqlite3_errmsg(database_)));
+  }
+};
+
+using DecodedTags = std::vector<std::pair<std::string, std::string>>;
+
+std::uint32_t read_u32_le(const unsigned char *value) {
+  return static_cast<std::uint32_t>(value[0]) | (static_cast<std::uint32_t>(value[1]) << 8U) |
+         (static_cast<std::uint32_t>(value[2]) << 16U) |
+         (static_cast<std::uint32_t>(value[3]) << 24U);
+}
+
+DecodedTags decode_object_tags(sqlite3_stmt *statement, int column) {
+  const auto *data = static_cast<const unsigned char *>(sqlite3_column_blob(statement, column));
+  const auto size = static_cast<std::size_t>(sqlite3_column_bytes(statement, column));
+  DecodedTags tags;
+  std::size_t offset = 0;
+  while (offset < size) {
+    if (size - offset < 8)
+      throw std::runtime_error("OSM object database contains malformed tags");
+    const auto key_size = static_cast<std::size_t>(read_u32_le(data + offset));
+    const auto value_size = static_cast<std::size_t>(read_u32_le(data + offset + 4));
+    offset += 8;
+    if (key_size > size - offset || value_size > size - offset - key_size)
+      throw std::runtime_error("OSM object database contains truncated tags");
+    tags.emplace_back(std::string(reinterpret_cast<const char *>(data + offset), key_size),
+                      std::string{});
+    offset += key_size;
+    tags.back().second.assign(reinterpret_cast<const char *>(data + offset), value_size);
+    offset += value_size;
+  }
+  return tags;
+}
+
+template <typename TObjectBuilder>
+void add_decoded_tags(TObjectBuilder &object, const DecodedTags &tags) {
+  if (tags.empty())
+    return;
+  osmium::builder::TagListBuilder builder{object};
+  for (const auto &[key, value] : tags)
+    builder.add_tag(key, value);
+}
+
+void add_object_node(osmium::memory::Buffer &buffer, std::int64_t id, std::int64_t lat_e7,
+                     std::int64_t lon_e7, const DecodedTags &tags) {
+  {
+    osmium::builder::NodeBuilder builder{buffer};
+    builder.set_id(id);
+    builder.set_visible(true);
+    builder.set_location(
+        osmium::Location{static_cast<double>(lon_e7) / 1e7, static_cast<double>(lat_e7) / 1e7});
+    add_decoded_tags(builder, tags);
+  }
+  buffer.commit();
+}
+
+void add_object_way(osmium::memory::Buffer &buffer, std::int64_t id, const DecodedTags &tags,
+                    const std::vector<std::int64_t> &nodes) {
+  {
+    osmium::builder::WayBuilder builder{buffer};
+    builder.set_id(id);
+    builder.set_visible(true);
+    add_decoded_tags(builder, tags);
+    if (!nodes.empty()) {
+      osmium::builder::WayNodeListBuilder node_builder{builder};
+      for (const auto node_id : nodes)
+        node_builder.add_node_ref(node_id);
+    }
+  }
+  buffer.commit();
+}
+
+struct ObjectMember {
+  osmium::item_type member_type = osmium::item_type::undefined;
+  std::int64_t member_id = 0;
+  std::string member_role;
+};
+
+void add_object_relation(osmium::memory::Buffer &buffer, std::int64_t id, const DecodedTags &tags,
+                         const std::vector<ObjectMember> &members) {
+  {
+    osmium::builder::RelationBuilder builder{buffer};
+    builder.set_id(id);
+    builder.set_visible(true);
+    add_decoded_tags(builder, tags);
+    if (!members.empty()) {
+      osmium::builder::RelationMemberListBuilder member_builder{builder};
+      for (const auto &member : members)
+        member_builder.add_member(member.member_type, member.member_id, member.member_role);
+    }
+  }
+  buffer.commit();
+}
+
+void prepare_object_selection(ObjectDatabase &database, const ObjectScope &scope) {
+  database.exec(
+      "CREATE TEMP TABLE selected_objects(object_type INTEGER NOT NULL,id INTEGER NOT NULL,"
+      "PRIMARY KEY(object_type,id)) WITHOUT ROWID");
+  sqlite3_stmt *insert = nullptr;
+  if (sqlite3_prepare_v2(database.get(), "INSERT INTO selected_objects VALUES(?,?)", -1, &insert,
+                         nullptr) != SQLITE_OK)
+    throw std::runtime_error("cannot prepare OSM object scope insert");
+  const auto add = [&](int type, const auto &ids) {
+    for (const auto id : ids) {
+      sqlite3_bind_int(insert, 1, type);
+      sqlite3_bind_int64(insert, 2, id);
+      if (sqlite3_step(insert) != SQLITE_DONE) {
+        sqlite3_finalize(insert);
+        throw std::runtime_error("cannot insert OSM object scope");
+      }
+      sqlite3_reset(insert);
+      sqlite3_clear_bindings(insert);
+    }
+  };
+  add(0, scope.nodes);
+  add(1, scope.ways);
+  add(2, scope.relations);
+  sqlite3_finalize(insert);
+
+  for (int depth = 0; depth < 32; ++depth) {
+    database.exec("INSERT OR IGNORE INTO selected_objects "
+                  "SELECT relation_members.member_type,relation_members.member_id "
+                  "FROM selected_objects CROSS JOIN relation_members "
+                  "ON selected_objects.object_type=2 "
+                  "AND relation_members.relation_id=selected_objects.id");
+    if (sqlite3_changes(database.get()) == 0)
+      break;
+    if (depth == 31)
+      throw std::runtime_error("relation reference closure exceeded 32 levels");
+  }
+  database.exec("INSERT OR IGNORE INTO selected_objects "
+                "SELECT 0,way_nodes.node_id FROM selected_objects CROSS JOIN way_nodes "
+                "INDEXED BY sqlite_autoindex_way_nodes_1 "
+                "ON selected_objects.object_type=1 AND way_nodes.way_id=selected_objects.id");
+  std::cout << "object selection: nodes="
+            << database.scalar_integer("SELECT count(*) FROM selected_objects WHERE object_type=0")
+            << " ways="
+            << database.scalar_integer("SELECT count(*) FROM selected_objects WHERE object_type=1")
+            << " relations="
+            << database.scalar_integer("SELECT count(*) FROM selected_objects WHERE object_type=2")
+            << '\n'
+            << std::flush;
+}
+
+template <typename TCallback>
+void stream_object_nodes(ObjectDatabase &database, TCallback callback) {
+  ObjectStatement query{
+      database, "SELECT nodes.id,nodes.lat_e7,nodes.lon_e7,nodes.tags "
+                "FROM selected_objects CROSS JOIN nodes WHERE selected_objects.object_type=0 "
+                "AND nodes.id=selected_objects.id ORDER BY selected_objects.id"};
+  osmium::memory::Buffer buffer{8 * 1024 * 1024, osmium::memory::Buffer::auto_grow::yes};
+  while (query.next()) {
+    auto *row = query.get();
+    add_object_node(buffer, sqlite3_column_int64(row, 0), sqlite3_column_int64(row, 1),
+                    sqlite3_column_int64(row, 2), decode_object_tags(row, 3));
+    if (buffer.committed() >= 8 * 1024 * 1024) {
+      callback(buffer);
+      buffer = osmium::memory::Buffer{8 * 1024 * 1024, osmium::memory::Buffer::auto_grow::yes};
+    }
+  }
+  if (buffer.committed() != 0)
+    callback(buffer);
+}
+
+template <typename TCallback>
+void stream_object_ways(ObjectDatabase &database, TCallback callback) {
+  ObjectStatement query{
+      database, "SELECT ways.id,ways.tags,way_nodes.node_id FROM selected_objects CROSS JOIN ways "
+                "LEFT JOIN way_nodes INDEXED BY sqlite_autoindex_way_nodes_1 "
+                "ON way_nodes.way_id=ways.id WHERE selected_objects.object_type=1 "
+                "AND ways.id=selected_objects.id ORDER BY selected_objects.id,way_nodes.seq"};
+  osmium::memory::Buffer buffer{8 * 1024 * 1024, osmium::memory::Buffer::auto_grow::yes};
+  std::int64_t current_id = 0;
+  DecodedTags tags;
+  std::vector<std::int64_t> nodes;
+  const auto flush_way = [&] {
+    if (current_id == 0)
+      return;
+    add_object_way(buffer, current_id, tags, nodes);
+    if (buffer.committed() >= 8 * 1024 * 1024) {
+      callback(buffer);
+      buffer = osmium::memory::Buffer{8 * 1024 * 1024, osmium::memory::Buffer::auto_grow::yes};
+    }
+  };
+  while (query.next()) {
+    auto *row = query.get();
+    const auto id = sqlite3_column_int64(row, 0);
+    if (id != current_id) {
+      flush_way();
+      current_id = id;
+      tags = decode_object_tags(row, 1);
+      nodes.clear();
+    }
+    if (sqlite3_column_type(row, 2) != SQLITE_NULL)
+      nodes.push_back(sqlite3_column_int64(row, 2));
+  }
+  flush_way();
+  if (buffer.committed() != 0)
+    callback(buffer);
+}
+
+template <typename TCallback>
+void stream_object_relations(ObjectDatabase &database, TCallback callback) {
+  ObjectStatement query{database,
+                        "SELECT relations.id,relations.tags,relation_members.member_type,"
+                        "relation_members.member_id,relation_members.role "
+                        "FROM selected_objects CROSS JOIN relations "
+                        "LEFT JOIN relation_members INDEXED BY sqlite_autoindex_relation_members_1 "
+                        "ON relation_members.relation_id=relations.id "
+                        "WHERE selected_objects.object_type=2 AND relations.id=selected_objects.id "
+                        "ORDER BY selected_objects.id,relation_members.seq"};
+  osmium::memory::Buffer buffer{8 * 1024 * 1024, osmium::memory::Buffer::auto_grow::yes};
+  std::int64_t current_id = 0;
+  DecodedTags tags;
+  std::vector<ObjectMember> members;
+  const auto flush_relation = [&] {
+    if (current_id == 0)
+      return;
+    add_object_relation(buffer, current_id, tags, members);
+    if (buffer.committed() >= 8 * 1024 * 1024) {
+      callback(buffer);
+      buffer = osmium::memory::Buffer{8 * 1024 * 1024, osmium::memory::Buffer::auto_grow::yes};
+    }
+  };
+  while (query.next()) {
+    auto *row = query.get();
+    const auto id = sqlite3_column_int64(row, 0);
+    if (id != current_id) {
+      flush_relation();
+      current_id = id;
+      tags = decode_object_tags(row, 1);
+      members.clear();
+    }
+    if (sqlite3_column_type(row, 2) != SQLITE_NULL) {
+      static const std::array<osmium::item_type, 3> types = {
+          osmium::item_type::node, osmium::item_type::way, osmium::item_type::relation};
+      const int type = sqlite3_column_int(row, 2);
+      if (type < 0 || type >= static_cast<int>(types.size()))
+        throw std::runtime_error("OSM object database contains invalid member type");
+      const auto *role = sqlite3_column_text(row, 4);
+      members.push_back({types[static_cast<std::size_t>(type)], sqlite3_column_int64(row, 3),
+                         role == nullptr ? std::string{} : reinterpret_cast<const char *>(role)});
+    }
+  }
+  flush_relation();
+  if (buffer.committed() != 0)
+    callback(buffer);
+}
+
 const char *kSchema = R"SQL(
 CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE TABLE features(
@@ -659,6 +1030,8 @@ class ImportHandler : public osmium::handler::Handler {
   osmium::Box bounds_;
   std::unordered_map<std::int64_t, std::uint8_t> route_modes_;
   bool route_modes_reserved_ = false;
+  const ObjectScope *scope_;
+  bool delta_;
   std::size_t batch_size_;
   std::size_t pending_ = 0;
   std::uint64_t objects_ = 0;
@@ -686,7 +1059,7 @@ class ImportHandler : public osmium::handler::Handler {
   }
 
 public:
-  ImportHandler(Database &database, std::size_t batch_size)
+  ImportHandler(Database &database, std::size_t batch_size, const ObjectScope *scope, bool delta)
       : database_(database),
         feature_(database,
                  "INSERT INTO features(osm_type,osm_id,feature_type,name,aliases,brand,"
@@ -700,7 +1073,7 @@ public:
                     "INSERT INTO route_edges(way_id,seq,source,target,length_m,"
                     "forward_modes,backward_modes,name,highway,speed_kph,layer,structure) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"),
-        batch_size_(batch_size) {
+        scope_(scope), delta_(delta), batch_size_(batch_size) {
     database_.exec("BEGIN");
   }
 
@@ -805,6 +1178,8 @@ public:
 
   void node(const osmium::Node &node) {
     progress();
+    if (scope_ != nullptr && !scope_->contains_node(node.id()))
+      return;
     if (!node.location().valid())
       return;
     bounds_.extend(node.location());
@@ -826,6 +1201,8 @@ public:
 
   void way(const osmium::Way &way) {
     progress();
+    if (scope_ != nullptr && !scope_->contains_way(way.id()))
+      return;
     if (way.nodes().empty())
       return;
     double lat_sum = 0;
@@ -903,7 +1280,7 @@ public:
     const int modes = forward | backward;
     if (!route_modes_reserved_) {
       route_modes_.max_load_factor(0.8F);
-      route_modes_.reserve(50000000);
+      route_modes_.reserve(delta_ ? 200000 : 50000000);
       route_modes_reserved_ = true;
     }
     const double speed = parse_speed(tag(way.tags(), "maxspeed"));
@@ -950,6 +1327,9 @@ public:
 
   void area(const osmium::Area &area) {
     progress();
+    if (scope_ != nullptr && (area.from_way() ? !scope_->contains_way(area.orig_id())
+                                              : !scope_->contains_relation(area.orig_id())))
+      return;
     const bool boundary = tag(area.tags(), "boundary") == "administrative";
     std::string category;
     std::string subcategory;
@@ -1056,11 +1436,30 @@ std::map<std::string, std::string> source_metadata(const fs::path &source) {
   };
 }
 
+std::map<std::string, std::string> object_source_metadata(ObjectDatabase &database,
+                                                          const fs::path &source) {
+  struct stat status{};
+  if (::stat(source.c_str(), &status) != 0)
+    throw std::system_error(errno, std::generic_category());
+  const auto metadata_value = [&](const char *key) {
+    return database.scalar_text("SELECT value FROM metadata WHERE key='" + std::string(key) + "'");
+  };
+  return {
+      {"source_name", fs::absolute(source).string()},
+      {"source_size", std::to_string(status.st_size)},
+      {"source_mtime_ns",
+       std::to_string(status.st_mtim.tv_sec * 1000000000LL + status.st_mtim.tv_nsec)},
+      {"replication_timestamp", metadata_value("replication_timestamp")},
+      {"replication_sequence", metadata_value("replication_sequence")},
+  };
+}
+
 void build_indexes(Database &database) {
   const std::vector<std::string> statements = {
       "CREATE UNIQUE INDEX feature_identity ON features(osm_type,osm_id,feature_type)",
       "CREATE INDEX feature_kind ON features(feature_type,category,subcategory)",
       "CREATE INDEX render_area_kind ON render_areas(category,subcategory)",
+      "CREATE INDEX route_edges_way ON route_edges(way_id)",
       "CREATE INDEX route_edges_source ON route_edges(source)",
       "CREATE INDEX route_edges_target ON route_edges(target)",
       "CREATE VIRTUAL TABLE features_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon)",
@@ -1072,6 +1471,25 @@ void build_indexes(Database &database) {
       "INSERT INTO feature_fts(rowid,search_text) SELECT id,search_text FROM features",
       "CREATE VIRTUAL TABLE route_nodes_rtree USING rtree(id,min_lat,max_lat,min_lon,max_lon)",
       "INSERT INTO route_nodes_rtree SELECT id,lat,lat,lon,lon FROM route_nodes",
+      "CREATE TRIGGER features_incremental_insert AFTER INSERT ON features BEGIN "
+      "INSERT INTO features_rtree VALUES(new.id,new.min_lat,new.max_lat,new.min_lon,new.max_lon);"
+      "INSERT INTO feature_fts(rowid,search_text) VALUES(new.id,new.search_text);END",
+      "CREATE TRIGGER features_incremental_delete AFTER DELETE ON features BEGIN "
+      "DELETE FROM features_rtree WHERE id=old.id;"
+      "DELETE FROM feature_fts WHERE rowid=old.id;END",
+      "CREATE TRIGGER render_areas_incremental_insert AFTER INSERT ON render_areas BEGIN "
+      "INSERT INTO render_areas_rtree "
+      "VALUES(new.id,new.min_lat,new.max_lat,new.min_lon,new.max_lon);END",
+      "CREATE TRIGGER render_areas_incremental_delete AFTER DELETE ON render_areas BEGIN "
+      "DELETE FROM render_areas_rtree WHERE id=old.id;END",
+      "CREATE TRIGGER route_nodes_incremental_insert AFTER INSERT ON route_nodes BEGIN "
+      "INSERT INTO route_nodes_rtree VALUES(new.id,new.lat,new.lat,new.lon,new.lon);END",
+      "CREATE TRIGGER route_nodes_incremental_update AFTER UPDATE OF lat,lon ON route_nodes BEGIN "
+      "UPDATE route_nodes_rtree SET "
+      "min_lat=new.lat,max_lat=new.lat,min_lon=new.lon,max_lon=new.lon "
+      "WHERE id=new.id;END",
+      "CREATE TRIGGER route_nodes_incremental_delete AFTER DELETE ON route_nodes BEGIN "
+      "DELETE FROM route_nodes_rtree WHERE id=old.id;END",
       "INSERT INTO feature_fts(feature_fts) VALUES('optimize')",
       "PRAGMA analysis_limit=1000",
       "ANALYZE features",
@@ -1136,45 +1554,93 @@ std::map<std::string, std::string> validate(Database &database) {
   return counts;
 }
 
+std::map<std::string, std::string> validate_delta(Database &database) {
+  if (database.scalar_text("PRAGMA quick_check") != "ok")
+    throw std::runtime_error("SQLite delta quick_check failed");
+  const std::vector<std::pair<std::string, std::string>> queries = {
+      {"feature_count", "SELECT count(*) FROM features"},
+      {"render_area_count", "SELECT count(*) FROM render_areas"},
+      {"route_node_count", "SELECT count(*) FROM route_nodes"},
+      {"route_edge_count", "SELECT count(*) FROM route_edges"},
+  };
+  std::map<std::string, std::string> counts;
+  for (const auto &[name, sql] : queries)
+    counts[name] = std::to_string(database.scalar_integer(sql));
+  return counts;
+}
+
 struct Arguments {
   fs::path source;
   fs::path output;
   fs::path temp_dir = "/tmp/osm-map-build";
+  fs::path scope;
   std::size_t batch_size = 100000;
   bool keep_temp = false;
+  bool delta = false;
+  bool object_database = false;
 };
 
 Arguments parse_arguments(int argc, char **argv) {
   if (argc < 3) {
     throw std::runtime_error("usage: osm_map_builder SOURCE.osm.pbf OUTPUT.sqlite "
-                             "[--temp-dir DIR] [--batch-size N] [--keep-temp]");
+                             "[--temp-dir DIR] [--batch-size N] [--keep-temp] "
+                             "[--delta --scope FILE] [--object-database]");
   }
-  Arguments result{argv[1], argv[2]};
+  Arguments result;
+  result.source = argv[1];
+  result.output = argv[2];
   for (int index = 3; index < argc; ++index) {
     const std::string option = argv[index];
     if (option == "--temp-dir" && index + 1 < argc)
       result.temp_dir = argv[++index];
+    else if (option == "--scope" && index + 1 < argc)
+      result.scope = argv[++index];
     else if (option == "--batch-size" && index + 1 < argc) {
       result.batch_size = std::clamp<std::size_t>(std::stoull(argv[++index]), 1000, 1000000);
     } else if (option == "--keep-temp")
       result.keep_temp = true;
+    else if (option == "--delta")
+      result.delta = true;
+    else if (option == "--object-database")
+      result.object_database = true;
     else
       throw std::runtime_error("unknown or incomplete option: " + option);
   }
+  if (result.delta != !result.scope.empty())
+    throw std::runtime_error("--delta and --scope must be used together");
+  if (result.object_database && !result.delta)
+    throw std::runtime_error("--object-database is only supported for delta builds");
   return result;
 }
 
 int run(const Arguments &arguments) {
   if (!fs::is_regular_file(arguments.source))
-    throw std::runtime_error("source PBF does not exist");
+    throw std::runtime_error("source does not exist");
   if (fs::exists(arguments.output))
     throw std::runtime_error("output database already exists");
   fs::create_directories(arguments.output.parent_path());
   fs::create_directories(arguments.temp_dir);
+  ObjectScope scope;
+  const ObjectScope *scope_pointer = nullptr;
+  if (arguments.delta) {
+    scope = read_scope(arguments.scope);
+    scope_pointer = &scope;
+    std::cout << "delta scope: nodes=" << scope.nodes.size() << " ways=" << scope.ways.size()
+              << " relations=" << scope.relations.size() << '\n'
+              << std::flush;
+  }
   const fs::path location_path =
       arguments.temp_dir / (arguments.output.filename().string() + ".locations.idx");
   fs::remove(location_path);
-  auto metadata = source_metadata(arguments.source);
+  std::unique_ptr<ObjectDatabase> object_database;
+  std::map<std::string, std::string> metadata;
+  if (arguments.object_database) {
+    object_database = std::make_unique<ObjectDatabase>(arguments.source);
+    prepare_object_selection(*object_database, scope);
+    metadata = object_source_metadata(*object_database, arguments.source);
+  } else {
+    metadata = source_metadata(arguments.source);
+  }
   std::cout << "source=" << fs::absolute(arguments.source) << " size=" << std::fixed
             << std::setprecision(2)
             << static_cast<double>(fs::file_size(arguments.source)) / (1024.0 * 1024.0 * 1024.0)
@@ -1188,7 +1654,8 @@ int run(const Arguments &arguments) {
   metadata["build_state"] = "building";
   metadata["build_phase"] = "relations";
   metadata["build_started_at"] = utc_now();
-  metadata["builder"] = "libosmium-cpp-v1";
+  metadata["builder"] =
+      arguments.object_database ? "libosmium-cpp-object-delta-v1" : "libosmium-cpp-v1";
   set_metadata(database, metadata);
 
   osmium::area::Assembler::config_type assembler_config;
@@ -1199,8 +1666,15 @@ int run(const Arguments &arguments) {
     area_filter.add_rule(true, key);
   osmium::area::MultipolygonManager<osmium::area::Assembler> area_manager{assembler_config,
                                                                           std::move(area_filter)};
-  const osmium::io::File input_file{arguments.source.string()};
-  osmium::relations::read_relations(input_file, area_manager);
+  if (arguments.object_database) {
+    stream_object_relations(*object_database, [&](osmium::memory::Buffer &buffer) {
+      osmium::apply(buffer, area_manager);
+    });
+    area_manager.prepare_for_lookup();
+  } else {
+    const osmium::io::File input_file{arguments.source.string()};
+    osmium::relations::read_relations(input_file, area_manager);
+  }
 
   const int location_fd = ::open(location_path.c_str(), O_CREAT | O_TRUNC | O_RDWR, 0644);
   if (location_fd < 0)
@@ -1210,22 +1684,34 @@ int run(const Arguments &arguments) {
   LocationIndex location_index{location_fd};
   osmium::handler::NodeLocationsForWays<LocationIndex> location_handler{location_index};
   location_handler.ignore_errors();
-  ImportHandler import_handler{database, arguments.batch_size};
+  ImportHandler import_handler{database, arguments.batch_size, scope_pointer, arguments.delta};
   auto area_handler = area_manager.handler([&import_handler](osmium::memory::Buffer &&buffer) {
     osmium::apply(buffer, import_handler);
   });
   set_metadata(database, {{"build_phase", "scan"}});
-  osmium::io::Reader reader{input_file};
-  osmium::apply(reader, location_handler, import_handler, area_handler);
-  reader.close();
+  if (arguments.object_database) {
+    const auto apply_buffer = [&](osmium::memory::Buffer &buffer) {
+      osmium::apply(buffer, location_handler, import_handler, area_handler);
+    };
+    stream_object_nodes(*object_database, apply_buffer);
+    stream_object_ways(*object_database, apply_buffer);
+    stream_object_relations(*object_database, apply_buffer);
+  } else {
+    const osmium::io::File input_file{arguments.source.string()};
+    osmium::io::Reader reader{input_file};
+    osmium::apply(reader, location_handler, import_handler, area_handler);
+    reader.close();
+  }
   import_handler.finish();
   set_metadata(database, {{"bounds", import_handler.bounds_json()}});
   set_metadata(database, {{"build_phase", "route_nodes"}});
   import_handler.write_route_nodes(location_index);
-  set_metadata(database, {{"build_phase", "indexes"}});
-  build_indexes(database);
+  if (!arguments.delta) {
+    set_metadata(database, {{"build_phase", "indexes"}});
+    build_indexes(database);
+  }
   set_metadata(database, {{"build_phase", "validation"}});
-  const auto counts = validate(database);
+  const auto counts = arguments.delta ? validate_delta(database) : validate(database);
   std::map<std::string, std::string> complete = counts;
   complete["build_state"] = "ready";
   complete["build_phase"] = "complete";
