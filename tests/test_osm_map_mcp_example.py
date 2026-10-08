@@ -18,11 +18,14 @@ from examples.osm_map_mcp_server.map_visual import (
     RoadSegment,
     _draw_roads,
     _road_style,
+    buffer_bounds,
+    fit_bounds_to_map,
 )
 from examples.osm_map_mcp_server.map_service import (
     MapService,
     MapSettings,
     _road_name,
+    _road_render_name,
     convert_coordinate,
     search_document,
 )
@@ -407,6 +410,81 @@ def test_background_roads_load_optional_render_levels(tmp_path: Path) -> None:
     assert {(road.layer, road.structure) for road in roads} == {(-1, -1)}
 
 
+def test_background_roads_load_complete_intersecting_way_geometry(
+    tmp_path: Path,
+) -> None:
+    service = MapService(MapSettings(database_path=_database(tmp_path)))
+
+    roads = service._background_roads((31.2009, 121.4009, 31.2011, 121.4011))
+    named = [road for road in roads if road.name == "测试路"]
+
+    assert len(named) == 2
+    assert any(
+        road.start == (31.2, 121.4) or road.end == (31.2, 121.4) for road in named
+    )
+
+
+def test_background_lines_load_complete_intersecting_geometry(
+    tmp_path: Path,
+) -> None:
+    database_path = _database(tmp_path)
+    database = sqlite3.connect(database_path)
+    line = _feature(
+        6,
+        "way",
+        300,
+        "line",
+        "测试河",
+        "waterway",
+        "canal",
+        31.201,
+        121.401,
+        geometry=_line_wkb([(121.399, 31.199), (121.401, 31.201), (121.403, 31.203)]),
+        bounds=(31.199, 121.399, 31.203, 121.403),
+    )
+    database.execute(
+        "INSERT INTO features VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        line,
+    )
+    database.execute(
+        "INSERT INTO features_rtree VALUES (?,?,?,?,?)",
+        (line[0], line[19], line[21], line[20], line[22]),
+    )
+    database.commit()
+    database.close()
+    service = MapService(MapSettings(database_path=database_path))
+
+    lines = service._background_lines((31.2009, 121.4009, 31.2011, 121.4011))
+
+    assert len(lines) == 1
+    assert lines[0].category == "waterway"
+    assert lines[0].points == (
+        (31.199, 121.399),
+        (31.201, 121.401),
+        (31.203, 121.403),
+    )
+
+
+def test_map_bounds_expand_to_rendered_aspect_ratio() -> None:
+    original = (31.28, 121.158, 31.31, 121.162)
+    fitted = fit_bounds_to_map(original)
+
+    assert fitted[0] <= original[0]
+    assert fitted[1] < original[1]
+    assert fitted[2] >= original[2]
+    assert fitted[3] > original[3]
+
+
+def test_background_query_bounds_extend_beyond_visible_map() -> None:
+    visible = fit_bounds_to_map((31.28, 121.158, 31.31, 121.162))
+    query = buffer_bounds(visible)
+
+    assert query[0] < visible[0]
+    assert query[1] < visible[1]
+    assert query[2] > visible[2]
+    assert query[3] > visible[3]
+
+
 def test_joined_road_segments_do_not_leave_casing_seams() -> None:
     class PixelViewport:
         @staticmethod
@@ -505,6 +583,25 @@ def test_route_uses_local_name_when_source_way_has_no_name() -> None:
     )
 
     assert [label.text for label in labels] == ["墨玉北路"]
+
+
+def test_road_render_name_suppresses_english_only_fallback() -> None:
+    assert (
+        _road_render_name(
+            379526876,
+            "Caoan Highway",
+            '{"name:en":"Caoan Highway"}',
+        )
+        == ""
+    )
+    assert (
+        _road_render_name(
+            68871845,
+            "Caoan Highway",
+            '{"name":"曹安公路","name:en":"Caoan Highway"}',
+        )
+        == "曹安公路"
+    )
 
 
 def test_route_steps_preserve_unnamed_road_types_and_turns() -> None:

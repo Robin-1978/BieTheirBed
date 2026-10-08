@@ -27,9 +27,10 @@ Build SQLite on fast local storage. `/disk` is suitable for the sparse location
 index and SQLite sort spill files, but its random write performance makes it a
 poor database build target. The builder writes route tables sequentially and
 creates all B-tree, FTS5 and RTree indexes after the base data is complete. It
-marks the database `ready` only after SQLite integrity, layer count, FTS and
-RTree checks pass. An interrupted build remains unavailable and can be safely
-deleted and rebuilt from the retained PBF.
+uses bounded samples for query-planner statistics, then marks the database
+`ready` only after SQLite integrity, layer count, FTS and RTree checks pass. An
+interrupted build remains unavailable and can be safely deleted and rebuilt
+from the retained PBF.
 
 The 2026-09-27 China snapshot built in 47 minutes 52 seconds. The 1.60 GB PBF
 produced a 21.59 GB SQLite database with 4,745,908 searchable features,
@@ -80,6 +81,11 @@ line. Numbered result markers, search radii, place boundaries and route lines
 are added as appropriate. Set
 `include_map_image=false` when only structured data is needed. Coordinate
 conversion and dataset metadata remain text only.
+
+The renderer fits the visible bounds in Web Mercator, prefetches beyond every
+image edge and queries intersecting full OSM geometries. Roads, waterways,
+railways, coastlines and polygons therefore continue through the viewport
+instead of ending where a sampled routing edge or database grid cell ends.
 
 `map://dataset` exposes the source replication timestamp, sequence, bounds,
 counts and capability status. `map://categories` exposes common bilingual OSM

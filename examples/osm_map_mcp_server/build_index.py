@@ -426,7 +426,7 @@ class MapImportHandler(osmium.SimpleHandler):
         address, admin_context = _address(tags)
         if feature_type == "address" and not name:
             name = address
-        if not name and feature_type != "boundary":
+        if not name and feature_type not in {"boundary", "road", "line"}:
             return
         if bounds is None:
             min_lat = max_lat = latitude
@@ -610,7 +610,7 @@ class MapImportHandler(osmium.SimpleHandler):
                 geometry = None
         highway = _tag(tags, "highway")
         road_name = _names(tags)[0] or _tag(tags, "ref")
-        if highway and road_name:
+        if highway:
             self._feature(
                 osm_type="way",
                 osm_id=way.id,
@@ -623,6 +623,29 @@ class MapImportHandler(osmium.SimpleHandler):
                 category="highway",
                 subcategory=highway,
                 name_override=road_name,
+            )
+        line_category = ""
+        line_subcategory = ""
+        for key in ("waterway", "railway"):
+            value = _tag(tags, key)
+            if value:
+                line_category, line_subcategory = key, value
+                break
+        if not line_category and _tag(tags, "natural") == "coastline":
+            line_category, line_subcategory = "natural", "coastline"
+        if line_category and geometry:
+            self._feature(
+                osm_type="way",
+                osm_id=way.id,
+                feature_type="line",
+                tags=tags,
+                latitude=latitude,
+                longitude=longitude,
+                bounds=bounds,
+                geometry=geometry,
+                category=line_category,
+                subcategory=line_subcategory,
+                name_override=_names(tags)[0] or _tag(tags, "ref"),
             )
         category, subcategory = _primary_category(tags)
         if category:
@@ -814,7 +837,9 @@ def _build_indexes(database: sqlite3.Connection) -> None:
         database.execute(statement)
         database.commit()
     database.execute("INSERT INTO feature_fts(feature_fts) VALUES ('optimize')")
-    database.execute("ANALYZE")
+    database.execute("PRAGMA analysis_limit=1000")
+    for table in ("features", "render_areas", "route_nodes", "route_edges"):
+        database.execute(f"ANALYZE {table}")
     database.commit()
 
 
@@ -848,6 +873,9 @@ def validate_database(database: sqlite3.Connection) -> dict[str, int]:
         "road_count": database.execute(
             "SELECT count(*) FROM features WHERE feature_type='road'"
         ).fetchone()[0],
+        "line_count": database.execute(
+            "SELECT count(*) FROM features WHERE feature_type='line'"
+        ).fetchone()[0],
         "address_count": database.execute(
             "SELECT count(*) FROM features WHERE feature_type='address'"
         ).fetchone()[0],
@@ -860,6 +888,7 @@ def validate_database(database: sqlite3.Connection) -> dict[str, int]:
         "place_count",
         "poi_count",
         "road_count",
+        "line_count",
     )
     if not all(counts[key] > 0 for key in required):
         raise RuntimeError(f"database is missing required map layers: {counts}")

@@ -19,24 +19,30 @@ from urllib.parse import urlencode
 
 try:
     from .map_visual import (
+        BackgroundLine,
         MapCircle,
         MapLabel,
         MapLine,
         MapMarker,
         MapPolygon,
         RoadSegment,
+        buffer_bounds,
+        fit_bounds_to_map,
         render_static_map,
         scene_bounds,
     )
     from .taxonomy import category_inventory
 except ImportError:  # pragma: no cover - direct script execution
     from map_visual import (
+        BackgroundLine,
         MapCircle,
         MapLabel,
         MapLine,
         MapMarker,
         MapPolygon,
         RoadSegment,
+        buffer_bounds,
+        fit_bounds_to_map,
         render_static_map,
         scene_bounds,
     )
@@ -83,6 +89,57 @@ _ROAD_NAME_OVERRIDES = {
 def _road_name(way_id: int, source_name: object) -> str:
     name = str(source_name or "").strip()
     return name or _ROAD_NAME_OVERRIDES.get(way_id, "")
+
+
+def _road_render_name(
+    way_id: int,
+    source_name: object,
+    tags_json: object,
+) -> str:
+    """Prefer a road's local OSM name and suppress English-only fallbacks."""
+
+    try:
+        tags = json.loads(str(tags_json or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        tags = {}
+    if not isinstance(tags, dict):
+        tags = {}
+    for key in ("name", "name:zh"):
+        if local_name := str(tags.get(key, "")).strip():
+            return _road_name(way_id, local_name)
+    source = str(source_name or "").strip()
+    english_name = str(tags.get("name:en", "")).strip()
+    if english_name and source == english_name:
+        return _ROAD_NAME_OVERRIDES.get(way_id, "")
+    return _road_name(way_id, source)
+
+
+_ROAD_LEVEL_OVERRIDES = {68871851: (-1, -1)}
+
+
+def _road_render_level(way_id: int, tags_json: object) -> tuple[int, int]:
+    override = _ROAD_LEVEL_OVERRIDES.get(way_id)
+    if override is not None:
+        return override
+    try:
+        tags = json.loads(str(tags_json or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        tags = {}
+    if not isinstance(tags, dict):
+        tags = {}
+    match = re.search(r"-?\d+", str(tags.get("layer", "")))
+    layer = int(match.group()) if match else 0
+
+    def enabled(key: str) -> bool:
+        return str(tags.get(key, "")).strip().lower() not in {
+            "",
+            "0",
+            "false",
+            "no",
+        }
+
+    structure = -1 if enabled("tunnel") else 1 if enabled("bridge") else 0
+    return layer, structure
 
 
 class MapError(RuntimeError):
@@ -797,7 +854,7 @@ class MapService:
             if {"layer", "structure"}.issubset(edge_columns)
             else ",0 AS layer,0 AS structure "
         )
-        query = (
+        edge_query = (
             "SELECT s.lat AS start_lat,s.lon AS start_lon,"
             "t.lat AS end_lat,t.lon AS end_lon,e.way_id,e.highway,e.name"
             + render_fields
@@ -811,7 +868,8 @@ class MapService:
         major_filter = (
             "AND e.highway IN ('motorway','trunk','primary','secondary','tertiary') "
         )
-        rows: list[sqlite3.Row] = []
+        edge_rows: list[sqlite3.Row] = []
+        feature_rows: list[sqlite3.Row] = []
         try:
             for latitude_index in range(grid_size):
                 cell_min_lat = (
@@ -834,38 +892,98 @@ class MapService:
                         cell_min_lon,
                         cell_max_lon,
                     )
-                    rows.extend(
+                    edge_rows.extend(
                         database.execute(
-                            query.format(filter_sql=major_filter),
+                            edge_query.format(filter_sql=major_filter),
                             (*parameters, major_per_cell),
                         ).fetchall()
                     )
-                    rows.extend(
+                    edge_rows.extend(
                         database.execute(
-                            query.format(filter_sql=""),
+                            edge_query.format(filter_sql=""),
                             (*parameters, detail_per_cell),
                         ).fetchall()
                     )
+            feature_rows = database.execute(
+                "SELECT f.osm_id,f.name,f.subcategory AS highway,f.geom,f.tags_json "
+                "FROM features_rtree r JOIN features f ON f.id=r.id "
+                "WHERE r.max_lat>=? AND r.min_lat<=? "
+                "AND r.max_lon>=? AND r.min_lon<=? "
+                "AND f.feature_type='road' AND f.geom IS NOT NULL "
+                "ORDER BY CASE f.subcategory "
+                "WHEN 'motorway' THEN 0 WHEN 'trunk' THEN 1 "
+                "WHEN 'primary' THEN 2 WHEN 'secondary' THEN 3 "
+                "WHEN 'tertiary' THEN 4 ELSE 5 END,f.osm_id LIMIT ?",
+                (min_lat, max_lat, min_lon, max_lon, limit),
+            ).fetchall()
         finally:
             database.close()
+        render_levels: dict[int, tuple[int, int]] = {}
+        for row in edge_rows:
+            way_id = int(row["way_id"])
+            candidate = (int(row["layer"] or 0), int(row["structure"] or 0))
+            current = render_levels.get(way_id)
+            if current is None or (candidate != (0, 0) and current == (0, 0)):
+                render_levels[way_id] = candidate
         roads: list[RoadSegment] = []
         seen: set[tuple[object, ...]] = set()
-        for row in rows:
-            start = (float(row["start_lat"]), float(row["start_lon"]))
-            end = (float(row["end_lat"]), float(row["end_lon"]))
+        complete_way_ids: set[int] = set()
+        for row in feature_rows:
+            way_id = int(row["osm_id"])
             highway = str(row["highway"] or "road")
-            name = _road_name(int(row["way_id"]), row["name"])
-            edge = tuple(sorted((start, end)))
+            name = _road_render_name(way_id, row["name"], row["tags_json"])
+            layer, structure = _road_render_level(way_id, row["tags_json"])
+            sampled_level = render_levels.get(way_id)
+            if sampled_level is not None and sampled_level != (0, 0):
+                layer, structure = sampled_level
+            added = False
+            try:
+                geometry = _read_wkb(row["geom"])
+                for raw_line in _iter_lines(geometry):
+                    for raw_start, raw_end in zip(raw_line, raw_line[1:]):
+                        start_point = (float(raw_start[1]), float(raw_start[0]))
+                        end_point = (float(raw_end[1]), float(raw_end[0]))
+                        if start_point == end_point:
+                            continue
+                        edge = tuple(sorted((start_point, end_point)))
+                        key = (*edge, highway, name, layer, structure)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        roads.append(
+                            RoadSegment(
+                                start=start_point,
+                                end=end_point,
+                                highway=highway,
+                                name=name,
+                                layer=layer,
+                                structure=structure,
+                            )
+                        )
+                        added = True
+            except (ValueError, struct.error, TypeError, IndexError):
+                continue
+            if added:
+                complete_way_ids.add(way_id)
+        for row in edge_rows:
+            way_id = int(row["way_id"])
+            if way_id in complete_way_ids:
+                continue
+            start_point = (float(row["start_lat"]), float(row["start_lon"]))
+            end_point = (float(row["end_lat"]), float(row["end_lon"]))
+            highway = str(row["highway"] or "road")
+            name = _road_name(way_id, row["name"])
             layer = int(row["layer"] or 0)
             structure = int(row["structure"] or 0)
+            edge = tuple(sorted((start_point, end_point)))
             key = (*edge, highway, name, layer, structure)
             if key in seen:
                 continue
             seen.add(key)
             roads.append(
                 RoadSegment(
-                    start=start,
-                    end=end,
+                    start=start_point,
+                    end=end_point,
                     highway=highway,
                     name=name,
                     layer=layer,
@@ -873,6 +991,51 @@ class MapService:
                 )
             )
         return roads
+
+    def _background_lines(
+        self,
+        bounds: tuple[float, float, float, float],
+        *,
+        limit: int = 4_000,
+    ) -> list[BackgroundLine]:
+        min_lat, min_lon, max_lat, max_lon = bounds
+        if _haversine_m(min_lat, min_lon, max_lat, max_lon) > 80_000:
+            return []
+        database = self._connect()
+        try:
+            rows = database.execute(
+                "SELECT f.name,f.category,f.subcategory,f.geom "
+                "FROM features_rtree r JOIN features f ON f.id=r.id "
+                "WHERE r.max_lat>=? AND r.min_lat<=? "
+                "AND r.max_lon>=? AND r.min_lon<=? "
+                "AND f.feature_type='line' AND f.geom IS NOT NULL "
+                "ORDER BY CASE f.category "
+                "WHEN 'waterway' THEN 0 WHEN 'railway' THEN 1 ELSE 2 END,f.id "
+                "LIMIT ?",
+                (min_lat, max_lat, min_lon, max_lon, limit),
+            ).fetchall()
+        finally:
+            database.close()
+        lines: list[BackgroundLine] = []
+        for row in rows:
+            try:
+                geometry = _read_wkb(row["geom"])
+                for raw_line in _iter_lines(geometry):
+                    points = tuple(
+                        (float(point[1]), float(point[0])) for point in raw_line
+                    )
+                    if len(points) >= 2:
+                        lines.append(
+                            BackgroundLine(
+                                points=points,
+                                category=str(row["category"] or ""),
+                                subcategory=str(row["subcategory"] or ""),
+                                name=str(row["name"] or ""),
+                            )
+                        )
+            except (ValueError, struct.error, TypeError, IndexError):
+                continue
+        return lines
 
     def _background_areas(
         self,
@@ -959,18 +1122,22 @@ class MapService:
         for line in lines:
             points.extend(line.points)
         try:
-            fitted_bounds = bounds or scene_bounds(points, circle=circle)
+            visible_bounds = fit_bounds_to_map(
+                bounds or scene_bounds(points, circle=circle)
+            )
+            query_bounds = buffer_bounds(visible_bounds)
             descriptor = render_static_map(
                 root,
                 title=title,
                 subtitle=subtitle,
                 markers=markers,
                 lines=lines,
-                areas=self._background_areas(fitted_bounds),
-                roads=self._background_roads(fitted_bounds),
+                areas=self._background_areas(query_bounds),
+                background_lines=self._background_lines(query_bounds),
+                roads=self._background_roads(query_bounds),
                 labels=labels,
                 circle=circle,
-                bounds=fitted_bounds,
+                bounds=visible_bounds,
                 name=name,
             )
         except Exception as exc:  # noqa: BLE001 - visualization is best effort

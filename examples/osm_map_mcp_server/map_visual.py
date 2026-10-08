@@ -11,6 +11,15 @@ from typing import Iterable, Sequence
 import uuid
 
 
+_OUTPUT_WIDTH = 1600
+_OUTPUT_HEIGHT = 1000
+_HEADER_HEIGHT = 112
+_MAP_MARGIN = 48
+_PLOT_ASPECT_RATIO = (_OUTPUT_WIDTH - _MAP_MARGIN * 2) / (
+    _OUTPUT_HEIGHT - _HEADER_HEIGHT - _MAP_MARGIN
+)
+
+
 @dataclass(frozen=True)
 class MapMarker:
     latitude: float
@@ -25,6 +34,14 @@ class MapLine:
     color: str = "#1677ff"
     width: int = 6
     outline: bool = False
+
+
+@dataclass(frozen=True)
+class BackgroundLine:
+    points: tuple[tuple[float, float], ...]
+    category: str
+    subcategory: str = ""
+    name: str = ""
 
 
 @dataclass(frozen=True)
@@ -64,7 +81,7 @@ def scene_bounds(
     *,
     circle: MapCircle | None = None,
 ) -> tuple[float, float, float, float]:
-    """Return padded WGS84 bounds suitable for querying background roads."""
+    """Return padded WGS84 bounds for the visible map scene."""
 
     valid = [
         (float(latitude), float(longitude))
@@ -114,6 +131,58 @@ def _mercator(latitude: float, longitude: float) -> tuple[float, float]:
     latitude = max(-85.0, min(85.0, latitude))
     y = math.degrees(math.log(math.tan(math.pi / 4 + math.radians(latitude) / 2)))
     return longitude, y
+
+
+def _inverse_mercator_y(value: float) -> float:
+    return math.degrees(math.atan(math.sinh(math.radians(value))))
+
+
+def buffer_bounds(
+    bounds: tuple[float, float, float, float],
+    *,
+    fraction: float = 0.08,
+) -> tuple[float, float, float, float]:
+    """Expand map bounds on every side for continuous background queries."""
+
+    min_lat, min_lon, max_lat, max_lon = bounds
+    min_x, min_y = _mercator(min_lat, min_lon)
+    max_x, max_y = _mercator(max_lat, max_lon)
+    padding = max(0.0, float(fraction))
+    x_padding = max(1e-9, max_x - min_x) * padding
+    y_padding = max(1e-9, max_y - min_y) * padding
+    return (
+        max(-85.0, _inverse_mercator_y(min_y - y_padding)),
+        max(-180.0, min_x - x_padding),
+        min(85.0, _inverse_mercator_y(max_y + y_padding)),
+        min(180.0, max_x + x_padding),
+    )
+
+
+def fit_bounds_to_map(
+    bounds: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Expand bounds to the final map aspect ratio in Web Mercator space."""
+
+    min_lat, min_lon, max_lat, max_lon = bounds
+    min_x, min_y = _mercator(min_lat, min_lon)
+    max_x, max_y = _mercator(max_lat, max_lon)
+    span_x = max(1e-9, max_x - min_x)
+    span_y = max(1e-9, max_y - min_y)
+    if span_x / span_y < _PLOT_ASPECT_RATIO:
+        expansion = span_y * _PLOT_ASPECT_RATIO - span_x
+        min_x -= expansion / 2
+        max_x += expansion / 2
+    else:
+        expansion = span_x / _PLOT_ASPECT_RATIO - span_y
+        min_y -= expansion / 2
+        max_y += expansion / 2
+
+    return (
+        max(-85.0, min(min_lat, _inverse_mercator_y(min_y))),
+        max(-180.0, min(min_lon, min_x)),
+        min(85.0, max(max_lat, _inverse_mercator_y(max_y))),
+        min(180.0, max(max_lon, max_x)),
+    )
 
 
 class _Viewport:
@@ -316,6 +385,69 @@ def _draw_roads(
                 fill=fill,
                 width=road_width * scale,
             )
+
+
+def _background_line_style(
+    category: str,
+    subcategory: str,
+    *,
+    zoom: float | None,
+) -> tuple[str, str, int]:
+    if category == "waterway":
+        width_key = (
+            subcategory
+            if subcategory in {"river", "canal", "stream", "drain", "ditch"}
+            else "stream"
+        )
+        stops = {
+            "river": ((11, 1.5), (14, 2.5), (16, 4), (18, 7)),
+            "canal": ((12, 1), (14, 2), (16, 3.5), (18, 6)),
+            "stream": ((13, 1), (16, 2), (18, 4)),
+            "drain": ((14, 1), (16, 1.5), (18, 3)),
+            "ditch": ((14, 1), (16, 1.5), (18, 3)),
+        }[width_key]
+        width = _interpolate_width(zoom, stops) if zoom is not None else 2
+        return "#9fd8eb", "#d9eef6", width
+    if category == "railway":
+        width = (
+            _interpolate_width(zoom, ((12, 1), (16, 2), (18, 3)))
+            if zoom is not None
+            else 2
+        )
+        return "#aaa39c", "#f4f1ed", width
+    return "#aeb8bc", "#eef1f2", 1
+
+
+def _draw_background_lines(
+    draw,
+    viewport: _Viewport,
+    lines: Sequence[BackgroundLine],
+    scale: int,
+) -> None:
+    zoom = viewport.zoom(scale) if hasattr(viewport, "zoom") else None
+    for line in lines:
+        if len(line.points) < 2:
+            continue
+        stride = max(1, math.ceil(len(line.points) / 2_000))
+        sampled = list(line.points[::stride])
+        if sampled[-1] != line.points[-1]:
+            sampled.append(line.points[-1])
+        pixels = [viewport.point(*point) for point in sampled]
+        fill, casing, width = _background_line_style(
+            line.category, line.subcategory, zoom=zoom
+        )
+        draw.line(
+            pixels,
+            fill=casing,
+            width=(width + 2) * scale,
+            joint="curve",
+        )
+        draw.line(
+            pixels,
+            fill=fill,
+            width=width * scale,
+            joint="curve",
+        )
 
 
 def _area_style(category: str, subcategory: str) -> tuple[int, str, str]:
@@ -598,6 +730,7 @@ def render_static_map(
     markers: Sequence[MapMarker],
     lines: Sequence[MapLine] = (),
     areas: Sequence[MapPolygon] = (),
+    background_lines: Sequence[BackgroundLine] = (),
     roads: Sequence[RoadSegment] = (),
     labels: Sequence[MapLabel] = (),
     circle: MapCircle | None = None,
@@ -614,10 +747,10 @@ def render_static_map(
     if bounds is None:
         bounds = scene_bounds(all_points, circle=circle)
 
-    output_width, output_height = 1600, 1000
+    output_width, output_height = _OUTPUT_WIDTH, _OUTPUT_HEIGHT
     scale = 2
     width, height = output_width * scale, output_height * scale
-    header, margin = 112 * scale, 48 * scale
+    header, margin = _HEADER_HEIGHT * scale, _MAP_MARGIN * scale
     viewport = _Viewport(
         bounds,
         width=width,
@@ -634,6 +767,8 @@ def render_static_map(
     marker_font = _font(18 * scale, bold=True)
 
     _draw_areas(draw, viewport, areas, scale)
+
+    _draw_background_lines(draw, viewport, background_lines, scale)
 
     _draw_roads(draw, viewport, roads, scale)
 
