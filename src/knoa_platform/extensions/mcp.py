@@ -385,7 +385,14 @@ async def _negotiate_session(session: Any, timeout: float) -> tuple[Any, bool]:
     """Prefer MCP 2026 discovery and fall back only for a legacy server."""
 
     from mcp import types
+    from mcp.client import session as client_session
     from mcp.shared.exceptions import MCPError
+
+    # The SDK uses a fixed 10 second discover deadline internally. Honor the
+    # configured MCP timeout so a slow local disk cannot defeat the outer limit.
+    client_session.DISCOVER_TIMEOUT_SECONDS = max(
+        client_session.DISCOVER_TIMEOUT_SECONDS, timeout
+    )
 
     try:
         result = await asyncio.wait_for(session.discover(), timeout=timeout)

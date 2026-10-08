@@ -215,6 +215,23 @@ async def test_mcp_negotiation_prefers_discover_and_falls_back_only_for_legacy()
 
 
 @pytest.mark.asyncio
+async def test_mcp_negotiation_uses_configured_discovery_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp.client import session as client_session
+
+    monkeypatch.setattr(client_session, "DISCOVER_TIMEOUT_SECONDS", 0.1)
+    result = SimpleNamespace(capabilities=SimpleNamespace(resources=None))
+
+    class _Session:
+        async def discover(self):
+            return result
+
+    assert await _negotiate_session(_Session(), 37) == (result, True)
+    assert client_session.DISCOVER_TIMEOUT_SECONDS == 37
+
+
+@pytest.mark.asyncio
 async def test_mcp_discovery_registers_only_locally_configured_tools(
     tmp_path: Path,
 ) -> None:

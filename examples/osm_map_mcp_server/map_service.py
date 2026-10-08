@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 try:
     from .map_visual import (
         BackgroundLine,
+        BackgroundPoi,
         MapCircle,
         MapLabel,
         MapLine,
@@ -35,6 +36,7 @@ try:
 except ImportError:  # pragma: no cover - direct script execution
     from map_visual import (
         BackgroundLine,
+        BackgroundPoi,
         MapCircle,
         MapLabel,
         MapLine,
@@ -86,6 +88,59 @@ _ROAD_NAME_OVERRIDES = {
     848004000: "曹安公路",
     844552657: "曹安公路",
 }
+
+
+_POI_RENDER_EXCLUDED = {
+    ("public_transport", "platform"),
+    ("public_transport", "stop_position"),
+    ("railway", "rail"),
+    ("man_made", "bridge"),
+}
+_POI_RENDER_PRIORITY = {
+    ("railway", "subway"): 0,
+    ("railway", "station"): 0,
+    ("public_transport", "station"): 0,
+    ("amenity", "hospital"): 0,
+    ("place", "town"): 1,
+    ("place", "village"): 1,
+    ("amenity", "university"): 1,
+    ("amenity", "college"): 1,
+    ("amenity", "school"): 2,
+    ("amenity", "kindergarten"): 3,
+    ("shop", "mall"): 2,
+    ("shop", "supermarket"): 3,
+    ("leisure", "park"): 2,
+    ("tourism", "attraction"): 2,
+    ("tourism", "museum"): 2,
+    ("tourism", "hotel"): 4,
+    ("amenity", "fuel"): 4,
+    ("amenity", "parking"): 5,
+    ("amenity", "bank"): 5,
+    ("amenity", "pharmacy"): 5,
+    ("amenity", "restaurant"): 7,
+    ("amenity", "cafe"): 7,
+    ("amenity", "fast_food"): 8,
+}
+_POI_CATEGORY_PRIORITY = {
+    "place": 3,
+    "railway": 4,
+    "public_transport": 4,
+    "amenity": 9,
+    "shop": 10,
+    "tourism": 8,
+    "leisure": 8,
+    "office": 11,
+}
+
+
+def _poi_render_priority(category: str, subcategory: str) -> int | None:
+    identity = (category, subcategory)
+    if identity in _POI_RENDER_EXCLUDED:
+        return None
+    return _POI_RENDER_PRIORITY.get(
+        identity,
+        _POI_CATEGORY_PRIORITY.get(category),
+    )
 
 
 def _road_name(way_id: int, source_name: object) -> str:
@@ -1067,6 +1122,67 @@ class MapService:
                 continue
         return lines
 
+    def _background_pois(
+        self,
+        bounds: tuple[float, float, float, float],
+        *,
+        limit: int = 800,
+    ) -> list[BackgroundPoi]:
+        min_lat, min_lon, max_lat, max_lon = bounds
+        if _haversine_m(min_lat, min_lon, max_lat, max_lon) > 80_000:
+            return []
+        database = self._connect()
+        try:
+            rows = database.execute(
+                "SELECT f.name,f.category,f.subcategory,f.lat,f.lon "
+                "FROM features_rtree r JOIN features f ON f.id=r.id "
+                "WHERE r.max_lat>=? AND r.min_lat<=? "
+                "AND r.max_lon>=? AND r.min_lon<=? "
+                "AND f.lat BETWEEN ? AND ? AND f.lon BETWEEN ? AND ? "
+                "AND f.feature_type IN ('poi','place') AND f.name<>'' "
+                "ORDER BY f.id LIMIT ?",
+                (
+                    min_lat,
+                    max_lat,
+                    min_lon,
+                    max_lon,
+                    min_lat,
+                    max_lat,
+                    min_lon,
+                    max_lon,
+                    limit,
+                ),
+            ).fetchall()
+        finally:
+            database.close()
+
+        pois: list[BackgroundPoi] = []
+        seen: set[tuple[str, float, float]] = set()
+        for row in rows:
+            category = str(row["category"] or "")
+            subcategory = str(row["subcategory"] or "")
+            priority = _poi_render_priority(category, subcategory)
+            if priority is None:
+                continue
+            name = str(row["name"] or "").strip()
+            latitude = float(row["lat"])
+            longitude = float(row["lon"])
+            identity = (name.casefold(), round(latitude, 4), round(longitude, 4))
+            if not name or identity in seen:
+                continue
+            seen.add(identity)
+            pois.append(
+                BackgroundPoi(
+                    latitude=latitude,
+                    longitude=longitude,
+                    name=name,
+                    category=category,
+                    subcategory=subcategory,
+                    priority=priority,
+                )
+            )
+        return sorted(pois, key=lambda poi: (poi.priority, poi.name))
+
     def _background_areas(
         self,
         bounds: tuple[float, float, float, float],
@@ -1165,6 +1281,7 @@ class MapService:
                 areas=self._background_areas(query_bounds),
                 background_lines=self._background_lines(query_bounds),
                 roads=self._background_roads(query_bounds),
+                pois=self._background_pois(query_bounds),
                 labels=labels,
                 circle=circle,
                 bounds=visible_bounds,

@@ -17,6 +17,7 @@ from examples.osm_map_mcp_server import rebuild_map
 from examples.osm_map_mcp_server import incremental_update
 from examples.osm_map_mcp_server.map_visual import (
     RoadSegment,
+    _background_line_style,
     _draw_roads,
     _road_style,
     buffer_bounds,
@@ -25,6 +26,7 @@ from examples.osm_map_mcp_server.map_visual import (
 from examples.osm_map_mcp_server.map_service import (
     MapService,
     MapSettings,
+    _poi_render_priority,
     _road_name,
     _road_render_name,
     convert_coordinate,
@@ -465,6 +467,31 @@ def test_background_lines_load_complete_intersecting_geometry(
         (31.201, 121.401),
         (31.203, 121.403),
     )
+
+
+def test_background_pois_prioritize_useful_named_features(tmp_path: Path) -> None:
+    service = MapService(MapSettings(database_path=_database(tmp_path)))
+
+    pois = service._background_pois((31.199, 121.399, 31.203, 121.403))
+
+    assert [(poi.name, poi.category, poi.subcategory) for poi in pois] == [
+        ("上海测试镇", "place", "town"),
+        ("东方咖啡", "amenity", "cafe"),
+    ]
+    assert _poi_render_priority("public_transport", "platform") is None
+
+
+def test_waterway_lines_use_continuous_area_paint_and_scaled_width() -> None:
+    river_fill, river_casing, river_width = _background_line_style(
+        "waterway", "river", zoom=14
+    )
+    canal_fill, canal_casing, canal_width = _background_line_style(
+        "waterway", "canal", zoom=14
+    )
+
+    assert river_fill == river_casing == canal_fill == canal_casing
+    assert river_width == 4
+    assert canal_width == 3
 
 
 def test_map_bounds_expand_to_rendered_aspect_ratio() -> None:

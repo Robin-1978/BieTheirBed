@@ -45,6 +45,16 @@ class BackgroundLine:
 
 
 @dataclass(frozen=True)
+class BackgroundPoi:
+    latitude: float
+    longitude: float
+    name: str
+    category: str
+    subcategory: str = ""
+    priority: int = 100
+
+
+@dataclass(frozen=True)
 class MapPolygon:
     rings: tuple[tuple[tuple[float, float], ...], ...]
     category: str
@@ -400,14 +410,16 @@ def _background_line_style(
             else "stream"
         )
         stops = {
-            "river": ((11, 1.5), (14, 2.5), (16, 4), (18, 7)),
-            "canal": ((12, 1), (14, 2), (16, 3.5), (18, 6)),
-            "stream": ((13, 1), (16, 2), (18, 4)),
-            "drain": ((14, 1), (16, 1.5), (18, 3)),
-            "ditch": ((14, 1), (16, 1.5), (18, 3)),
+            "river": ((11, 2), (14, 4), (16, 7), (18, 12)),
+            "canal": ((12, 2), (14, 3), (16, 5), (18, 9)),
+            "stream": ((13, 1), (16, 3), (18, 5)),
+            "drain": ((14, 1), (16, 2), (18, 4)),
+            "ditch": ((14, 1), (16, 2), (18, 4)),
         }[width_key]
         width = _interpolate_width(zoom, stops) if zoom is not None else 2
-        return "#9fd8eb", "#d9eef6", width
+        # OSM often maps a canal as an area for only part of its length. Matching
+        # the area and line paint avoids a dark centerline and a false width seam.
+        return "#b9dfef", "#b9dfef", width
     if category == "railway":
         width = (
             _interpolate_width(zoom, ((12, 1), (16, 2), (18, 3)))
@@ -458,7 +470,7 @@ def _area_style(category: str, subcategory: str) -> tuple[int, str, str]:
         or (category == "natural" and subcategory in {"water", "bay", "wetland"})
         or (category == "landuse" and subcategory in {"reservoir", "basin"})
     ):
-        return 40, "#c9e7f4", "#9fcbdc"
+        return 40, "#b9dfef", "#b9dfef"
     if category == "leisure" and subcategory in {
         "park",
         "garden",
@@ -633,6 +645,218 @@ def _draw_route_labels(
     return occupied
 
 
+def _poi_style(category: str, subcategory: str) -> tuple[str, str]:
+    if category in {"railway", "public_transport"}:
+        return "#7c3aed", "#4c1d95"
+    if category == "place":
+        return "#475569", "#1e293b"
+    if category == "amenity" and subcategory in {
+        "hospital",
+        "clinic",
+        "pharmacy",
+    }:
+        return "#dc2626", "#991b1b"
+    if category == "amenity":
+        return "#2563eb", "#1e3a8a"
+    if category == "shop":
+        return "#ea580c", "#9a3412"
+    if category == "tourism":
+        return "#0891b2", "#155e75"
+    if category == "leisure":
+        return "#16a34a", "#166534"
+    return "#64748b", "#334155"
+
+
+def _draw_background_pois(
+    draw,
+    viewport: _Viewport,
+    pois: Sequence[BackgroundPoi],
+    font,
+    *,
+    width: int,
+    height: int,
+    header: int,
+    margin: int,
+    occupied: list[tuple[int, int, int, int]],
+    scale: int,
+) -> None:
+    """Draw a useful, collision-free selection of named orientation points."""
+
+    zoom = viewport.zoom(scale) if hasattr(viewport, "zoom") else 16.0
+    maximum = 26 if zoom >= 15.0 else 16
+    center = ((width + margin) / 2, (header + height - margin) / 2)
+    candidates = sorted(
+        pois,
+        key=lambda poi: (
+            poi.priority,
+            math.hypot(
+                viewport.point(poi.latitude, poi.longitude)[0] - center[0],
+                viewport.point(poi.latitude, poi.longitude)[1] - center[1],
+            ),
+            poi.name,
+        ),
+    )
+    placed = 0
+    seen: set[str] = set()
+    for poi in candidates:
+        raw_text = poi.name.strip()
+        text = raw_text if len(raw_text) <= 14 else f"{raw_text[:13]}…"
+        normalized = text.casefold()
+        if not text or normalized in seen:
+            continue
+        origin_x, origin_y = viewport.point(poi.latitude, poi.longitude)
+        radius = 5 * scale
+        sample_box = _label_box(
+            draw,
+            (0, 0),
+            text,
+            font,
+            scale=scale,
+            stroke_width=2 * scale,
+        )
+        text_width = sample_box[2] - sample_box[0]
+        text_height = sample_box[3] - sample_box[1]
+        horizontal = radius + 5 * scale + text_width / 2
+        vertical = radius + 4 * scale + text_height / 2
+        offsets = (
+            (horizontal, 0),
+            (-horizontal, 0),
+            (0, -vertical),
+            (0, vertical),
+        )
+        selected = None
+        for offset_x, offset_y in offsets:
+            xy = (round(origin_x + offset_x), round(origin_y + offset_y))
+            text_box = _label_box(
+                draw,
+                xy,
+                text,
+                font,
+                scale=scale,
+                stroke_width=2 * scale,
+            )
+            combined_box = (
+                min(origin_x - radius, text_box[0]),
+                min(origin_y - radius, text_box[1]),
+                max(origin_x + radius, text_box[2]),
+                max(origin_y + radius, text_box[3]),
+            )
+            inside = (
+                margin <= combined_box[0]
+                and combined_box[2] <= width - margin
+                and header + 4 * scale <= combined_box[1]
+                and combined_box[3] <= height - margin
+            )
+            if inside and not any(
+                _boxes_overlap(combined_box, item, gap=5 * scale) for item in occupied
+            ):
+                selected = (xy, combined_box)
+                break
+        if selected is None:
+            continue
+        xy, combined_box = selected
+        fill, outline = _poi_style(poi.category, poi.subcategory)
+        draw.ellipse(
+            (
+                origin_x - radius - 2 * scale,
+                origin_y - radius - 2 * scale,
+                origin_x + radius + 2 * scale,
+                origin_y + radius + 2 * scale,
+            ),
+            fill="#ffffff",
+        )
+        draw.ellipse(
+            (
+                origin_x - radius,
+                origin_y - radius,
+                origin_x + radius,
+                origin_y + radius,
+            ),
+            fill=fill,
+            outline=outline,
+            width=scale,
+        )
+        _draw_centered_text(draw, xy, text, font, "#334155", scale)
+        occupied.append(combined_box)
+        seen.add(normalized)
+        placed += 1
+        if placed >= maximum:
+            break
+
+
+def _draw_background_line_labels(
+    draw,
+    viewport: _Viewport,
+    lines: Sequence[BackgroundLine],
+    font,
+    *,
+    width: int,
+    height: int,
+    header: int,
+    margin: int,
+    excluded_names: set[str],
+    occupied: list[tuple[int, int, int, int]],
+    scale: int,
+) -> None:
+    grouped: dict[str, list[BackgroundLine]] = {}
+    for line in lines:
+        name = line.name.strip()
+        if line.category == "waterway" and name and name not in excluded_names:
+            grouped.setdefault(name, []).append(line)
+
+    candidates: list[tuple[float, str, tuple[tuple[int, int], ...]]] = []
+    for name, named_lines in grouped.items():
+        anchors: list[tuple[float, tuple[int, int]]] = []
+        total_length = 0.0
+        for line in named_lines:
+            pixels = [viewport.point(*point) for point in line.points]
+            for start, end in zip(pixels, pixels[1:]):
+                segment_length = math.hypot(end[0] - start[0], end[1] - start[1])
+                total_length += segment_length
+                anchors.append(
+                    (
+                        segment_length,
+                        ((start[0] + end[0]) // 2, (start[1] + end[1]) // 2),
+                    )
+                )
+        if total_length < 28 * scale:
+            continue
+        ranked = tuple(anchor for _length, anchor in sorted(anchors, reverse=True)[:10])
+        candidates.append((total_length, name[:14], ranked))
+
+    placed = 0
+    for _length, label, anchors in sorted(candidates, reverse=True):
+        selected = None
+        for xy in anchors:
+            box = _label_box(
+                draw,
+                xy,
+                label,
+                font,
+                scale=scale,
+                stroke_width=2 * scale,
+            )
+            inside = (
+                margin <= box[0]
+                and box[2] <= width - margin
+                and header + 4 * scale <= box[1]
+                and box[3] <= height - margin
+            )
+            if inside and not any(
+                _boxes_overlap(box, item, gap=6 * scale) for item in occupied
+            ):
+                selected = (xy, box)
+                break
+        if selected is None:
+            continue
+        xy, box = selected
+        _draw_centered_text(draw, xy, label, font, "#287a9b", scale)
+        occupied.append(box)
+        placed += 1
+        if placed >= 8:
+            break
+
+
 def _draw_background_labels(
     draw,
     viewport: _Viewport,
@@ -647,20 +871,37 @@ def _draw_background_labels(
     occupied: list[tuple[int, int, int, int]],
     scale: int,
 ) -> None:
+    zoom = viewport.zoom(scale) if hasattr(viewport, "zoom") else 16.0
+    if zoom >= 16.0:
+        maximum_rank = _road_rank("service")
+    elif zoom >= 14.8:
+        maximum_rank = _road_rank("residential")
+    else:
+        maximum_rank = _road_rank("tertiary")
     grouped: dict[str, list[RoadSegment]] = {}
     for road in roads:
         name = road.name.strip()
         if (
             not name
             or name in excluded_names
-            or _road_rank(road.highway) > _road_rank("tertiary")
+            or _road_rank(road.highway) > maximum_rank
         ):
             continue
         grouped.setdefault(name, []).append(road)
 
     center = ((width + margin) / 2, (header + height - margin) / 2)
     candidates: list[tuple[float, str, tuple[tuple[int, int], ...]]] = []
-    importance = {0: 125.0, 1: 118.0, 2: 110.0, 3: 82.0, 4: 62.0}
+    importance = {
+        0: 125.0,
+        1: 118.0,
+        2: 110.0,
+        3: 82.0,
+        4: 62.0,
+        5: 52.0,
+        6: 46.0,
+        7: 38.0,
+        8: 30.0,
+    }
     for name, segments in grouped.items():
         rendered = []
         best_rank = min(_road_rank(segment.highway) for segment in segments)
@@ -689,9 +930,11 @@ def _draw_background_labels(
             (score, name[:16], tuple(item[2] for item in ranked_anchors[:12]))
         )
 
+    placed = 0
+    maximum = 32 if zoom >= 15.0 else 22
     for _score, text, anchors in sorted(
         candidates, key=lambda item: item[0], reverse=True
-    )[:32]:
+    )[:64]:
         selected = None
         for xy in anchors:
             box = _label_box(
@@ -718,7 +961,8 @@ def _draw_background_labels(
         xy, box = selected
         _draw_centered_text(draw, xy, text, font, "#334155", scale)
         occupied.append(box)
-        if len(occupied) >= len(excluded_names) + 18:
+        placed += 1
+        if placed >= maximum:
             break
 
 
@@ -732,6 +976,7 @@ def render_static_map(
     areas: Sequence[MapPolygon] = (),
     background_lines: Sequence[BackgroundLine] = (),
     roads: Sequence[RoadSegment] = (),
+    pois: Sequence[BackgroundPoi] = (),
     labels: Sequence[MapLabel] = (),
     circle: MapCircle | None = None,
     bounds: tuple[float, float, float, float] | None = None,
@@ -763,6 +1008,8 @@ def render_static_map(
     title_font = _font(34 * scale, bold=True)
     subtitle_font = _font(20 * scale)
     label_font = _font(17 * scale)
+    poi_font = _font(14 * scale)
+    water_label_font = _font(15 * scale)
     route_label_font = _font(17 * scale, bold=True)
     marker_font = _font(18 * scale, bold=True)
 
@@ -829,6 +1076,31 @@ def render_static_map(
         height=height,
         header=header,
         margin=margin,
+        scale=scale,
+    )
+    _draw_background_pois(
+        draw,
+        viewport,
+        pois,
+        poi_font,
+        width=width,
+        height=height,
+        header=header,
+        margin=margin,
+        occupied=occupied_labels,
+        scale=scale,
+    )
+    _draw_background_line_labels(
+        draw,
+        viewport,
+        background_lines,
+        water_label_font,
+        width=width,
+        height=height,
+        header=header,
+        margin=margin,
+        excluded_names=excluded_names,
+        occupied=occupied_labels,
         scale=scale,
     )
     _draw_background_labels(
