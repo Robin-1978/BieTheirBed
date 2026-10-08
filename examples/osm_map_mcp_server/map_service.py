@@ -60,6 +60,9 @@ _COORDINATE_RE = re.compile(
     r"(-?\d{1,3}(?:\.\d+)?)(?![\d.])"
 )
 _SEARCH_PART_RE = re.compile(r"[\u3400-\u9fff]+|[a-z0-9]+", re.IGNORECASE)
+_NEARBY_DIRECT_FTS_ROWS = 5_000
+_NEARBY_MAX_FTS_ROWS = 250_000
+_SQLITE_IN_CHUNK = 900
 logger = logging.getLogger("osm-map-service")
 
 # Local corrections for OSM ways whose current source tags omit the local name
@@ -1743,25 +1746,12 @@ class MapService:
         )
         d_lat = radius_m / 110_540
         d_lon = radius_m / max(10_000, 111_320 * math.cos(math.radians(wgs_lat)))
-        parameters: list[Any] = [
+        bounds_parameters: list[Any] = [
             wgs_lat - d_lat,
             wgs_lat + d_lat,
             wgs_lon - d_lon,
             wgs_lon + d_lon,
         ]
-        if query.strip():
-            sql = (
-                "SELECT f.* FROM feature_fts JOIN features f ON f.id=feature_fts.rowid "
-                "JOIN features_rtree r ON r.id=f.id WHERE r.max_lat>=? AND r.min_lat<=? "
-                "AND r.max_lon>=? AND r.min_lon<=? AND feature_fts MATCH ? "
-            )
-            parameters.append(_fts_expression(query))
-        else:
-            sql = (
-                "SELECT f.* FROM features f JOIN features_rtree r ON r.id=f.id "
-                "WHERE r.max_lat>=? AND r.min_lat<=? AND r.max_lon>=? AND r.min_lon<=? "
-                "AND f.feature_type IN ('poi','place','address') "
-            )
         values = [value.strip() for value in categories if value.strip()][:20]
         normalized_values: list[str] = []
         for value in values:
@@ -1774,21 +1764,97 @@ class MapService:
             else:
                 normalized_values.append(value.strip())
         values = normalized_values
-        if values:
-            clauses = []
+
+        def category_matches(row: sqlite3.Row) -> bool:
+            if not values:
+                return True
+            row_category, row_subcategory = _normalize_category(
+                str(row["category"]), str(row["subcategory"])
+            )
             for value in values:
                 if ":" in value:
                     category, subcategory = value.split(":", 1)
-                    clauses.append("(f.category=? AND f.subcategory=?)")
-                    parameters.extend((category, subcategory))
-                else:
-                    clauses.append("(f.category=? OR f.subcategory=?)")
-                    parameters.extend((value, value))
-            sql += "AND (" + " OR ".join(clauses) + ") "
-        sql += "LIMIT 1000"
+                    if row_category == category and row_subcategory == subcategory:
+                        return True
+                elif value in {row_category, row_subcategory}:
+                    return True
+            return False
+
+        def fetch_features(
+            database: sqlite3.Connection, feature_ids: Sequence[int]
+        ) -> list[sqlite3.Row]:
+            fetched: list[sqlite3.Row] = []
+            for offset in range(0, len(feature_ids), _SQLITE_IN_CHUNK):
+                chunk = feature_ids[offset : offset + _SQLITE_IN_CHUNK]
+                placeholders = ",".join("?" for _ in chunk)
+                fetched.extend(
+                    database.execute(
+                        f"SELECT * FROM features WHERE id IN ({placeholders})", chunk
+                    ).fetchall()
+                )
+            return fetched
+
         database = self._connect()
         try:
-            rows = database.execute(sql, parameters).fetchall()
+            if query.strip():
+                # SQLite may reorder the FTS5/RTree join to start with every feature
+                # in the box, then rescan FTS5 once per row. A missing POI in a dense
+                # city can therefore take minutes. Resolve both indexed candidate
+                # sets independently and intersect their integer ids instead.
+                fts_rows = database.execute(
+                    "SELECT rowid FROM feature_fts WHERE feature_fts MATCH ? LIMIT ?",
+                    (_fts_expression(query), _NEARBY_MAX_FTS_ROWS + 1),
+                ).fetchall()
+                if len(fts_rows) > _NEARBY_MAX_FTS_ROWS:
+                    raise MapError(
+                        "query_too_broad",
+                        "nearby text query matches too many map features; "
+                        "add more specific text",
+                    )
+                text_ids = [int(row[0]) for row in fts_rows]
+                if len(text_ids) <= _NEARBY_DIRECT_FTS_ROWS:
+                    rows = [
+                        row
+                        for row in fetch_features(database, text_ids)
+                        if float(row["max_lat"]) >= bounds_parameters[0]
+                        and float(row["min_lat"]) <= bounds_parameters[1]
+                        and float(row["max_lon"]) >= bounds_parameters[2]
+                        and float(row["min_lon"]) <= bounds_parameters[3]
+                    ]
+                else:
+                    text_id_set = set(text_ids)
+                    spatial_ids = [
+                        int(row[0])
+                        for row in database.execute(
+                            "SELECT id FROM features_rtree "
+                            "WHERE max_lat>=? AND min_lat<=? "
+                            "AND max_lon>=? AND min_lon<=?",
+                            bounds_parameters,
+                        )
+                        if int(row[0]) in text_id_set
+                    ]
+                    rows = fetch_features(database, spatial_ids)
+                rows = [row for row in rows if category_matches(row)]
+            else:
+                sql = (
+                    "SELECT f.* FROM features f JOIN features_rtree r ON r.id=f.id "
+                    "WHERE r.max_lat>=? AND r.min_lat<=? "
+                    "AND r.max_lon>=? AND r.min_lon<=? "
+                    "AND f.feature_type IN ('poi','place','address') "
+                )
+                parameters: list[Any] = list(bounds_parameters)
+                if values:
+                    clauses = []
+                    for value in values:
+                        if ":" in value:
+                            category, subcategory = value.split(":", 1)
+                            clauses.append("(f.category=? AND f.subcategory=?)")
+                            parameters.extend((category, subcategory))
+                        else:
+                            clauses.append("(f.category=? OR f.subcategory=?)")
+                            parameters.extend((value, value))
+                    sql += "AND (" + " OR ".join(clauses) + ") "
+                rows = database.execute(sql + "LIMIT 1000", parameters).fetchall()
         finally:
             database.close()
         candidates = []
@@ -1835,7 +1901,7 @@ class MapService:
         )
         return self._attach_visual(
             result,
-            include_map_image=include_map_image,
+            include_map_image=include_map_image and bool(results),
             title=f"周边查找{f'：{query}' if query.strip() else ''}",
             subtitle=f"半径{_format_distance_zh(radius_m)} · {len(results)} 个结果",
             markers=markers,

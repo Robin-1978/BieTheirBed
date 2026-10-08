@@ -286,6 +286,22 @@ def test_offline_map_queries_and_routes(tmp_path: Path) -> None:
     )
     assert [item["name"] for item in nearby["results"]] == ["东方咖啡"]
 
+    named_nearby = service.nearby_search(
+        31.201,
+        121.401,
+        radius_m=500,
+        query="东方咖啡",
+        categories=("amenity:cafe",),
+    )
+    assert [item["name"] for item in named_nearby["results"]] == ["东方咖啡"]
+    missing_nearby = service.nearby_search(
+        31.201,
+        121.401,
+        radius_m=500,
+        query="柚米寓 唐镇店",
+    )
+    assert missing_nearby["results"] == []
+
     reverse = service.reverse_geocode(31.201, 121.401)
     assert reverse["administrative_areas"][0]["name"] == "上海测试区"
     assert reverse["nearby"][0]["distance_m"] == 0
@@ -373,6 +389,17 @@ def test_spatial_queries_render_valid_managed_pngs(tmp_path: Path) -> None:
         with Image.open(path) as image:
             assert image.format == "PNG"
             assert image.size == (1600, 1000)
+
+    missing = service.nearby_search(
+        31.201,
+        121.401,
+        radius_m=500,
+        query="柚米寓 唐镇店",
+        include_map_image=True,
+    )
+    assert missing["results"] == []
+    assert "visualization" not in missing
+    assert "managed_file" not in missing
 
 
 def test_background_areas_load_from_legacy_feature_layer(tmp_path: Path) -> None:
