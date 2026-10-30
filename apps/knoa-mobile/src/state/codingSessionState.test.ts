@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { GatewayError } from "../api/gatewayClient";
-import type { CodingSessionDetail, CodingSessionSummary } from "../api/models";
+import type { CodingSessionMessage, CodingSessionSummary } from "../api/models";
 import {
-  type CodingSessionKey,
   canInterruptCodingSession,
+  codingMessageRoleLabel,
   codingSessionErrorMessage,
+  codingSessionRouteKey,
+  codingSessionStateLabel,
   interruptOutcomeMessage,
-  loadCodingSessionSnapshot,
-  sameCodingSession,
+  loadCodingSessionList,
+  readableCodingMessages,
 } from "./codingSessionState";
 
 function summary(overrides: Partial<CodingSessionSummary> = {}): CodingSessionSummary {
@@ -29,28 +31,12 @@ function summary(overrides: Partial<CodingSessionSummary> = {}): CodingSessionSu
   };
 }
 
-function detail(overrides: Partial<CodingSessionSummary> = {}): CodingSessionDetail {
-  return { session: summary(overrides), messages: [] };
+function message(overrides: Partial<CodingSessionMessage> = {}): CodingSessionMessage {
+  return { message_id: "m1", role: "assistant", text: "hello", created_at: 1, ...overrides };
 }
 
 const listing = (sessions: CodingSessionSummary[], providerErrors: Array<{ provider: string; error: string }> = []) =>
   vi.fn(async () => ({ sessions, nextCursor: "", providerErrors }));
-
-describe("sameCodingSession", () => {
-  it("matches only when provider and external session id both match", () => {
-    const a: CodingSessionKey = { provider: "codex", external_session_id: "thread-a" };
-    expect(sameCodingSession(a, { provider: "codex", external_session_id: "thread-a" })).toBe(true);
-    expect(sameCodingSession(a, { provider: "opencode", external_session_id: "thread-a" })).toBe(false);
-    expect(sameCodingSession(a, { provider: "codex", external_session_id: "thread-b" })).toBe(false);
-  });
-
-  it("treats a missing side as a different session", () => {
-    const a: CodingSessionKey = { provider: "codex", external_session_id: "thread-a" };
-    expect(sameCodingSession(a, null)).toBe(false);
-    expect(sameCodingSession(undefined, a)).toBe(false);
-    expect(sameCodingSession(null, null)).toBe(false);
-  });
-});
 
 describe("canInterruptCodingSession", () => {
   it("is true only when the provider declares interrupt", () => {
@@ -73,126 +59,19 @@ describe("interruptOutcomeMessage", () => {
   });
 });
 
-describe("loadCodingSessionSnapshot", () => {
-  it("lists sessions without fetching a detail when nothing is selected", async () => {
-    const getDetail = vi.fn(async (): Promise<CodingSessionDetail> => detail());
-
-    const snapshot = await loadCodingSessionSnapshot({
-      list: listing([summary()]),
-      getDetail,
-      selectedKey: () => null,
-    });
-
-    expect(snapshot.sessions).toHaveLength(1);
-    expect(snapshot.detail).toBeNull();
-    expect(snapshot.error).toBe("");
-    expect(getDetail).not.toHaveBeenCalled();
-  });
-
-  it("returns the fresh detail of the selected session", async () => {
-    const selected: CodingSessionKey = { provider: "codex", external_session_id: "thread-a" };
-    const getDetail = vi.fn(async (): Promise<CodingSessionDetail> => detail({ revision: "turn-9" }));
-
-    const snapshot = await loadCodingSessionSnapshot({
-      list: listing([summary()]),
-      getDetail,
-      selectedKey: () => selected,
-    });
-
-    expect(getDetail).toHaveBeenCalledWith(selected);
-    expect(snapshot.detail?.session.revision).toBe("turn-9");
-  });
-
-  it("drops a detail that arrives after the user closed the panel", async () => {
-    let selected: CodingSessionKey | null = { provider: "codex", external_session_id: "thread-a" };
-
-    const snapshot = await loadCodingSessionSnapshot({
-      list: listing([summary()]),
-      getDetail: async () => {
-        selected = null;
-        return detail();
-      },
-      selectedKey: () => selected,
-    });
-
-    expect(snapshot.detail).toBeNull();
-  });
-
-  it("drops a detail that arrives after the user opened another session", async () => {
-    let selected: CodingSessionKey | null = { provider: "codex", external_session_id: "thread-a" };
-
-    const snapshot = await loadCodingSessionSnapshot({
-      list: listing([summary(), summary({ external_session_id: "thread-b" })]),
-      getDetail: async () => {
-        selected = { provider: "codex", external_session_id: "thread-b" };
-        return detail();
-      },
-      selectedKey: () => selected,
-    });
+describe("loadCodingSessionList", () => {
+  it("returns the listed sessions without an error", async () => {
+    const snapshot = await loadCodingSessionList({ list: listing([summary(), summary({ external_session_id: "thread-b" })]) });
 
     expect(snapshot.sessions).toHaveLength(2);
-    expect(snapshot.detail).toBeNull();
-  });
-
-  it("keeps the session list and reports a detail failure of the selected session", async () => {
-    const selected: CodingSessionKey = { provider: "codex", external_session_id: "thread-a" };
-
-    const snapshot = await loadCodingSessionSnapshot({
-      list: listing([summary()]),
-      getDetail: async () => {
-        throw new GatewayError(404, "not_found");
-      },
-      selectedKey: () => selected,
-    });
-
-    expect(snapshot.sessions).toHaveLength(1);
-    expect(snapshot.detail).toBeNull();
-    expect(snapshot.error).toBe("内容不存在或已经被删除");
-  });
-
-  it("explains a 403 on the selected session instead of the generic gateway text", async () => {
-    const selected: CodingSessionKey = { provider: "codex", external_session_id: "thread-a" };
-
-    const snapshot = await loadCodingSessionSnapshot({
-      list: listing([summary()]),
-      getDetail: async () => {
-        throw new GatewayError(403, "forbidden");
-      },
-      selectedKey: () => selected,
-    });
-
-    expect(snapshot.error).toMatch(/所有者/);
-    expect(snapshot.error).toMatch(/工作目录/);
-  });
-
-  it("stays silent about a detail failure for a session the user already left", async () => {
-    let selected: CodingSessionKey | null = { provider: "codex", external_session_id: "thread-a" };
-
-    const snapshot = await loadCodingSessionSnapshot({
-      list: listing([summary()]),
-      getDetail: async () => {
-        selected = null;
-        throw new GatewayError(404, "not_found");
-      },
-      selectedKey: () => selected,
-    });
-
     expect(snapshot.error).toBe("");
   });
 
   it("surfaces provider errors only when no session could be listed", async () => {
     const providerErrors = [{ provider: "opencode", error: "connection refused" }];
 
-    const empty = await loadCodingSessionSnapshot({
-      list: listing([], providerErrors),
-      getDetail: async () => detail(),
-      selectedKey: () => null,
-    });
-    const partial = await loadCodingSessionSnapshot({
-      list: listing([summary()], providerErrors),
-      getDetail: async () => detail(),
-      selectedKey: () => null,
-    });
+    const empty = await loadCodingSessionList({ list: listing([], providerErrors) });
+    const partial = await loadCodingSessionList({ list: listing([summary()], providerErrors) });
 
     expect(empty.error).toBe("opencode: connection refused");
     expect(partial.error).toBe("");
@@ -200,14 +79,95 @@ describe("loadCodingSessionSnapshot", () => {
 
   it("propagates a failed listing so the caller can report it", async () => {
     await expect(
-      loadCodingSessionSnapshot({
+      loadCodingSessionList({
         list: async () => {
           throw new GatewayError(503, "unavailable");
         },
-        getDetail: async () => detail(),
-        selectedKey: () => null,
       }),
     ).rejects.toBeInstanceOf(GatewayError);
+  });
+});
+
+describe("codingSessionStateLabel", () => {
+  it("names every state the gateway reports", () => {
+    expect(codingSessionStateLabel("running")).toBe("运行中 · 只读");
+    expect(codingSessionStateLabel("interrupted")).toBe("已中断");
+    expect(codingSessionStateLabel("failed")).toBe("失败");
+    expect(codingSessionStateLabel("idle")).toBe("空闲，可继续");
+    expect(codingSessionStateLabel("unknown")).toBe("未知");
+  });
+
+  it("falls back to unknown for a state a newer gateway may add", () => {
+    expect(codingSessionStateLabel("queued")).toBe("未知");
+  });
+});
+
+describe("codingMessageRoleLabel", () => {
+  it("names the two speakers and passes anything else through", () => {
+    expect(codingMessageRoleLabel("user")).toBe("你");
+    expect(codingMessageRoleLabel("assistant")).toBe("助手");
+    expect(codingMessageRoleLabel("tool")).toBe("tool");
+  });
+});
+
+describe("codingSessionRouteKey", () => {
+  it("reads provider and session id from the router params", () => {
+    expect(codingSessionRouteKey({ provider: "opencode", id: "ses_1" })).toEqual({
+      provider: "opencode",
+      external_session_id: "ses_1",
+    });
+  });
+
+  it("takes the first value when the router hands over an array", () => {
+    expect(codingSessionRouteKey({ provider: ["codex", "x"], id: ["thread-a", "y"] })).toEqual({
+      provider: "codex",
+      external_session_id: "thread-a",
+    });
+  });
+
+  it("is null when either part is missing or blank, so the screen can refuse to load", () => {
+    expect(codingSessionRouteKey({})).toBeNull();
+    expect(codingSessionRouteKey({ provider: "codex" })).toBeNull();
+    expect(codingSessionRouteKey({ id: "thread-a" })).toBeNull();
+    expect(codingSessionRouteKey({ provider: "  ", id: "thread-a" })).toBeNull();
+    expect(codingSessionRouteKey({ provider: "codex", id: [] })).toBeNull();
+  });
+});
+
+describe("readableCodingMessages", () => {
+  it("keeps the messages that carry text, in order, and counts the hidden steps", () => {
+    const result = readableCodingMessages([
+      message({ message_id: "m1", role: "user", text: "fix it" }),
+      message({ message_id: "m2", role: "assistant", text: "" }),
+      message({ message_id: "m3", role: "assistant", text: "done" }),
+      message({ message_id: "m4", role: "assistant", text: "" }),
+    ]);
+
+    expect(result.messages.map((item) => item.message_id)).toEqual(["m1", "m3"]);
+    expect(result.hidden).toBe(2);
+  });
+
+  it("treats whitespace-only text as empty", () => {
+    const result = readableCodingMessages([message({ text: " \n\t " }), message({ message_id: "m2", text: "ok" })]);
+
+    expect(result.messages.map((item) => item.message_id)).toEqual(["m2"]);
+    expect(result.hidden).toBe(1);
+  });
+
+  it("keeps the whole conversation instead of cutting it to the last few messages", () => {
+    const many = Array.from({ length: 60 }, (_, index) => message({ message_id: `m${index}`, text: `text ${index}` }));
+
+    const result = readableCodingMessages(many);
+
+    expect(result.messages).toHaveLength(60);
+    expect(result.hidden).toBe(0);
+  });
+
+  it("reports nothing visible when every message is empty", () => {
+    const result = readableCodingMessages([message({ text: "" }), message({ message_id: "m2", text: "" })]);
+
+    expect(result.messages).toEqual([]);
+    expect(result.hidden).toBe(2);
   });
 });
 

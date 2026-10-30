@@ -66,7 +66,7 @@ OpenCode provider 连接已存在的 `opencode serve` 或 background service。�
 
 KNOA 以运行它的操作系统用户的身份工作，不使用第二套账号或密码。Codex provider 启动 `PATH` 中的 `codex app-server` 且不覆盖 `CODEX_HOME`，因此读取该用户默认的 Codex 目录和登录状态；OpenCode 按上文发现该用户的后台服务。默认可见范围是该用户的全部会话，不按目录过滤，`coding_session_allowed_directories` 只用于把范围收窄到指定目录。Codex 列表沿用 app-server 的默认来源过滤（交互式的 `cli` 与 `vscode`），实机 553 个线程中的 305 个子 agent 与 `exec` 线程不进入列表。OpenCode 服务未运行是正常状态：列表为空而不是错误，会话级操作返回 503。服务注册文件是凭据，只有在它是当前用户拥有的私有（600）普通文件、不是符号链接、且 URL 为回环地址的 http 时才被采用，否则返回明确错误而不是静默忽略。已知限制：每次请求新起的 `codex app-server` 看不到其他客户端正在执行的回合，Codex 线程的运行状态在实机上全部是 `notLoaded`（映射为 `unknown`），需要接入桌面端常驻的 app-server 才能获得真实运行状态。
 
-手机端 Coding Sessions 页面分为列表、详情和绑定后聊天三种状态。列表显示 provider 标签、标题、目录、相对更新时间和运行徽标；详情显示最近用户输入、最近助手输出、事件时间线和“绑定到 KNOA”“继续”“只读等待”按钮。`read_only=true` 时隐藏发送按钮并显示占用方状态；provider 变为空闲后刷新详情并恢复发送。绑定完成后，聊天页面使用 KNOA `session_handle`，但每一轮的执行目标由绑定记录决定；provider 响应和失败码镜像到现有 `ChatTurnSnapshot`，不复制完整外部数据库。
+手机端 Coding Sessions 分为列表和详情两个独立页面（路由 `/coding-sessions` 与 `/coding-sessions/detail`）；设计中的第三种状态“绑定后聊天”手机端尚未实现。列表显示 provider 标签、标题、目录、相对更新时间和运行徽标，点开一个会话进入详情页。详情页顶部显示标题、目录、状态和“绑定当前小诺会话”“请求中断”按钮，中间按时间顺序滚动显示网关返回的有文字内容的消息（每个 provider 最多返回最近 200 条，没有文字内容的消息折叠为一行计数），底部是随键盘上移的输入框和发送按钮，键盘处理与聊天页相同。详情放在独立页面而不是列表下方，是因为列表最多 100 张卡片，展开在列表之后的详情与输入框会落在屏幕之外。`read_only=true` 时输入框和发送按钮禁用并提示桌面端运行中；列表和详情每 5 秒静默轮询一次（后台轮询不触发下拉刷新动画），provider 变为空闲后输入框自动恢复可用。手机端只调用列表、详情、绑定、继续、中断五个接口，没有接入事件时间线。绑定后聊天的设计目标是：聊天页面使用 KNOA `session_handle`，但每一轮的执行目标由绑定记录决定；provider 响应和失败码镜像到现有 `ChatTurnSnapshot`，不复制完整外部数据库。
 
 绑定和继续的顺序固定为：鉴权 → 读取 provider 会话 → 校验 principal 对 provider 的访问权限 → 校验工作目录是否允许 → 读取当前状态和 revision → 写入或确认 binding → provider resume/continue → 记录本地 turn → 转发增量事件 → 在 provider 完成后提交最终镜像。任一步失败时，Core 保留绑定和失败原因，客户端可以重新读取并重试；provider 返回冲突时不自动重试。
 

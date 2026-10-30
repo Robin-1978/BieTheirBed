@@ -1,27 +1,13 @@
-import type { CodingSessionDetail, CodingSessionSummary } from "../api/models";
+import type { CodingSessionMessage, CodingSessionSummary } from "../api/models";
 
 export type CodingSessionKey = Pick<CodingSessionSummary, "provider" | "external_session_id">;
 
 export type CodingSessionAction = "open" | "attach" | "prompt" | "interrupt";
 
-export type CodingSessionSnapshot = {
+export type CodingSessionListSnapshot = {
   sessions: CodingSessionSummary[];
-  /** Fresh detail of the selected session; null when nothing is selected or the selection moved on. */
-  detail: CodingSessionDetail | null;
   error: string;
 };
-
-export function sameCodingSession(
-  left: CodingSessionKey | null | undefined,
-  right: CodingSessionKey | null | undefined,
-): boolean {
-  return Boolean(
-    left
-      && right
-      && left.provider === right.provider
-      && left.external_session_id === right.external_session_id,
-  );
-}
 
 /**
  * The interrupt button follows what the provider declares: a running session
@@ -38,36 +24,69 @@ export function interruptOutcomeMessage(interrupted: boolean): string {
 }
 
 /**
- * Lists the sessions and refreshes the selected one.
- *
- * `selectedKey` is read again after the detail request: the user may have
- * closed the panel or opened another session meanwhile, and a late response
- * must not reopen or overwrite what is on screen now.  A failed listing
- * rejects; a failed detail request is reported in `error` so the freshly
- * listed sessions are still shown.
+ * Lists the sessions.  A provider that is down only matters while nothing could
+ * be listed at all: with the other provider's sessions on screen the list is
+ * still useful.  A failed listing rejects so the caller can report it.
  */
-export async function loadCodingSessionSnapshot(input: {
+export async function loadCodingSessionList(input: {
   list(): Promise<{ sessions: CodingSessionSummary[]; providerErrors: Array<{ provider: string; error: string }> }>;
-  getDetail(key: CodingSessionKey): Promise<CodingSessionDetail>;
-  selectedKey(): CodingSessionKey | null;
-}): Promise<CodingSessionSnapshot> {
+}): Promise<CodingSessionListSnapshot> {
   const listing = await input.list();
-  let detail: CodingSessionDetail | null = null;
-  let error = listing.providerErrors.length && !listing.sessions.length
+  const error = listing.providerErrors.length && !listing.sessions.length
     ? listing.providerErrors.map((item) => `${item.provider}: ${item.error}`).join("\n")
     : "";
-  const requested = input.selectedKey();
-  if (requested) {
-    try {
-      const fetched = await input.getDetail(requested);
-      if (sameCodingSession(input.selectedKey(), requested)) detail = fetched;
-    } catch (cause) {
-      if (sameCodingSession(input.selectedKey(), requested)) {
-        error = codingSessionErrorMessage(cause, "open", "无法读取会话详情");
-      }
-    }
-  }
-  return { sessions: listing.sessions, detail, error };
+  return { sessions: listing.sessions, error };
+}
+
+export function codingSessionStateLabel(state: string): string {
+  if (state === "running") return "运行中 · 只读";
+  if (state === "interrupted") return "已中断";
+  if (state === "failed") return "失败";
+  if (state === "idle") return "空闲，可继续";
+  return "未知";
+}
+
+export function codingMessageRoleLabel(role: string): string {
+  if (role === "user") return "你";
+  if (role === "assistant") return "助手";
+  return role;
+}
+
+function firstParam(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+/**
+ * Reads the session a detail screen was opened for from the router params
+ * (`useLocalSearchParams` may hand over an array).  Null when either part is
+ * missing, so the screen refuses to load instead of asking for "undefined".
+ */
+export function codingSessionRouteKey(params: {
+  provider?: string | string[];
+  id?: string | string[];
+}): CodingSessionKey | null {
+  const provider = firstParam(params.provider);
+  const externalSessionId = firstParam(params.id);
+  if (!provider || !externalSessionId) return null;
+  return { provider, external_session_id: externalSessionId };
+}
+
+/**
+ * A message can come back without text: the Codex bridge keeps only the
+ * userMessage/agentMessage items and the OpenCode bridge only the `text` parts
+ * of an assistant row, so a message made of anything else has an empty `text`.
+ * Shown as empty cards they bury the conversation, so only messages with text
+ * are listed; the number left out is returned so the screen can say so.  What
+ * the gateway returns is kept whole (it already caps it at the last 200): the
+ * detail screen scrolls instead of cutting the history to the last few entries.
+ */
+export function readableCodingMessages(messages: readonly CodingSessionMessage[]): {
+  messages: CodingSessionMessage[];
+  hidden: number;
+} {
+  const readable = messages.filter((message) => message.text.trim().length > 0);
+  return { messages: readable, hidden: messages.length - readable.length };
 }
 
 const FORBIDDEN = "没有权限使用这个编码会话：只有这台电脑的所有者可以操作，且会话的工作目录必须在允许范围内。";
