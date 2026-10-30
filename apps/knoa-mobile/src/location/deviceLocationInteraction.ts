@@ -16,18 +16,23 @@ export async function answerDeviceLocationInteraction(
 ): Promise<DeviceLocationResolution> {
  const preference = await loadLocationPreference();
  const requestedPrecision = interaction.display.precision;
- const validPrecision =
+ const hasValidPrecision =
   requestedPrecision === "city" ||
   requestedPrecision === "block" ||
-  requestedPrecision === "precise"
-   ? (requestedPrecision as LocationPrecision)
-   : preference.precision;
+  requestedPrecision === "precise";
+ const validPrecision = hasValidPrecision
+  ? (requestedPrecision as LocationPrecision)
+  : preference.precision;
  const fallback: DeviceLocationResolution = {
  status: "unavailable",
  location: "",
  precision: validPrecision,
  };
- if (interaction.kind !== "device_location" || interaction.state !== "pending") {
+ if (
+ interaction.kind !== "device_location" ||
+ interaction.state !== "pending" ||
+ !hasValidPrecision
+ ) {
  return fallback;
  }
  const addressRequired = interaction.display.address_required;
@@ -38,7 +43,7 @@ export async function answerDeviceLocationInteraction(
  return { ...fallback, status: "disabled" };
  }
  const snapshot = await resolveDeviceLocation({
- requestedPrecision: requestedPrecision as LocationPrecision,
+ requestedPrecision: validPrecision,
  addressRequired,
  });
  if (!snapshot?.text) return fallback;
