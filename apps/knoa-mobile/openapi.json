@@ -2756,6 +2756,622 @@
         }
       }
     },
+    "/v1/coding/sessions": {
+      "get": {
+        "operationId": "listCodingSessions",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 32
+            }
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "External coding sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodingSessionListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/coding/sessions/{provider}/{external_session_id}": {
+      "get": {
+        "operationId": "getCodingSession",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "external_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "External coding session detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodingSessionDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/coding/sessions/{provider}/{external_session_id}/attach": {
+      "post": {
+        "operationId": "attachCodingSession",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "external_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodingSessionAttachRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Coding session binding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodingSessionBindingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/coding/sessions/{provider}/{external_session_id}/prompt": {
+      "post": {
+        "operationId": "continueCodingSession",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "external_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodingSessionContinueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Coding session turn accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodingSessionTurnResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/coding/sessions/{provider}/{external_session_id}/interrupt": {
+      "post": {
+        "operationId": "interruptCodingSession",
+        "security": [
+          {
+            "gatewaySession": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "external_session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodingSessionInterruptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Coding session interrupt result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodingSessionInterruptResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/conversations/sessions": {
       "get": {
         "operationId": "listConversationSessions",
@@ -10899,6 +11515,300 @@
         ],
         "title": "ChatTurnState",
         "type": "string"
+      },
+      "CodingSessionAttachRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "session_handle": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Session Handle",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_handle"
+        ],
+        "title": "CodingSessionAttachRequest",
+        "type": "object"
+      },
+      "CodingSessionBindingResponse": {
+        "properties": {
+          "binding": {
+            "additionalProperties": true,
+            "title": "Binding",
+            "type": "object"
+          }
+        },
+        "required": [
+          "binding"
+        ],
+        "title": "CodingSessionBindingResponse",
+        "type": "object"
+      },
+      "CodingSessionContinueRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "maxLength": 200000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "CodingSessionContinueRequest",
+        "type": "object"
+      },
+      "CodingSessionDetailResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/CodingSessionSummaryResponse"
+          },
+          "messages": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CodingSessionMessageResponse"
+            },
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "title": "CodingSessionDetailResponse",
+        "type": "object"
+      },
+      "CodingSessionInterruptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "external_turn_id": {
+            "default": "",
+            "maxLength": 256,
+            "title": "External Turn Id",
+            "type": "string"
+          }
+        },
+        "title": "CodingSessionInterruptRequest",
+        "type": "object"
+      },
+      "CodingSessionInterruptResponse": {
+        "properties": {
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "interrupted"
+        ],
+        "title": "CodingSessionInterruptResponse",
+        "type": "object"
+      },
+      "CodingSessionListQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "provider": {
+            "default": "",
+            "maxLength": 32,
+            "title": "Provider",
+            "type": "string"
+          },
+          "directory": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Directory",
+            "type": "string"
+          },
+          "search": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Search",
+            "type": "string"
+          },
+          "include_archived": {
+            "default": false,
+            "title": "Include Archived",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "cursor": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Cursor",
+            "type": "string"
+          }
+        },
+        "title": "CodingSessionListQuery",
+        "type": "object"
+      },
+      "CodingSessionListResponse": {
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/CodingSessionSummaryResponse"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "next_cursor": {
+            "default": "",
+            "title": "Next Cursor",
+            "type": "string"
+          },
+          "provider_errors": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Provider Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "CodingSessionListResponse",
+        "type": "object"
+      },
+      "CodingSessionMessageResponse": {
+        "properties": {
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          }
+        },
+        "required": [
+          "message_id",
+          "role",
+          "text",
+          "created_at"
+        ],
+        "title": "CodingSessionMessageResponse",
+        "type": "object"
+      },
+      "CodingSessionSummaryResponse": {
+        "properties": {
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "external_session_id": {
+            "title": "External Session Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "directory": {
+            "title": "Directory",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "number"
+          },
+          "latest_user_message": {
+            "default": "",
+            "title": "Latest User Message",
+            "type": "string"
+          },
+          "latest_assistant_message": {
+            "default": "",
+            "title": "Latest Assistant Message",
+            "type": "string"
+          },
+          "read_only": {
+            "default": false,
+            "title": "Read Only",
+            "type": "boolean"
+          },
+          "capabilities": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "native_state": {
+            "default": "",
+            "title": "Native State",
+            "type": "string"
+          },
+          "revision": {
+            "default": "",
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "external_session_id",
+          "title",
+          "directory",
+          "state",
+          "updated_at"
+        ],
+        "title": "CodingSessionSummaryResponse",
+        "type": "object"
+      },
+      "CodingSessionTurnResponse": {
+        "properties": {
+          "external_session_id": {
+            "title": "External Session Id",
+            "type": "string"
+          },
+          "external_turn_id": {
+            "title": "External Turn Id",
+            "type": "string"
+          },
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          },
+          "read_only": {
+            "default": false,
+            "title": "Read Only",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "external_session_id",
+          "external_turn_id",
+          "accepted"
+        ],
+        "title": "CodingSessionTurnResponse",
+        "type": "object"
       },
       "ConfigControlState": {
         "additionalProperties": false,

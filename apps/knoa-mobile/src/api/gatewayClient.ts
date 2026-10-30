@@ -12,6 +12,8 @@ import type {
   ConfigPublishResult,
   ConfigRevision,
   ConfigValidationResult,
+  CodingSessionDetail,
+  CodingSessionSummary,
   ConversationSession,
   GatewaySession,
   HumanInteraction,
@@ -417,6 +419,64 @@ export class GatewayClient {
       next_cursor?: string;
     }>(`/v1/conversations/sessions?${query}`);
     return { sessions: response.sessions, nextCursor: response.next_cursor ?? "" };
+  }
+
+  async listCodingSessions(input: {
+    provider?: string;
+    directory?: string;
+    search?: string;
+    includeArchived?: boolean;
+    limit?: number;
+    cursor?: string;
+  } = {}): Promise<{ sessions: CodingSessionSummary[]; nextCursor: string; providerErrors: Array<{ provider: string; error: string }> }> {
+    const query = new URLSearchParams();
+    if (input.provider) query.set("provider", input.provider);
+    if (input.directory) query.set("directory", input.directory);
+    if (input.search) query.set("search", input.search);
+    if (input.includeArchived) query.set("include_archived", "true");
+    query.set("limit", String(input.limit ?? 50));
+    if (input.cursor) query.set("cursor", input.cursor);
+    const response = await this.json<{
+      sessions: CodingSessionSummary[];
+      next_cursor?: string;
+      provider_errors?: Array<{ provider: string; error: string }>;
+    }>(`/v1/coding/sessions?${query}`);
+    return {
+      sessions: response.sessions ?? [],
+      nextCursor: response.next_cursor ?? "",
+      providerErrors: response.provider_errors ?? [],
+    };
+  }
+
+  async getCodingSession(provider: string, externalSessionId: string): Promise<CodingSessionDetail> {
+    return this.json(`/v1/coding/sessions/${encodeURIComponent(provider)}/${encodeURIComponent(externalSessionId)}`);
+  }
+
+  async attachCodingSession(provider: string, externalSessionId: string, sessionHandle: string): Promise<void> {
+    await this.json(`/v1/coding/sessions/${encodeURIComponent(provider)}/${encodeURIComponent(externalSessionId)}/attach`, {
+      method: "POST",
+      body: { session_handle: sessionHandle },
+    });
+  }
+
+  async continueCodingSession(provider: string, externalSessionId: string, text: string): Promise<{
+    external_session_id: string;
+    external_turn_id: string;
+    accepted: boolean;
+    read_only: boolean;
+  }> {
+    return this.json(`/v1/coding/sessions/${encodeURIComponent(provider)}/${encodeURIComponent(externalSessionId)}/prompt`, {
+      method: "POST",
+      body: { text },
+    });
+  }
+
+  async interruptCodingSession(provider: string, externalSessionId: string, externalTurnId = ""): Promise<boolean> {
+    const response = await this.json<{ interrupted: boolean }>(`/v1/coding/sessions/${encodeURIComponent(provider)}/${encodeURIComponent(externalSessionId)}/interrupt`, {
+      method: "POST",
+      body: { external_turn_id: externalTurnId },
+    });
+    return response.interrupted;
   }
 
   async getConversationSession(sessionHandle: string): Promise<ConversationSession> {

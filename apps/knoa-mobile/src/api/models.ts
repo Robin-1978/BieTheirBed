@@ -335,6 +335,33 @@ export type ConversationSession = {
   revision: number;
 };
 
+export type CodingSessionSummary = {
+  provider: "codex" | "opencode" | string;
+  external_session_id: string;
+  title: string;
+  directory: string;
+  state: "idle" | "running" | "interrupted" | "failed" | "unknown" | string;
+  updated_at: number;
+  latest_user_message: string;
+  latest_assistant_message: string;
+  read_only: boolean;
+  capabilities: string[];
+  native_state: string;
+  revision: string;
+};
+
+export type CodingSessionMessage = {
+  message_id: string;
+  role: "user" | "assistant" | "system" | "tool" | string;
+  text: string;
+  created_at: number;
+};
+
+export type CodingSessionDetail = {
+  session: CodingSessionSummary;
+  messages: CodingSessionMessage[];
+};
+
 export type ChatTimelineEntry = {
   kind: string;
   content: string;

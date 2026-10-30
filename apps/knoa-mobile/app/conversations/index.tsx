@@ -185,6 +185,10 @@ export default function ConversationHistoryScreen() {
             <AppPressable accessibilityLabel={t("conversations.new")} style={styles.primary} onPress={() => void gateway.newConversation().then(() => router.replace({ pathname: "/(tabs)", params: nodeRouteParams(params) }))}>
               <AppIcon name="new-topic" color={colors.onAccent} size={21} />
             </AppPressable>
+            <AppPressable style={styles.filter} onPress={() => router.push({ pathname: "/coding-sessions", params: nodeRouteParams(params) })}>
+              <AppIcon name="code" color={colors.accent} size={18} />
+              <Text style={styles.filterText}>编码会话</Text>
+            </AppPressable>
             <AppPressable style={styles.filter} onPress={() => setShowArchived((value) => !value)}>
               <Text style={styles.filterText}>{showArchived ? t("conversations.hideArchived") : t("conversations.showArchived")}</Text>
             </AppPressable>

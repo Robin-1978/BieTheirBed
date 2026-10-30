@@ -516,6 +516,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/coding/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listCodingSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coding/sessions/{provider}/{external_session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getCodingSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coding/sessions/{provider}/{external_session_id}/attach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["attachCodingSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coding/sessions/{provider}/{external_session_id}/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["continueCodingSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/coding/sessions/{provider}/{external_session_id}/interrupt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["interruptCodingSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/sessions": {
         parameters: {
             query?: never;
@@ -2195,6 +2275,165 @@ export interface components {
          * @enum {string}
          */
         ChatTurnState: "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+        /** CodingSessionAttachRequest */
+        CodingSessionAttachRequest: {
+            /** Session Handle */
+            session_handle: string;
+        };
+        /** CodingSessionBindingResponse */
+        CodingSessionBindingResponse: {
+            /** Binding */
+            binding: {
+                [key: string]: unknown;
+            };
+        };
+        /** CodingSessionContinueRequest */
+        CodingSessionContinueRequest: {
+            /** Text */
+            text: string;
+        };
+        /** CodingSessionDetailResponse */
+        CodingSessionDetailResponse: {
+            session: components["schemas"]["CodingSessionSummaryResponse"];
+            /**
+             * Messages
+             * @default []
+             */
+            messages: components["schemas"]["CodingSessionMessageResponse"][];
+        };
+        /** CodingSessionInterruptRequest */
+        CodingSessionInterruptRequest: {
+            /**
+             * External Turn Id
+             * @default
+             */
+            external_turn_id: string;
+        };
+        /** CodingSessionInterruptResponse */
+        CodingSessionInterruptResponse: {
+            /** Interrupted */
+            interrupted: boolean;
+        };
+        /** CodingSessionListQuery */
+        CodingSessionListQuery: {
+            /**
+             * Provider
+             * @default
+             */
+            provider: string;
+            /**
+             * Directory
+             * @default
+             */
+            directory: string;
+            /**
+             * Search
+             * @default
+             */
+            search: string;
+            /**
+             * Include Archived
+             * @default false
+             */
+            include_archived: boolean;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
+            /**
+             * Cursor
+             * @default
+             */
+            cursor: string;
+        };
+        /** CodingSessionListResponse */
+        CodingSessionListResponse: {
+            /** Sessions */
+            sessions: components["schemas"]["CodingSessionSummaryResponse"][];
+            /**
+             * Next Cursor
+             * @default
+             */
+            next_cursor: string;
+            /**
+             * Provider Errors
+             * @default []
+             */
+            provider_errors: {
+                [key: string]: string;
+            }[];
+        };
+        /** CodingSessionMessageResponse */
+        CodingSessionMessageResponse: {
+            /** Message Id */
+            message_id: string;
+            /** Role */
+            role: string;
+            /** Text */
+            text: string;
+            /** Created At */
+            created_at: number;
+        };
+        /** CodingSessionSummaryResponse */
+        CodingSessionSummaryResponse: {
+            /** Provider */
+            provider: string;
+            /** External Session Id */
+            external_session_id: string;
+            /** Title */
+            title: string;
+            /** Directory */
+            directory: string;
+            /** State */
+            state: string;
+            /** Updated At */
+            updated_at: number;
+            /**
+             * Latest User Message
+             * @default
+             */
+            latest_user_message: string;
+            /**
+             * Latest Assistant Message
+             * @default
+             */
+            latest_assistant_message: string;
+            /**
+             * Read Only
+             * @default false
+             */
+            read_only: boolean;
+            /**
+             * Capabilities
+             * @default []
+             */
+            capabilities: string[];
+            /**
+             * Native State
+             * @default
+             */
+            native_state: string;
+            /**
+             * Revision
+             * @default
+             */
+            revision: string;
+        };
+        /** CodingSessionTurnResponse */
+        CodingSessionTurnResponse: {
+            /** External Session Id */
+            external_session_id: string;
+            /** External Turn Id */
+            external_turn_id: string;
+            /** Accepted */
+            accepted: boolean;
+            /**
+             * Read Only
+             * @default false
+             */
+            read_only: boolean;
+        };
         /** ConfigControlState */
         ConfigControlState: {
             /** Desired Revision Id */
@@ -7159,6 +7398,443 @@ export interface operations {
             };
             /** @description Request rejected */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listCodingSessions: {
+        parameters: {
+            query?: {
+                provider?: string;
+                directory?: string;
+                search?: string;
+                include_archived?: boolean;
+                limit?: number;
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description External coding sessions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodingSessionListResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getCodingSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                external_session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description External coding session detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodingSessionDetailResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    attachCodingSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                external_session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodingSessionAttachRequest"];
+            };
+        };
+        responses: {
+            /** @description Coding session binding */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodingSessionBindingResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    continueCodingSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                external_session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodingSessionContinueRequest"];
+            };
+        };
+        responses: {
+            /** @description Coding session turn accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodingSessionTurnResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    interruptCodingSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                external_session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodingSessionInterruptRequest"];
+            };
+        };
+        responses: {
+            /** @description Coding session interrupt result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodingSessionInterruptResponse"];
+                };
+            };
+            /** @description Request rejected */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Request rejected */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

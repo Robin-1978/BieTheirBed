@@ -66,6 +66,7 @@ function AppNavigator() {
             }}
           />
           <Stack.Screen name="conversations/index" options={{ title: t("nav.conversations") }} />
+          <Stack.Screen name="coding-sessions" options={{ title: "编码会话" }} />
           <Stack.Screen
             name="tasks/index"
             options={{
