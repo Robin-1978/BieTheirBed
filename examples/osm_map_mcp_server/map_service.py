@@ -63,6 +63,18 @@ _SEARCH_PART_RE = re.compile(r"[\u3400-\u9fff]+|[a-z0-9]+", re.IGNORECASE)
 _NEARBY_DIRECT_FTS_ROWS = 5_000
 _NEARBY_MAX_FTS_ROWS = 250_000
 _SQLITE_IN_CHUNK = 900
+# Candidate scans (FTS/RTree prefilter + python ranking) never consume the WKB
+# geometry blob; rendering and reverse-geocode fetch it via separate queries.
+# Listing columns explicitly keeps hundred-row candidate scans off the largest
+# column in this 30GB serving database.
+_FEATURE_COLUMNS_NO_GEOM = (
+    "id,osm_type,osm_id,feature_type,name,aliases,brand,category,subcategory,"
+    "admin_level,population,address,admin_context,postcode,phone,website,"
+    "opening_hours,lat,lon,min_lat,min_lon,max_lat,max_lon,tags_json,search_text"
+)
+_FEATURE_COLUMNS_NO_GEOM_F = ",".join(
+    f"f.{column}" for column in _FEATURE_COLUMNS_NO_GEOM.split(",")
+)
 logger = logging.getLogger("osm-map-service")
 
 # Local corrections for OSM ways whose current source tags omit the local name
@@ -227,6 +239,8 @@ class MapSettings:
     database_path: Path
     route_timeout_seconds: float = 20.0
     route_max_expansions: int = 250_000
+    route_total_timeout_seconds: float = 45.0
+    query_timeout_seconds: float = 45.0
     managed_file_root: Path | None = None
 
     @classmethod
@@ -246,6 +260,14 @@ class MapSettings:
                 os.environ.get("OSM_MAP_ROUTE_MAX_EXPANSIONS", "250000"),
                 1_000,
                 1_000_000,
+            ),
+            route_total_timeout_seconds=_bounded_float(
+                os.environ.get("OSM_MAP_ROUTE_TOTAL_TIMEOUT_SECONDS", "45"),
+                5.0,
+                55.0,
+            ),
+            query_timeout_seconds=_bounded_float(
+                os.environ.get("OSM_MAP_QUERY_TIMEOUT_SECONDS", "45"), 5.0, 55.0
             ),
             managed_file_root=(
                 Path(managed_root).expanduser()
@@ -888,7 +910,12 @@ class MapService:
     def __init__(self, settings: MapSettings) -> None:
         self.settings = settings
 
-    def _connect(self, *, require_ready: bool = True) -> sqlite3.Connection:
+    def _connect(
+        self,
+        *,
+        require_ready: bool = True,
+        timeout_seconds: float | None = None,
+    ) -> sqlite3.Connection:
         path = self.settings.database_path
         if not path.is_file():
             raise MapError("dataset_missing", f"map database does not exist: {path}")
@@ -899,6 +926,21 @@ class MapService:
         )
         database.row_factory = sqlite3.Row
         database.execute("PRAGMA query_only=ON")
+        # Bound every read query on this connection: under disk contention a
+        # stalled FTS/RTree scan must abort into a clear error instead of
+        # hanging past the MCP tool timeout.
+        deadline = time.monotonic() + (
+            self.settings.query_timeout_seconds
+            if timeout_seconds is None
+            else timeout_seconds
+        )
+
+        def _progress() -> int:
+            # SQLite aborts the running statement when the progress
+            # handler returns non-zero.
+            return 0 if time.monotonic() < deadline else 1
+
+        database.set_progress_handler(_progress, 65536)
         try:
             metadata = dict(database.execute("SELECT key,value FROM metadata"))
         except sqlite3.DatabaseError as exc:
@@ -1373,7 +1415,7 @@ class MapService:
             return []
         placeholders = ",".join("?" for _ in override_ids)
         sql = (
-            "SELECT f.*,0.0 AS text_rank FROM features f "
+            f"SELECT {_FEATURE_COLUMNS_NO_GEOM_F},0.0 AS text_rank FROM features f "
             + ("JOIN features_rtree r ON r.id=f.id " if bounds is not None else "")
             + "WHERE f.osm_type='way' AND f.feature_type='road' "
             + f"AND f.osm_id IN ({placeholders}) "
@@ -1425,13 +1467,19 @@ class MapService:
                 suffix = "*" if len(token) == 1 or token.isascii() else ""
                 pieces.append(f'"{escaped}"{suffix}')
             relaxed = " OR ".join(pieces)
+        # NOTE: these must stay CROSS JOIN (not JOIN/`,`) so SQLite evaluates
+        # feature_fts first and PK-probes the rest. With plain JOIN the planner
+        # may scan every feature inside a large region box and re-probe FTS5
+        # once per row: >60s on the live 30GB DB for a district-level region
+        # (same trap nearby_search already avoids via split queries).
         sql_base = (
-            "SELECT f.*,bm25(feature_fts) AS text_rank FROM feature_fts "
-            "JOIN features f ON f.id=feature_fts.rowid "
+            f"SELECT {_FEATURE_COLUMNS_NO_GEOM_F},bm25(feature_fts) AS text_rank "
+            "FROM feature_fts "
+            "CROSS JOIN features f ON f.id=feature_fts.rowid "
         )
         parameters_base: list[Any] = []
         if bounds is not None:
-            sql_base += "JOIN features_rtree r ON r.id=f.id "
+            sql_base += "CROSS JOIN features_rtree r ON r.id=f.id "
         sql_base += "WHERE feature_fts MATCH ? "
         if station_only:
             sql_base += (
@@ -1452,13 +1500,21 @@ class MapService:
             )
             parameters_base.extend((min_lat, max_lat, min_lon, max_lon))
         sql_base += "ORDER BY text_rank LIMIT ?"
-        rows = database.execute(
-            sql_base, [strict, *parameters_base, min(500, max(1, limit))]
-        ).fetchall()
-        if not rows and relaxed is not None:
+        try:
             rows = database.execute(
-                sql_base, [relaxed, *parameters_base, min(500, max(1, limit))]
+                sql_base, [strict, *parameters_base, min(500, max(1, limit))]
             ).fetchall()
+            if not rows and relaxed is not None:
+                rows = database.execute(
+                    sql_base, [relaxed, *parameters_base, min(500, max(1, limit))]
+                ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "interrupted" in str(exc):
+                raise MapError(
+                    "search_timeout",
+                    "place search exceeded its time budget, please retry",
+                ) from exc
+            raise
         seen_ids = {int(row["id"]) for row in rows}
         rows.extend(row for row in override_rows if int(row["id"]) not in seen_ids)
         return rows
@@ -1789,7 +1845,9 @@ class MapService:
                 placeholders = ",".join("?" for _ in chunk)
                 fetched.extend(
                     database.execute(
-                        f"SELECT * FROM features WHERE id IN ({placeholders})", chunk
+                        f"SELECT {_FEATURE_COLUMNS_NO_GEOM} FROM features "
+                        f"WHERE id IN ({placeholders})",
+                        chunk,
                     ).fetchall()
                 )
             return fetched
@@ -1837,7 +1895,8 @@ class MapService:
                 rows = [row for row in rows if category_matches(row)]
             else:
                 sql = (
-                    "SELECT f.* FROM features f JOIN features_rtree r ON r.id=f.id "
+                    f"SELECT {_FEATURE_COLUMNS_NO_GEOM_F} FROM features f "
+                    "JOIN features_rtree r ON r.id=f.id "
                     "WHERE r.max_lat>=? AND r.min_lat<=? "
                     "AND r.max_lon>=? AND r.min_lon<=? "
                     "AND f.feature_type IN ('poi','place','address') "
@@ -1855,6 +1914,13 @@ class MapService:
                             parameters.extend((value, value))
                     sql += "AND (" + " OR ".join(clauses) + ") "
                 rows = database.execute(sql + "LIMIT 1000", parameters).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "interrupted" in str(exc):
+                raise MapError(
+                    "search_timeout",
+                    "nearby search exceeded its time budget, please retry",
+                ) from exc
+            raise
         finally:
             database.close()
         candidates = []
@@ -2535,11 +2601,20 @@ class MapService:
         output_coordinate_system: str = "wgs84",
         include_geometry: bool = False,
         include_map_image: bool = False,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         if mode not in MODE_BITS:
             raise MapError(
                 "invalid_route_mode", "route mode must be walking, cycling or driving"
             )
+        started = time.monotonic()
+        total_budget = self.settings.route_total_timeout_seconds
+        if timeout_seconds is not None:
+            total_budget = min(total_budget, max(1.0, float(timeout_seconds)))
+
+        def _over_budget() -> bool:
+            return time.monotonic() - started > total_budget
+
         origin_cands = self._resolve_candidates(
             origin, coordinate_system=coordinate_system, limit=6
         )
@@ -2610,7 +2685,14 @@ class MapService:
         indexed_pairs.sort(key=lambda p: (p[0], p[1]))
         pairs = [p[2:] for p in indexed_pairs]
         best_straight = indexed_pairs[0][1] if indexed_pairs else 0.0
-        database = self._connect()
+        if _over_budget():
+            raise MapError(
+                "route_timeout",
+                "route planning exceeded its time budget, please retry",
+            )
+        database = self._connect(
+            timeout_seconds=max(1.0, total_budget - (time.monotonic() - started))
+        )
         last_error: MapError | None = None
         try:
             mode_bit = MODE_BITS[mode]
@@ -2622,6 +2704,11 @@ class MapService:
                 dest_lon,
                 dest_match,
             ) in pairs:
+                if _over_budget():
+                    raise MapError(
+                        "route_timeout",
+                        "route planning exceeded its time budget, please retry",
+                    )
                 straight = _haversine_m(origin_lat, origin_lon, dest_lat, dest_lon)
                 # Don't silently route from a far同名 fallback (e.g. 故宫北院区
                 # 25 km away) when the intended pair is next door but car-free.
@@ -2671,6 +2758,11 @@ class MapService:
                     "route_not_found", "the locations are not connected for this mode"
                 )
         except sqlite3.OperationalError as exc:
+            if "interrupted" in str(exc):
+                raise MapError(
+                    "route_timeout",
+                    "route planning exceeded its time budget, please retry",
+                ) from exc
             if "route_" in str(exc) or "no such table" in str(exc):
                 raise MapError(
                     "route_unavailable", "this map database has no routing index"
@@ -2795,6 +2887,7 @@ class MapService:
     ) -> dict[str, Any]:
         if not origins or len(origins) > 16:
             raise MapError("invalid_origins", "origins must contain 1 to 16 locations")
+        distance_started = time.monotonic()
         dest_lat, dest_lon, dest_match = self._resolve_location(
             destination, coordinate_system=coordinate_system
         )
@@ -2837,6 +2930,9 @@ class MapService:
                     mode=mode,
                     coordinate_system=coordinate_system,
                     include_map_image=False,
+                    timeout_seconds=max(
+                        5.0, 45.0 - (time.monotonic() - distance_started)
+                    ),
                 )
                 results.append(
                     {

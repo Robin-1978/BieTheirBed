@@ -209,16 +209,93 @@ def read_changes(change_file: Path) -> ChangeSet:
     return changes
 
 
-def write_scope(scope: Scope, path: Path) -> None:
+def write_scope(
+    scope: Scope, path: Path, direct_relations: frozenset[int] = frozenset()
+) -> None:
+    """Write a tiered delta scope file.
+
+    Tier 0 (`n`/`w`/`r`) is fully expanded and re-derived: direct osc edits
+    plus upward parent ways. Tier A (`R`) holds ancestor relations pulled in
+    by upward closure only; the C++ builder expands those only while small
+    and defers giants to an off-peak consolidation batch instead of
+    re-selecting millions of unchanged members.
+    """
+    ancestors = sorted(scope.relations - direct_relations)
     with path.open("w", encoding="utf-8") as output:
         for object_id in sorted(scope.nodes):
             output.write(f"n {object_id}\n")
         for object_id in sorted(scope.ways):
             output.write(f"w {object_id}\n")
         for object_id in sorted(scope.relations):
-            output.write(f"r {object_id}\n")
+            if object_id in direct_relations:
+                output.write(f"r {object_id}\n")
+        for object_id in ancestors:
+            output.write(f"R {object_id}\n")
         output.flush()
         os.fsync(output.fileno())
+
+
+def prune_merge_scope(
+    scope: Scope, deferred_ids: set[int], incomplete_ids: set[int]
+) -> set[int]:
+    """Drop deferred/incomplete relations from the merge scope.
+
+    Deferred ancestors have no replacement in the delta, and incompletely
+    assembled relations would otherwise replace their current live polygon
+    with nothing. Both keep their existing live features until the deferred
+    consolidation batch rebuilds them.
+    """
+    pruned = set(deferred_ids) | set(incomplete_ids)
+    scope.relations -= pruned
+    return pruned
+
+
+def read_deferred_scope(path: Path) -> set[int]:
+    deferred: set[int] = set()
+    if not path.is_file():
+        return deferred
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line.isdigit():
+                deferred.add(int(line))
+    return deferred
+
+
+def append_deferred_scope(path: Path, object_ids: Iterable[int]) -> None:
+    known = read_deferred_scope(path)
+    fresh = sorted(set(object_ids) - known)
+    if not fresh:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as output:
+        for object_id in fresh:
+            output.write(f"{object_id}\n")
+        output.flush()
+        os.fsync(output.fileno())
+
+
+def deferred_consolidation_due(
+    path: Path, *, window_start: int, window_end: int, max_age_hours: float
+) -> bool:
+    """Decide whether deferred giant ancestors should rejoin this batch.
+
+    Deferred ancestors rejoin as tier 0 (full expansion) only off-peak or
+    when they have waited longer than the max age, so the heavy consolidation
+    never competes with live serving traffic.
+    """
+    if not read_deferred_scope(path):
+        return False
+    try:
+        age_hours = (time.time() - path.stat().st_mtime) / 3600.0
+    except OSError:
+        return True
+    if age_hours >= max_age_hours:
+        return True
+    hour = time.localtime().tm_hour
+    if window_start <= window_end:
+        return window_start <= hour < window_end
+    return hour >= window_start or hour < window_end
 
 
 def dependency_scope(connection: sqlite3.Connection, direct: Scope) -> Scope:
@@ -756,7 +833,10 @@ def merge_delta(
         previous_metadata.get("replication_sequence", ""),
     )
     connection = sqlite3.connect(database, timeout=3600)
-    connection.execute("PRAGMA synchronous=FULL")
+    # WAL + pending journal replays a crashed merge, so NORMAL (fsync only on
+    # checkpoint) is sufficient here; FULL fsyncs every transaction frame and
+    # stalls the 15-minute serving overlap window.
+    connection.execute("PRAGMA synchronous=NORMAL")
     connection.execute("PRAGMA busy_timeout=3600000")
     connection.execute("ATTACH DATABASE ? AS delta", (str(delta_database),))
     try:
@@ -1113,10 +1193,11 @@ def _build_and_merge_direct(
     base_sequence: int,
     target_metadata: PbfMetadata,
     scope: Scope,
+    direct_relations: frozenset[int] = frozenset(),
 ) -> dict[str, int]:
     scope_file = work / f"scope-{base_sequence}-{target_metadata.sequence}.txt"
     delta_database = work / f"delta-{base_sequence}-{target_metadata.sequence}.sqlite"
-    write_scope(scope, scope_file)
+    write_scope(scope, scope_file, direct_relations)
     _remove(delta_database)
     _run(
         [
@@ -1131,8 +1212,35 @@ def _build_and_merge_direct(
             "--scope",
             str(scope_file),
             "--object-database",
+            "--max-ancestor-members",
+            str(args.max_ancestor_members),
+            "--max-selection-nodes",
+            str(args.max_selection_nodes),
         ]
     )
+    deferred_file = scope_file.with_name(scope_file.name + ".deferred")
+    incomplete_file = scope_file.with_name(scope_file.name + ".incomplete")
+    deferred_ids: set[int] = set()
+    incomplete_ids: set[int] = set()
+    try:
+        deferred_ids = read_deferred_scope(deferred_file)
+        incomplete_ids = read_deferred_scope(incomplete_file)
+        append_deferred_scope(
+            work / "deferred_scope.txt", deferred_ids | incomplete_ids
+        )
+    finally:
+        _remove(deferred_file)
+        _remove(incomplete_file)
+    pruned = prune_merge_scope(scope, deferred_ids, incomplete_ids)
+    if pruned:
+        # Deferred ancestors keep their existing live features: the delta has
+        # no replacement for them, so they must leave the merge scope or the
+        # merge would delete their current polygons with nothing to replace.
+        print(
+            f"ancestor deferred this batch: relations={len(pruned)} "
+            f"scope={scope.counts()}",
+            flush=True,
+        )
     ensure_incremental_schema(database, args.index_temp_dir.resolve())
     merged = merge_delta(database, delta_database, scope, source, target_metadata)
     clear_pending_dependency_update(dependency_database)
@@ -1205,6 +1313,9 @@ def _update_locked(
             database_sequence,
             target_metadata,
             scope,
+            # Recovery replays a flat journal without tier provenance, so keep
+            # the previous all-tier-0 behavior here.
+            frozenset(scope.relations),
         )
         change_file = work / f"changes-{database_sequence}-{dependency_sequence}.osc.gz"
         _archive_changes(change_file, work)
@@ -1258,9 +1369,27 @@ def _update_locked(
     dependency_connection, scope = prepare_dependency_update(
         dependency_database, changes
     )
+    direct_relations = frozenset(changes.scope.relations)
+    deferred_path = work / "deferred_scope.txt"
+    consolidating = False
+    if deferred_consolidation_due(
+        deferred_path,
+        window_start=args.deferred_window_start,
+        window_end=args.deferred_window_end,
+        max_age_hours=args.deferred_max_age_hours,
+    ):
+        deferred_ids = read_deferred_scope(deferred_path)
+        scope.relations |= deferred_ids
+        direct_relations = frozenset(direct_relations | deferred_ids)
+        consolidating = True
+        print(
+            f"deferred consolidation: rejoining {len(deferred_ids)} relations "
+            f"as tier 0",
+            flush=True,
+        )
     scope_file = work / f"scope-{database_sequence}-{target_sequence}.txt"
     try:
-        write_scope(scope, scope_file)
+        write_scope(scope, scope_file, direct_relations)
         stage_dependency_update(
             dependency_connection,
             target_metadata,
@@ -1281,7 +1410,10 @@ def _update_locked(
         database_sequence,
         target_metadata,
         scope,
+        direct_relations,
     )
+    if consolidating:
+        _remove(deferred_path)
 
     print(
         f"incremental update complete sequence={database_sequence}->{target_sequence} "
@@ -1333,6 +1465,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--diff-batch-mb", type=int, default=256)
     parser.add_argument("--socket-timeout", type=int, default=120)
     parser.add_argument("--build-batch-size", type=int, default=50_000)
+    parser.add_argument("--max-ancestor-members", type=int, default=2_000)
+    parser.add_argument("--max-selection-nodes", type=int, default=300_000)
+    parser.add_argument("--deferred-window-start", type=int, default=2)
+    parser.add_argument("--deferred-window-end", type=int, default=5)
+    parser.add_argument("--deferred-max-age-hours", type=float, default=24.0)
     return parser
 
 
@@ -1341,4 +1478,9 @@ if __name__ == "__main__":
     arguments.diff_batch_mb = max(1, min(arguments.diff_batch_mb, 1024))
     arguments.socket_timeout = max(10, min(arguments.socket_timeout, 600))
     arguments.build_batch_size = max(1_000, min(arguments.build_batch_size, 500_000))
+    arguments.max_ancestor_members = max(0, min(arguments.max_ancestor_members, 100_000_000))
+    arguments.max_selection_nodes = max(0, min(arguments.max_selection_nodes, 1_000_000_000))
+    arguments.deferred_window_start = max(0, min(arguments.deferred_window_start, 23))
+    arguments.deferred_window_end = max(0, min(arguments.deferred_window_end, 23))
+    arguments.deferred_max_age_hours = max(1.0, min(arguments.deferred_max_age_hours, 720.0))
     raise SystemExit(update(arguments))

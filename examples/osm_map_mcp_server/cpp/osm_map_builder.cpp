@@ -57,6 +57,10 @@ struct ObjectScope {
   std::unordered_set<std::int64_t> nodes;
   std::unordered_set<std::int64_t> ways;
   std::unordered_set<std::int64_t> relations;
+  // Ancestor relations pulled in by upward dependency closure only (never
+  // directly edited). They need re-assembly when small, but must not trigger
+  // full member expansion when giant (see prepare_object_selection).
+  std::unordered_set<std::int64_t> ancestor_relations;
 
   bool contains_node(std::int64_t id) const { return !enabled || nodes.find(id) != nodes.end(); }
   bool contains_way(std::int64_t id) const { return !enabled || ways.find(id) != ways.end(); }
@@ -71,17 +75,20 @@ ObjectScope read_scope(const fs::path &path) {
     throw std::runtime_error("cannot open delta scope: " + path.string());
   ObjectScope scope;
   scope.enabled = true;
-  char type = '\0';
+  std::string token;
   std::int64_t id = 0;
-  while (input >> type >> id) {
-    if (id <= 0)
-      throw std::runtime_error("delta scope contains a non-positive object ID");
+  while (input >> token >> id) {
+    if (token.size() != 1 || id <= 0)
+      throw std::runtime_error("delta scope is malformed");
+    const char type = token[0];
     if (type == 'n')
       scope.nodes.insert(id);
     else if (type == 'w')
       scope.ways.insert(id);
     else if (type == 'r')
       scope.relations.insert(id);
+    else if (type == 'R')
+      scope.ancestor_relations.insert(id);
     else
       throw std::runtime_error("delta scope contains an unknown object type");
   }
@@ -821,54 +828,130 @@ void add_object_relation(osmium::memory::Buffer &buffer, std::int64_t id, const 
   buffer.commit();
 }
 
-void prepare_object_selection(ObjectDatabase &database, const ObjectScope &scope) {
-  database.exec(
-      "CREATE TEMP TABLE selected_objects(object_type INTEGER NOT NULL,id INTEGER NOT NULL,"
-      "PRIMARY KEY(object_type,id)) WITHOUT ROWID");
-  sqlite3_stmt *insert = nullptr;
-  if (sqlite3_prepare_v2(database.get(), "INSERT INTO selected_objects VALUES(?,?)", -1, &insert,
-                         nullptr) != SQLITE_OK)
-    throw std::runtime_error("cannot prepare OSM object scope insert");
-  const auto add = [&](int type, const auto &ids) {
-    for (const auto id : ids) {
-      sqlite3_bind_int(insert, 1, type);
-      sqlite3_bind_int64(insert, 2, id);
-      if (sqlite3_step(insert) != SQLITE_DONE) {
-        sqlite3_finalize(insert);
-        throw std::runtime_error("cannot insert OSM object scope");
-      }
-      sqlite3_reset(insert);
-      sqlite3_clear_bindings(insert);
-    }
-  };
-  add(0, scope.nodes);
-  add(1, scope.ways);
-  add(2, scope.relations);
-  sqlite3_finalize(insert);
+std::unordered_set<std::int64_t> prepare_object_selection(
+    ObjectDatabase &database, const ObjectScope &scope, std::int64_t max_ancestor_members,
+    std::int64_t max_selection_nodes, const fs::path &deferred_path) {
+  std::ofstream deferred{deferred_path, std::ios::out | std::ios::trunc};
+  if (!deferred)
+    throw std::runtime_error("cannot open deferred scope file: " + deferred_path.string());
+  std::vector<std::int64_t> deferred_ids;
 
-  for (int depth = 0; depth < 32; ++depth) {
-    database.exec("INSERT OR IGNORE INTO selected_objects "
-                  "SELECT relation_members.member_type,relation_members.member_id "
-                  "FROM selected_objects CROSS JOIN relation_members "
-                  "ON selected_objects.object_type=2 "
-                  "AND relation_members.relation_id=selected_objects.id");
-    if (sqlite3_changes(database.get()) == 0)
-      break;
-    if (depth == 31)
-      throw std::runtime_error("relation reference closure exceeded 32 levels");
+  // Ancestor relations (tier A) with more direct members than the limit are
+  // never expanded: rebuilding e.g. a whole country boundary because one of
+  // its members moved is what turns minute diffs into multi-GB selections.
+  // They are recorded for a deferred off-peak consolidation batch instead.
+  // Deferred ids are kept out of the closure below via an anti-join, so a
+  // deferred relation cannot re-enter through another ancestor's members.
+  database.exec("DROP TABLE IF EXISTS deferred_relations");
+  database.exec("CREATE TEMP TABLE deferred_relations(id INTEGER PRIMARY KEY) WITHOUT ROWID");
+  std::unordered_set<std::int64_t> small_ancestors;
+  ObjectStatement member_count{database,
+                               "SELECT COUNT(*) FROM relation_members WHERE relation_id=?"};
+  sqlite3_stmt *defer_insert = nullptr;
+  if (sqlite3_prepare_v2(database.get(), "INSERT OR IGNORE INTO deferred_relations VALUES(?)",
+                         -1, &defer_insert, nullptr) != SQLITE_OK)
+    throw std::runtime_error("cannot prepare deferred scope insert");
+  const auto defer = [&](std::int64_t id) {
+    deferred_ids.push_back(id);
+    deferred << id << '\n';
+    sqlite3_bind_int64(defer_insert, 1, id);
+    if (sqlite3_step(defer_insert) != SQLITE_DONE) {
+      sqlite3_finalize(defer_insert);
+      throw std::runtime_error("cannot insert deferred relation");
+    }
+    sqlite3_reset(defer_insert);
+    sqlite3_clear_bindings(defer_insert);
+  };
+  for (const auto id : scope.ancestor_relations) {
+    if (scope.relations.find(id) != scope.relations.end())
+      continue;  // directly edited: tier 0 wins, full expansion below
+    sqlite3_bind_int64(member_count.get(), 1, id);
+    const bool giant = member_count.next() &&
+                       sqlite3_column_int64(member_count.get(), 0) > max_ancestor_members;
+    sqlite3_reset(member_count.get());
+    sqlite3_clear_bindings(member_count.get());
+    if (giant) {
+      defer(id);
+    } else {
+      small_ancestors.insert(id);
+    }
   }
-  database.exec("INSERT OR IGNORE INTO selected_objects "
-                "SELECT 0,way_nodes.node_id FROM selected_objects CROSS JOIN way_nodes "
-                "INDEXED BY sqlite_autoindex_way_nodes_1 "
-                "ON selected_objects.object_type=1 AND way_nodes.way_id=selected_objects.id");
-  std::cout << "object selection: nodes="
-            << database.scalar_integer("SELECT count(*) FROM selected_objects WHERE object_type=0")
+
+  const auto run_closure = [&](bool include_ancestors) {
+    database.exec("DROP TABLE IF EXISTS selected_objects");
+    database.exec(
+        "CREATE TEMP TABLE selected_objects(object_type INTEGER NOT NULL,id INTEGER NOT NULL,"
+        "PRIMARY KEY(object_type,id)) WITHOUT ROWID");
+    sqlite3_stmt *insert = nullptr;
+    if (sqlite3_prepare_v2(database.get(), "INSERT INTO selected_objects VALUES(?,?)", -1,
+                           &insert, nullptr) != SQLITE_OK)
+      throw std::runtime_error("cannot prepare OSM object scope insert");
+    const auto add = [&](int type, const auto &ids) {
+      for (const auto id : ids) {
+        sqlite3_bind_int(insert, 1, type);
+        sqlite3_bind_int64(insert, 2, id);
+        if (sqlite3_step(insert) != SQLITE_DONE) {
+          sqlite3_finalize(insert);
+          throw std::runtime_error("cannot insert OSM object scope");
+        }
+        sqlite3_reset(insert);
+        sqlite3_clear_bindings(insert);
+      }
+    };
+    add(0, scope.nodes);
+    add(1, scope.ways);
+    add(2, scope.relations);
+    if (include_ancestors)
+      add(2, small_ancestors);
+    sqlite3_finalize(insert);
+
+    for (int depth = 0; depth < 32; ++depth) {
+      database.exec("INSERT OR IGNORE INTO selected_objects "
+                    "SELECT relation_members.member_type,relation_members.member_id "
+                    "FROM selected_objects CROSS JOIN relation_members "
+                    "ON selected_objects.object_type=2 "
+                    "AND relation_members.relation_id=selected_objects.id "
+                    "AND (relation_members.member_type<>2 OR relation_members.member_id NOT IN "
+                    "(SELECT id FROM deferred_relations))");
+      if (sqlite3_changes(database.get()) == 0)
+        break;
+      if (depth == 31)
+        throw std::runtime_error("relation reference closure exceeded 32 levels");
+    }
+    database.exec("INSERT OR IGNORE INTO selected_objects "
+                  "SELECT 0,way_nodes.node_id FROM selected_objects CROSS JOIN way_nodes "
+                  "INDEXED BY sqlite_autoindex_way_nodes_1 "
+                  "ON selected_objects.object_type=1 AND way_nodes.way_id=selected_objects.id");
+  };
+
+  run_closure(true);
+  auto selected_nodes = database.scalar_integer(
+      "SELECT count(*) FROM selected_objects WHERE object_type=0");
+  if (selected_nodes > max_selection_nodes && !small_ancestors.empty()) {
+    // Second pass without ancestors: the cap guards against nested
+    // hierarchies (e.g. country -> province -> county admin trees) where no
+    // single relation looks giant but the transitive closure still explodes.
+    for (const auto id : small_ancestors)
+      defer(id);
+    small_ancestors.clear();
+    run_closure(false);
+    selected_nodes = database.scalar_integer(
+        "SELECT count(*) FROM selected_objects WHERE object_type=0");
+  }
+  sqlite3_finalize(defer_insert);
+  deferred.flush();
+  std::cout << "ancestor deferred: relations=" << deferred_ids.size() << '\n' << std::flush;
+  std::cout << "object selection: nodes=" << selected_nodes
             << " ways="
             << database.scalar_integer("SELECT count(*) FROM selected_objects WHERE object_type=1")
             << " relations="
             << database.scalar_integer("SELECT count(*) FROM selected_objects WHERE object_type=2")
             << '\n'
             << std::flush;
+  // Included small ancestors must pass the ImportHandler scope filter so
+  // their re-assembled areas reach the delta; deferred ones stay out so the
+  // merge keeps their existing live features untouched.
+  return small_ancestors;
 }
 
 template <typename TCallback>
@@ -1028,6 +1111,7 @@ class ImportHandler : public osmium::handler::Handler {
   Statement route_edge_;
   osmium::geom::WKBFactory<> wkb_;
   osmium::Box bounds_;
+  std::ofstream *incomplete_stream_ = nullptr;
   std::unordered_map<std::int64_t, std::uint8_t> route_modes_;
   bool route_modes_reserved_ = false;
   const ObjectScope *scope_;
@@ -1124,6 +1208,8 @@ public:
 
   std::uint64_t object_count() const { return objects_; }
   std::string bounds_json() const { return box_json(bounds_); }
+
+  void set_incomplete_stream(std::ofstream *stream) { incomplete_stream_ = stream; }
 
   void add_feature(FeatureInput input) {
     auto [name, aliases] = names(*input.tags);
@@ -1369,8 +1455,14 @@ public:
         ++count;
       }
     }
-    if (count == 0 || !complete_geometry)
+    if (count == 0 || !complete_geometry) {
+      // Pruned members (see prepare_object_selection) make relation assembly
+      // incomplete. Record the id so the caller keeps the existing live
+      // feature instead of merging a missing replacement.
+      if (!complete_geometry && !area.from_way() && incomplete_stream_ != nullptr)
+        *incomplete_stream_ << area.orig_id() << '\n';
       return;
+    }
     std::string geometry;
     try {
       geometry = wkb_.create_multipolygon(area);
@@ -1578,13 +1670,16 @@ struct Arguments {
   bool keep_temp = false;
   bool delta = false;
   bool object_database = false;
+  std::int64_t max_ancestor_members = 2000;
+  std::int64_t max_selection_nodes = 300000;
 };
 
 Arguments parse_arguments(int argc, char **argv) {
   if (argc < 3) {
     throw std::runtime_error("usage: osm_map_builder SOURCE.osm.pbf OUTPUT.sqlite "
                              "[--temp-dir DIR] [--batch-size N] [--keep-temp] "
-                             "[--delta --scope FILE] [--object-database]");
+                             "[--delta --scope FILE] [--object-database] "
+                             "[--max-ancestor-members N] [--max-selection-nodes N]");
   }
   Arguments result;
   result.source = argv[1];
@@ -1597,6 +1692,12 @@ Arguments parse_arguments(int argc, char **argv) {
       result.scope = argv[++index];
     else if (option == "--batch-size" && index + 1 < argc) {
       result.batch_size = std::clamp<std::size_t>(std::stoull(argv[++index]), 1000, 1000000);
+    } else if (option == "--max-ancestor-members" && index + 1 < argc) {
+      result.max_ancestor_members =
+          std::clamp<std::int64_t>(std::stoll(argv[++index]), 0, 100000000);
+    } else if (option == "--max-selection-nodes" && index + 1 < argc) {
+      result.max_selection_nodes =
+          std::clamp<std::int64_t>(std::stoll(argv[++index]), 0, 1000000000);
     } else if (option == "--keep-temp")
       result.keep_temp = true;
     else if (option == "--delta")
@@ -1636,7 +1737,10 @@ int run(const Arguments &arguments) {
   std::map<std::string, std::string> metadata;
   if (arguments.object_database) {
     object_database = std::make_unique<ObjectDatabase>(arguments.source);
-    prepare_object_selection(*object_database, scope);
+    for (const auto id : prepare_object_selection(
+             *object_database, scope, arguments.max_ancestor_members,
+             arguments.max_selection_nodes, arguments.scope.string() + ".deferred"))
+      scope.relations.insert(id);
     metadata = object_source_metadata(*object_database, arguments.source);
   } else {
     metadata = source_metadata(arguments.source);
@@ -1685,6 +1789,14 @@ int run(const Arguments &arguments) {
   osmium::handler::NodeLocationsForWays<LocationIndex> location_handler{location_index};
   location_handler.ignore_errors();
   ImportHandler import_handler{database, arguments.batch_size, scope_pointer, arguments.delta};
+  std::ofstream incomplete_stream;
+  if (arguments.object_database) {
+    incomplete_stream.open(arguments.scope.string() + ".incomplete",
+                           std::ios::out | std::ios::trunc);
+    if (!incomplete_stream)
+      throw std::runtime_error("cannot open incomplete scope file");
+    import_handler.set_incomplete_stream(&incomplete_stream);
+  }
   auto area_handler = area_manager.handler([&import_handler](osmium::memory::Buffer &&buffer) {
     osmium::apply(buffer, import_handler);
   });
