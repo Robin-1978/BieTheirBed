@@ -72,7 +72,8 @@ class ProviderConfig(BaseModel):
         required = (
             self.requires_api_key
             if self.requires_api_key is not None
-            else self.driver in {"openai", "openai_compatible", "openai_responses", "anthropic"}
+            else self.driver
+            in {"openai", "openai_compatible", "openai_responses", "anthropic"}
         )
         if required and not value:
             raise ValueError("API key is required for this provider account")
@@ -118,7 +119,9 @@ class ModelConfig(BaseModel):
     thinking: ThinkingConfig | None = None
     #: Per-model wire protocol overriding the provider driver (same
     #: semantics as ManagedModelConfig.protocol).
-    protocol: Literal["openai_compatible", "openai_responses", "anthropic"] | None = None
+    protocol: Literal["openai_compatible", "openai_responses", "anthropic"] | None = (
+        None
+    )
 
     @field_validator("context_window", mode="before")
     @classmethod
@@ -160,7 +163,9 @@ class WebhookRouteConfig(BaseModel):
     def resolved_secret(self) -> str:
         if self.secret_env:
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", self.secret_env):
-                raise ValueError("webhook secret_env must be an environment variable name")
+                raise ValueError(
+                    "webhook secret_env must be an environment variable name"
+                )
             value = os.environ.get(self.secret_env, "")
             if not value:
                 raise ValueError(
@@ -234,20 +239,24 @@ class AppConfig(BaseModel):
                     model="@default",
                 ),
                 max_concurrency=4,
-                allowed_platform_tools=frozenset({
-                    "read_file",
-                    "edit_file",
-                    "write_file",
-                    "grep_search",
-                    "glob_files",
-                    "run_command",
-                    "read_artifact",
-                }),
-                platform_capability_ceiling=frozenset({
-                    "host_read",
-                    "host_write",
-                    "shell",
-                }),
+                allowed_platform_tools=frozenset(
+                    {
+                        "read_file",
+                        "edit_file",
+                        "write_file",
+                        "grep_search",
+                        "glob_files",
+                        "run_command",
+                        "read_artifact",
+                    }
+                ),
+                platform_capability_ceiling=frozenset(
+                    {
+                        "host_read",
+                        "host_write",
+                        "shell",
+                    }
+                ),
                 runtime_limits=AgentRuntimeLimits(
                     max_iterations=30,
                 ),
@@ -272,16 +281,20 @@ class AppConfig(BaseModel):
                     model="@default",
                 ),
                 max_concurrency=4,
-                allowed_platform_tools=frozenset({
-                    "web_search",
-                    "web_fetch",
-                    "read_artifact",
-                    "notify",
-                }),
-                platform_capability_ceiling=frozenset({
-                    "network",
-                    "desktop_control",
-                }),
+                allowed_platform_tools=frozenset(
+                    {
+                        "web_search",
+                        "web_fetch",
+                        "read_artifact",
+                        "notify",
+                    }
+                ),
+                platform_capability_ceiling=frozenset(
+                    {
+                        "network",
+                        "desktop_control",
+                    }
+                ),
                 runtime_limits=AgentRuntimeLimits(
                     max_iterations=20,
                 ),
@@ -341,9 +354,7 @@ class AppConfig(BaseModel):
             ),
         }
     )
-    approval_review: ApprovalReviewConfig = Field(
-        default_factory=ApprovalReviewConfig
-    )
+    approval_review: ApprovalReviewConfig = Field(default_factory=ApprovalReviewConfig)
     # Multi-provider model catalog. Provider keys identify API accounts;
     # model keys are stable aliases used by the application.
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
@@ -401,6 +412,21 @@ class AppConfig(BaseModel):
     gateway_public_url: str = ""
     gateway_tls_cert_file: str = ""
     gateway_tls_key_file: str = ""
+    # Optional bridge to the shared Codex app-server/OpenCode session stores.
+    # It works as the OS user running KNOA: Codex uses that user's Codex home,
+    # OpenCode is found through its own service registration, and every session
+    # of the user is visible unless directories are listed here to narrow it.
+    coding_sessions_enabled: bool = True
+    coding_session_allowed_directories: tuple[str, ...] = ()
+    codex_app_server_command: tuple[str, ...] = ("codex", "app-server")
+    codex_app_server_cwd: str = ""
+    # Follow the user's OpenCode background service (its service.json) unless an
+    # explicit opencode_server_url + password below is configured.
+    opencode_service_discovery: bool = True
+    opencode_server_url: str = ""
+    opencode_server_username: str = "opencode"
+    opencode_server_password: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    opencode_server_directory: str = ""
     ice_servers: list[dict[str, Any]] = Field(default_factory=list)
     capability_mcp_host: str = "127.0.0.1"
     capability_mcp_port: int = 9530
@@ -470,7 +496,9 @@ class AppConfig(BaseModel):
             raise ValueError("Core WebSocket service port must be between 0 and 65535")
         owner = self.owner_principal_id.strip()
         if not owner or len(owner) > 256 or any(char.isspace() for char in owner):
-            raise ValueError("Owner principal ID must contain 1-256 non-space characters")
+            raise ValueError(
+                "Owner principal ID must contain 1-256 non-space characters"
+            )
         aliases = tuple(alias.strip() for alias in self.owner_principal_aliases)
         if len(aliases) > 16 or any(
             not alias or len(alias) > 256 or any(char.isspace() for char in alias)
@@ -500,7 +528,9 @@ class AppConfig(BaseModel):
             if not self.webhook_routes:
                 raise ValueError("Enabled webhook adapter requires at least one route")
             if self.service_port <= 0:
-                raise ValueError("Enabled webhook adapter requires the Core TCP service")
+                raise ValueError(
+                    "Enabled webhook adapter requires the Core TCP service"
+                )
             if self.webhook_port == self.service_port:
                 raise ValueError("Webhook and Core service ports must differ")
         if self.gateway_enabled:
@@ -536,9 +566,7 @@ class AppConfig(BaseModel):
                 raise ValueError(
                     "Gateway public URL must not contain credentials, query or fragment"
                 )
-            if parsed.scheme != "https" and not is_loopback_host(
-                parsed.hostname or ""
-            ):
+            if parsed.scheme != "https" and not is_loopback_host(parsed.hostname or ""):
                 raise ValueError("Non-loopback Gateway public URL must use HTTPS")
         self.gateway_public_url = public_url
         if self.feishu_enabled and (
@@ -602,8 +630,7 @@ class AppConfig(BaseModel):
                 binding = binding.model_copy(
                     update={
                         "model": (
-                            self.default_model
-                            or default_model
+                            self.default_model or default_model
                             if binding.model == "@default"
                             else reviewer_model
                         )
@@ -657,7 +684,8 @@ class AppConfig(BaseModel):
                     f"provider.{provider_id}.api_key" if self.llm_api_key else ""
                 ),
                 requires_api_key=(
-                    self.llm_provider in {"openai", "openai_compatible", "openai_responses", "anthropic"}
+                    self.llm_provider
+                    in {"openai", "openai_compatible", "openai_responses", "anthropic"}
                 ),
                 timeout_seconds=self.llm_timeout,
             )
@@ -834,9 +862,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open("rb") as stream:
         raw = stream.read(_MAX_CONFIG_BYTES + 1)
     if len(raw) > _MAX_CONFIG_BYTES:
-        raise ValueError(
-            f"Config file exceeds {_MAX_CONFIG_BYTES} byte limit: {path}"
-        )
+        raise ValueError(f"Config file exceeds {_MAX_CONFIG_BYTES} byte limit: {path}")
     data = yaml.safe_load(raw.decode("utf-8"))
     return data if isinstance(data, dict) else {}
 
@@ -880,6 +906,13 @@ def _env_overrides() -> dict[str, Any]:
         "KNOA_GATEWAY_PUBLIC_URL": ("gateway_public_url", str),
         "KNOA_GATEWAY_TLS_CERT_FILE": ("gateway_tls_cert_file", str),
         "KNOA_GATEWAY_TLS_KEY_FILE": ("gateway_tls_key_file", str),
+        "KNOA_CODING_SESSIONS_ENABLED": ("coding_sessions_enabled", bool),
+        "KNOA_CODEX_APP_SERVER_CWD": ("codex_app_server_cwd", str),
+        "KNOA_OPENCODE_SERVICE_DISCOVERY": ("opencode_service_discovery", bool),
+        "KNOA_OPENCODE_SERVER_URL": ("opencode_server_url", str),
+        "KNOA_OPENCODE_SERVER_USERNAME": ("opencode_server_username", str),
+        "KNOA_OPENCODE_SERVER_PASSWORD": ("opencode_server_password", str),
+        "KNOA_OPENCODE_SERVER_DIRECTORY": ("opencode_server_directory", str),
         "KNOA_FEISHU_ENABLED": ("feishu_enabled", bool),
         "KNOA_FEISHU_APP_ID": ("feishu_app_id", str),
         "KNOA_FEISHU_APP_SECRET": ("feishu_app_secret", str),
@@ -890,7 +923,10 @@ def _env_overrides() -> dict[str, Any]:
         "KNOA_DINGTALK_ROBOT_CODE": ("dingtalk_robot_code", str),
         "KNOA_DINGTALK_RECEIVE_ID": ("dingtalk_receive_id", str),
         "KNOA_ATTACHMENT_TTL_SECONDS": ("attachment_ttl_seconds", int),
-        "KNOA_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": ("attachment_cleanup_interval_seconds", int),
+        "KNOA_ATTACHMENT_CLEANUP_INTERVAL_SECONDS": (
+            "attachment_cleanup_interval_seconds",
+            int,
+        ),
         "KNOA_TASK_TRACE_RETENTION_DAYS": ("task_trace_retention_days", int),
         "KNOA_CONVERSATION_DETAIL_RETENTION_DAYS": (
             "conversation_detail_retention_days",
@@ -906,7 +942,13 @@ def _env_overrides() -> dict[str, Any]:
         if raw is not None:
             try:
                 if field_type is bool:
-                    overrides[field_name] = raw.strip().lower() in ("1", "true", "yes", "y", "on")
+                    overrides[field_name] = raw.strip().lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                        "y",
+                        "on",
+                    )
                 elif field_type == "json":
                     overrides[field_name] = json.loads(raw)
                 else:
@@ -923,7 +965,9 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     source_default = Path(__file__).resolve().parents[2] / "config" / "default.yaml"
     packaged_default = Path(__file__).resolve().parent / "resources" / "default.yaml"
     default_path = source_default if source_default.is_file() else packaged_default
-    explicit_path = Path(config_path).expanduser().resolve() if config_path is not None else None
+    explicit_path = (
+        Path(config_path).expanduser().resolve() if config_path is not None else None
+    )
 
     yaml_data = _load_yaml(default_path)
     user_path = default_runtime_root() / "config" / "local.yaml"
@@ -937,6 +981,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
             yaml_data = {**yaml_data, **explicit_data}
     if explicit_path is not None and not explicit_path.exists():
         import warnings
+
         warnings.warn(
             f"Config file not found: {explicit_path}. "
             "Using defaults, user config, and environment variables."
@@ -946,5 +991,7 @@ def load_config(config_path: str | Path | None = None) -> AppConfig:
     merged: dict[str, Any] = {**yaml_data, **env_data}
     # Only propagate a path to the daemon when the user explicitly selected
     # one. The default daemon independently loads the same per-user config.
-    merged["source_config_path"] = str(explicit_path) if explicit_path is not None else ""
+    merged["source_config_path"] = (
+        str(explicit_path) if explicit_path is not None else ""
+    )
     return AppConfig(**merged)

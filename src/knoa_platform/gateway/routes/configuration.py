@@ -19,8 +19,9 @@ _CONFIG_BODY_BYTES = 1024 * 1024
 
 
 class ConfigurationRoutes:
-    def _authorize_configuration(self, request: Request):
-        authenticated = self._authorize(request, limit=120)
+    def _authorize_configuration(self, request: Request, *, limit: int = 120):
+        """Owner-only authorization shared by the route families that control the host."""
+        authenticated = self._authorize(request, limit=limit)
         if isinstance(authenticated, JSONResponse):
             return authenticated
         if authenticated.device.principal_id != self._config.owner_principal_id:

@@ -1,4 +1,5 @@
 """Public, versioned Secure Gateway HTTP protocol models."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -305,7 +306,9 @@ class SelectCatalogCapabilityRequest(GatewayRequest):
 
 
 class RecordImprovementEvidenceRequest(GatewayRequest):
-    kind: Literal["explicit_feedback", "failed_execution", "recovery_result", "metric_regression"]
+    kind: Literal[
+        "explicit_feedback", "failed_execution", "recovery_result", "metric_regression"
+    ]
     subject_ref: str = Field(default="", max_length=256)
     summary: str = Field(min_length=1, max_length=4000)
 
@@ -351,6 +354,27 @@ class WriteSecretRequest(GatewayRequest):
 
 class GatewayQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class CodingSessionListQuery(GatewayQuery):
+    provider: str = Field(default="", max_length=32)
+    directory: str = Field(default="", max_length=4096)
+    search: str = Field(default="", max_length=512)
+    include_archived: bool = False
+    limit: int = Field(default=50, ge=1, le=200)
+    cursor: str = Field(default="", max_length=512)
+
+
+class CodingSessionContinueRequest(GatewayRequest):
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+class CodingSessionInterruptRequest(GatewayRequest):
+    external_turn_id: str = Field(default="", max_length=256)
+
+
+class CodingSessionAttachRequest(GatewayRequest):
+    session_handle: str = Field(min_length=1, max_length=256)
 
 
 class TaskListQuery(GatewayQuery):
@@ -549,6 +573,54 @@ class SessionResponse(BaseModel):
 
 class SessionCreatedResponse(BaseModel):
     session_handle: str
+
+
+class CodingSessionSummaryResponse(BaseModel):
+    provider: str
+    external_session_id: str
+    title: str
+    directory: str
+    state: str
+    updated_at: float
+    latest_user_message: str = ""
+    latest_assistant_message: str = ""
+    read_only: bool = False
+    capabilities: tuple[str, ...] = ()
+    native_state: str = ""
+    revision: str = ""
+
+
+class CodingSessionMessageResponse(BaseModel):
+    message_id: str
+    role: str
+    text: str
+    created_at: float
+
+
+class CodingSessionDetailResponse(BaseModel):
+    session: CodingSessionSummaryResponse
+    messages: tuple[CodingSessionMessageResponse, ...] = ()
+
+
+class CodingSessionListResponse(BaseModel):
+    sessions: tuple[CodingSessionSummaryResponse, ...]
+    next_cursor: str = ""
+    provider_errors: tuple[dict[str, str], ...] = ()
+
+
+class CodingSessionBindingResponse(BaseModel):
+    binding: dict[str, Any]
+
+
+class CodingSessionTurnResponse(BaseModel):
+    external_session_id: str
+    external_turn_id: str
+    accepted: bool
+    read_only: bool = False
+
+
+class CodingSessionInterruptResponse(BaseModel):
+    interrupted: bool
 
 
 class AgentSummary(BaseModel):

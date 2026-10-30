@@ -42,6 +42,7 @@ from knoa_platform.gateway.identity import (
 from knoa_platform.gateway.routes import (
     ArtifactRoutes,
     ChannelRoutes,
+    CodingSessionRoutes,
     ConfigurationRoutes,
     ConsoleRoutes,
     ConversationRoutes,
@@ -55,6 +56,10 @@ from knoa_platform.gateway.routes import (
     RemoteResourceRoutes,
     SecretRoutes,
     TaskRoutes,
+)
+from knoa_platform.coding_sessions import (
+    CodingSessionService,
+    build_coding_session_service,
 )
 from knoa_platform.gateway.streaming import GatewayStreaming
 from knoa_platform.host_lifecycle_client import HostLifecycleClient
@@ -108,6 +113,7 @@ class _EmbeddedUvicornServer(uvicorn.Server):
 class SecureGatewayAdapter(
     ConsoleRoutes,
     ChannelRoutes,
+    CodingSessionRoutes,
     ConversationRoutes,
     TaskRoutes,
     ArtifactRoutes,
@@ -140,6 +146,7 @@ class SecureGatewayAdapter(
         release_repository: AndroidReleaseRepository | None = None,
         event_heartbeat_seconds: float = 15.0,
         channel_controller: object | None = None,
+        coding_sessions: CodingSessionService | None = None,
     ) -> None:
         if not config.gateway_enabled:
             raise ValueError("SecureGatewayAdapter requires gateway_enabled")
@@ -175,6 +182,9 @@ class SecureGatewayAdapter(
         self._authentication = authentication
         self._audit = audit or GatewayAuditRepository(database)
         self._database = database
+        self._coding_sessions = coding_sessions or build_coding_session_service(
+            config, database
+        )
         self._maintenance_interval = max(
             60,
             config.attachment_cleanup_interval_seconds,
@@ -492,6 +502,31 @@ class SecureGatewayAdapter(
                 Route("/v1/mcp/resources", self._list_mcp_resources, methods=["GET"]),
                 Route("/v1/sessions", self._create_session, methods=["POST"]),
                 Route(
+                    "/v1/coding/sessions",
+                    self._list_coding_sessions,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/coding/sessions/{provider:str}/{external_session_id:str}",
+                    self._get_coding_session,
+                    methods=["GET"],
+                ),
+                Route(
+                    "/v1/coding/sessions/{provider:str}/{external_session_id:str}/attach",
+                    self._attach_coding_session,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/coding/sessions/{provider:str}/{external_session_id:str}/prompt",
+                    self._continue_coding_session,
+                    methods=["POST"],
+                ),
+                Route(
+                    "/v1/coding/sessions/{provider:str}/{external_session_id:str}/interrupt",
+                    self._interrupt_coding_session,
+                    methods=["POST"],
+                ),
+                Route(
                     "/v1/conversations/sessions",
                     self._list_conversation_sessions,
                     methods=["GET"],
@@ -546,7 +581,9 @@ class SecureGatewayAdapter(
                 Route("/v1/memories", self._list_memories, methods=["GET"]),
                 Route("/v1/memories", self._save_memory, methods=["POST"]),
                 Route("/v1/memories/clear", self._clear_memories, methods=["POST"]),
-                Route("/v1/memories/{key:str}", self._delete_memory, methods=["DELETE"]),
+                Route(
+                    "/v1/memories/{key:str}", self._delete_memory, methods=["DELETE"]
+                ),
                 Route("/v1/memories/{key:str}", self._update_memory, methods=["PUT"]),
                 Route("/v1/event-sources", self._list_event_sources, methods=["GET"]),
                 Route("/v1/event-sources", self._create_event_source, methods=["POST"]),
@@ -873,6 +910,7 @@ class SecureGatewayAdapter(
                 lan_task.cancel()
                 await asyncio.gather(lan_task, return_exceptions=True)
         await self._core.close()
+        await self._coding_sessions.close()
 
     async def _maintenance_loop(self) -> None:
         while True:

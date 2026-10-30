@@ -29,6 +29,17 @@ from knoa_platform.gateway.protocol import (
     CapabilityInstallPlanResponse,
     CatalogSelectionResponse,
     ChallengeResponse,
+    CodingSessionAttachRequest,
+    CodingSessionBindingResponse,
+    CodingSessionContinueRequest,
+    CodingSessionDetailResponse,
+    CodingSessionInterruptRequest,
+    CodingSessionInterruptResponse,
+    CodingSessionListQuery,
+    CodingSessionListResponse,
+    CodingSessionMessageResponse,
+    CodingSessionSummaryResponse,
+    CodingSessionTurnResponse,
     ChatApprovalResolvedResponse,
     ChatTurnListResponse,
     ChatTurnResponse,
@@ -186,6 +197,17 @@ _MODELS: tuple[type[BaseModel], ...] = (
     AuthCompleteResponse,
     SessionResponse,
     SessionCreatedResponse,
+    CodingSessionAttachRequest,
+    CodingSessionBindingResponse,
+    CodingSessionContinueRequest,
+    CodingSessionDetailResponse,
+    CodingSessionInterruptRequest,
+    CodingSessionInterruptResponse,
+    CodingSessionListQuery,
+    CodingSessionListResponse,
+    CodingSessionMessageResponse,
+    CodingSessionSummaryResponse,
+    CodingSessionTurnResponse,
     CreateProductTaskRequest,
     UpdateProductTaskRequest,
     ContinueProductTaskRequest,
@@ -661,6 +683,143 @@ def gateway_openapi_schema() -> dict[str, Any]:
                     "responses": {
                         "201": _json_response("Core session", SessionCreatedResponse),
                         **_errors("401", "429", "503"),
+                    },
+                }
+            },
+            "/v1/coding/sessions": {
+                "get": {
+                    "operationId": "listCodingSessions",
+                    "security": bearer,
+                    "parameters": [
+                        _query("provider", {"type": "string", "maxLength": 32}),
+                        _query("directory", {"type": "string", "maxLength": 4096}),
+                        _query("search", {"type": "string", "maxLength": 512}),
+                        _query("include_archived", {"type": "boolean"}),
+                        _query(
+                            "limit", {"type": "integer", "minimum": 1, "maximum": 200}
+                        ),
+                        _query("cursor", {"type": "string", "maxLength": 512}),
+                    ],
+                    "responses": {
+                        "200": _json_response(
+                            "External coding sessions", CodingSessionListResponse
+                        ),
+                        **_errors("400", "401", "403", "429", "503"),
+                    },
+                }
+            },
+            "/v1/coding/sessions/{provider}/{external_session_id}": {
+                "get": {
+                    "operationId": "getCodingSession",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "provider",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                        {
+                            "name": "external_session_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                    ],
+                    "responses": {
+                        "200": _json_response(
+                            "External coding session detail",
+                            CodingSessionDetailResponse,
+                        ),
+                        **_errors("401", "403", "404", "429", "503"),
+                    },
+                }
+            },
+            "/v1/coding/sessions/{provider}/{external_session_id}/attach": {
+                "post": {
+                    "operationId": "attachCodingSession",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "provider",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                        {
+                            "name": "external_session_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                    ],
+                    "requestBody": _json_body(CodingSessionAttachRequest),
+                    "responses": {
+                        "201": _json_response(
+                            "Coding session binding", CodingSessionBindingResponse
+                        ),
+                        **_errors(
+                            "400", "401", "403", "404", "409", "415", "429", "503"
+                        ),
+                    },
+                }
+            },
+            "/v1/coding/sessions/{provider}/{external_session_id}/prompt": {
+                "post": {
+                    "operationId": "continueCodingSession",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "provider",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                        {
+                            "name": "external_session_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                    ],
+                    "requestBody": _json_body(CodingSessionContinueRequest),
+                    "responses": {
+                        "202": _json_response(
+                            "Coding session turn accepted", CodingSessionTurnResponse
+                        ),
+                        **_errors(
+                            "400", "401", "403", "404", "409", "415", "429", "503"
+                        ),
+                    },
+                }
+            },
+            "/v1/coding/sessions/{provider}/{external_session_id}/interrupt": {
+                "post": {
+                    "operationId": "interruptCodingSession",
+                    "security": bearer,
+                    "parameters": [
+                        {
+                            "name": "provider",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                        {
+                            "name": "external_session_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string", "maxLength": 128},
+                        },
+                    ],
+                    "requestBody": _json_body(CodingSessionInterruptRequest),
+                    "responses": {
+                        "200": _json_response(
+                            "Coding session interrupt result",
+                            CodingSessionInterruptResponse,
+                        ),
+                        **_errors(
+                            "400", "401", "403", "404", "409", "415", "429", "503"
+                        ),
                     },
                 }
             },

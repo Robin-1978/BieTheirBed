@@ -35,6 +35,16 @@ from knoa_platform.agent_runtime.contracts import (
 )
 from knoa_platform.artifacts import ArtifactRef
 from knoa_platform.config import AppConfig
+from knoa_codex_agent.coding_sessions import (  # noqa: E402
+    CodingSessionDetail,
+    CodingSessionPage,
+    CodingSessionSummary,
+    CodingSessionTurnReceipt,
+)
+from knoa_platform.coding_sessions import (  # noqa: E402
+    CodingSessionBindingRepository,
+    CodingSessionService,
+)
 from knoa_platform.configuration import ConfigControlState, ConfigRevision
 from knoa_platform.conversation import ChatTurnState
 from knoa_platform.gateway.adapter import SecureGatewayAdapter
@@ -1768,4 +1778,190 @@ async def test_gateway_adapter_serves_p2p_ice_servers(tmp_path) -> None:
             "credential": "pass1",
         }
     ]
+
+
+class _GuestAuthentication(_Authentication):
+    """Authenticates a device that belongs to a principal other than the owner."""
+
+    def authenticate_session(self, token):
+        session = super().authenticate_session(token)
+        return SimpleNamespace(
+            session_id=session.session_id,
+            expires_at=session.expires_at,
+            device=SimpleNamespace(
+                device_id="dev-guest", principal_id="personal:guest"
+            ),
+        )
+
+
+class _CodingProvider:
+    """External provider stub: a prompt starts a run, an interrupt ends it."""
+
+    provider_id = "fake"
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.running = False
+
+    def _summary(self, external_session_id: str = "ext-a") -> CodingSessionSummary:
+        return CodingSessionSummary(
+            provider="fake",
+            external_session_id=external_session_id,
+            title="Fix search",
+            directory="/work/project",
+            state="running" if self.running else "idle",
+            updated_at=3,
+            read_only=self.running,
+            capabilities=("read", "interrupt") if self.running else ("read", "continue"),
+        )
+
+    async def list_sessions(self, **kwargs):
+        self.calls.append(("list", kwargs))
+        return CodingSessionPage(sessions=(self._summary(),))
+
+    async def get_session(self, external_session_id):
+        self.calls.append(("get", external_session_id))
+        return CodingSessionDetail(session=self._summary(external_session_id))
+
+    async def continue_session(self, external_session_id, text):
+        self.calls.append(("continue", external_session_id, text))
+        self.running = True
+        return CodingSessionTurnReceipt(external_session_id, "turn-a", True)
+
+    async def interrupt_session(self, external_session_id, external_turn_id=""):
+        self.calls.append(("interrupt", external_session_id, external_turn_id))
+        self.running = False
+        return True
+
+    async def close(self) -> None:
+        return None
+
+
+_CODING_BASE = "/v1/coding/sessions"
+_CODING_HEADERS = {"Authorization": "Bearer v1.gws-a." + "t" * 43}
+
+
+def _coding_session_adapter(tmp_path, authentication):
+    provider = _CodingProvider()
+    service = CodingSessionService(
+        {"fake": provider},
+        CodingSessionBindingRepository(tmp_path / "coding-bindings.db"),
+    )
+    adapter = SecureGatewayAdapter(
+        _config(tmp_path),
+        authentication=authentication,
+        core=_Core(),
+        coding_sessions=service,
+    )
+    return adapter, provider
+
+
+@pytest.mark.asyncio
+async def test_coding_session_routes_reject_non_owner_principals(tmp_path) -> None:
+    adapter, provider = _coding_session_adapter(tmp_path, _GuestAuthentication())
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = _CODING_HEADERS
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway.local"
+    ) as http:
+        responses = [
+            await http.get(_CODING_BASE, headers=headers),
+            await http.get(f"{_CODING_BASE}/fake/ext-a", headers=headers),
+            await http.post(
+                f"{_CODING_BASE}/fake/ext-a/attach",
+                headers=headers,
+                json={"session_handle": "knoa-a"},
+            ),
+            await http.post(
+                f"{_CODING_BASE}/fake/ext-a/prompt",
+                headers=headers,
+                json={"text": "continue"},
+            ),
+            await http.post(
+                f"{_CODING_BASE}/fake/ext-a/interrupt", headers=headers, json={}
+            ),
+        ]
+
+    assert [response.status_code for response in responses] == [403] * 5
+    assert {response.json()["error"] for response in responses} == {"forbidden"}
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_coding_session_routes_serve_the_owner_principal(tmp_path) -> None:
+    adapter, provider = _coding_session_adapter(tmp_path, _Authentication())
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = _CODING_HEADERS
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway.local"
+    ) as http:
+        listed = await http.get(_CODING_BASE, headers=headers)
+        detail = await http.get(f"{_CODING_BASE}/fake/ext-a", headers=headers)
+        attached = await http.post(
+            f"{_CODING_BASE}/fake/ext-a/attach",
+            headers=headers,
+            json={"session_handle": "knoa-a"},
+        )
+        prompted = await http.post(
+            f"{_CODING_BASE}/fake/ext-a/prompt",
+            headers=headers,
+            json={"text": "continue"},
+        )
+        interrupted = await http.post(
+            f"{_CODING_BASE}/fake/ext-a/interrupt", headers=headers, json={}
+        )
+
+    assert listed.status_code == 200
+    assert listed.json()["sessions"][0]["external_session_id"] == "ext-a"
+    assert detail.status_code == 200
+    assert attached.status_code == 201
+    assert attached.json()["binding"]["session_handle"] == "knoa-a"
+    assert prompted.status_code == 202
+    assert prompted.json()["accepted"] is True
+    assert interrupted.status_code == 200
+    assert interrupted.json() == {"interrupted": True}
+    assert ("continue", "ext-a", "continue") in provider.calls
+
+
+@pytest.mark.asyncio
+async def test_coding_session_interrupt_of_an_idle_session_is_a_conflict(tmp_path) -> None:
+    adapter, provider = _coding_session_adapter(tmp_path, _Authentication())
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = _CODING_HEADERS
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway.local"
+    ) as http:
+        await http.post(
+            f"{_CODING_BASE}/fake/ext-a/attach",
+            headers=headers,
+            json={"session_handle": "knoa-a"},
+        )
+        interrupted = await http.post(
+            f"{_CODING_BASE}/fake/ext-a/interrupt", headers=headers, json={}
+        )
+
+    assert interrupted.status_code == 409
+    assert interrupted.json() == {"error": "conflict"}
+    assert not any(call[0] == "interrupt" for call in provider.calls)
+
+
+@pytest.mark.asyncio
+async def test_coding_session_attach_conflict_is_reported_as_409(tmp_path) -> None:
+    adapter, _provider = _coding_session_adapter(tmp_path, _Authentication())
+    transport = httpx.ASGITransport(app=adapter.app)
+    headers = _CODING_HEADERS
+    attach = f"{_CODING_BASE}/fake/ext-a/attach"
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://gateway.local"
+    ) as http:
+        first = await http.post(attach, headers=headers, json={"session_handle": "knoa-a"})
+        second = await http.post(attach, headers=headers, json={"session_handle": "knoa-b"})
+        retry = await http.post(attach, headers=headers, json={"session_handle": "knoa-a"})
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json() == {"error": "conflict"}
+    # Re-attaching from the conversation that already owns the session stays idempotent.
+    assert retry.status_code == 201
+    assert retry.json()["binding"]["binding_id"] == first.json()["binding"]["binding_id"]
 
