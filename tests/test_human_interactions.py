@@ -178,7 +178,7 @@ async def test_device_location_interaction_accepts_an_automatic_app_response(
         "interaction-location",
         {
             "status": "available",
-            "location": "上海市浦东新区",
+            "location": "上海市测试区",
             "precision": "block",
         },
         resolved_by="mobile-app",
@@ -188,7 +188,7 @@ async def test_device_location_interaction_accepts_an_automatic_app_response(
     assert interaction.kind == "device_location"
     assert await handle.wait() == {
         "status": "available",
-        "location": "上海市浦东新区",
+        "location": "上海市测试区",
         "precision": "block",
     }
 

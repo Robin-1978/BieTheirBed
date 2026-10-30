@@ -113,7 +113,7 @@ async def test_coordinate_request_does_not_reverse_geocode(tmp_path) -> None:
         },
         value={
             "status": "available",
-            "location": "(31.2136,121.6469 ±30m)",
+            "location": "(10.1232,20.5674 ±30m)",
             "precision": "precise",
         },
         reverse=lambda _text: pytest.fail("coordinates must not be reverse-geocoded"),
@@ -121,7 +121,7 @@ async def test_coordinate_request_does_not_reverse_geocode(tmp_path) -> None:
 
     assert result.output == {
         "available": True,
-        "location": "(31.2136,121.6469 ±30m)",
+        "location": "(10.1232,20.5674 ±30m)",
         "precision": "precise",
     }
 
@@ -137,7 +137,7 @@ async def test_device_location_rejects_precision_above_the_request(tmp_path) -> 
         },
         value={
             "status": "available",
-            "location": "(31.2136,121.6469 ±30m)",
+            "location": "(10.1232,20.5674 ±30m)",
             "precision": "precise",
         },
         reverse=lambda _text: pytest.fail("over-precise data must be rejected"),

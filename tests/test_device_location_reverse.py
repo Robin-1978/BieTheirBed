@@ -26,10 +26,10 @@ def test_coordinate_only_fix_gets_neighbourhood(monkeypatch) -> None:
     monkeypatch.setattr(
         reverse_module,
         "_fetch_photon",
-        lambda lat, lon: {"name": "恒生万鹂广场", "district": "唐镇", "city": "浦东新区", "state": "上海市"},
+        lambda lat, lon: {"name": "测试广场", "district": "测试镇", "city": "测试区", "state": "测试市"},
     )
-    assert enrich_device_location("未知位置 (31.2136,121.6469 ±30m)") == (
-        "未知位置 (31.2136,121.6469 ±30m) (附近：恒生万鹂广场唐镇浦东新区上海市)"
+    assert enrich_device_location("未知位置 (10.1232,20.5674 ±30m)") == (
+        "未知位置 (10.1232,20.5674 ±30m) (附近：测试广场测试镇测试区测试市)"
     )
 
 
@@ -38,7 +38,7 @@ def test_lookup_failure_returns_input_unchanged(monkeypatch) -> None:
         raise TimeoutError("slow network")
 
     monkeypatch.setattr(reverse_module, "_fetch_photon", _boom)
-    text = "未知位置 (31.2136,121.6469 ±30m)"
+    text = "未知位置 (10.1232,20.5674 ±30m)"
     assert enrich_device_location(text) == text
 
 
@@ -47,11 +47,11 @@ def test_second_call_serves_from_cache(monkeypatch) -> None:
 
     def _fetch(lat: float, lon: float) -> dict:
         calls.append((lat, lon))
-        return {"name": "恒生万鹂广场"}
+        return {"name": "测试广场"}
 
     monkeypatch.setattr(reverse_module, "_fetch_photon", _fetch)
-    enrich_device_location("未知位置 (31.2136,121.6469 ±30m)")
-    enrich_device_location("未知位置 (31.2137,121.6468 ±30m)")
+    enrich_device_location("未知位置 (10.1232,20.5674 ±30m)")
+    enrich_device_location("未知位置 (10.1233,20.5673 ±30m)")
     assert len(calls) == 1
 
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const location = vi.hoisted(() => ({
  preference: { enabled: true, precision: "block" as const },
- result: { text: "上海市浦东新区", precision: "block" as const },
+ result: { text: "上海市测试区", precision: "block" as const },
 }));
 
 vi.mock("./deviceLocation", () => ({
@@ -37,7 +37,7 @@ function request(overrides: Partial<HumanInteraction["display"]> = {}): HumanInt
 beforeEach(() => {
  vi.clearAllMocks();
  location.preference = { enabled: true, precision: "block" };
- location.result = { text: "上海市浦东新区", precision: "block" };
+ location.result = { text: "上海市测试区", precision: "block" };
 });
 
 describe("device location interaction", () => {
@@ -46,7 +46,7 @@ describe("device location interaction", () => {
 
  await expect(answerDeviceLocationInteraction(request())).resolves.toEqual({
  status: "available",
- location: "上海市浦东新区",
+ location: "上海市测试区",
  precision: "block",
  });
  expect(vi.mocked(device.resolveDeviceLocation)).toHaveBeenCalledWith({

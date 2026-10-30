@@ -299,7 +299,7 @@ def test_offline_map_queries_and_routes(tmp_path: Path) -> None:
         31.201,
         121.401,
         radius_m=500,
-        query="柚米寓 唐镇店",
+        query="不存在的商户",
     )
     assert missing_nearby["results"] == []
 
@@ -395,7 +395,7 @@ def test_spatial_queries_render_valid_managed_pngs(tmp_path: Path) -> None:
         31.201,
         121.401,
         radius_m=500,
-        query="柚米寓 唐镇店",
+        query="不存在的商户",
         include_map_image=True,
     )
     assert missing["results"] == []
