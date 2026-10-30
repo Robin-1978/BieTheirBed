@@ -59,7 +59,8 @@ def _tool_definitions() -> list[types.Tool]:
             description=(
                 "Search Chinese places, addresses, roads, brands and POIs in the local OSM "
                 "dataset. Use region to disambiguate names and coordinates to bias ranking. "
-                "Returns a numbered map image by default."
+                "Returns a numbered map image by default. "
+                "Example: show Zhujiajiao town on the map -> search_places with query=\"Zhujiajiao\"."
             ),
             input_schema=_schema(
                 {
@@ -111,10 +112,12 @@ def _tool_definitions() -> list[types.Tool]:
             description=(
                 "Find places within a true circular radius. Optional categories accept an "
                 "OSM value such as cafe or a qualified value such as amenity:cafe. Use "
-                "for nearby/周边/附近/哪里买 requests. For fruit try shop:greengrocer, "
+                "for nearby requests such as coffee shops nearby. For fruit try shop:greengrocer, "
                 "shop:supermarket and shop:convenience together. Returns a numbered radius "
-                "map image by default. Do not use this tool for 导航/路线 requests; call "
-                "map.route directly for those requests."
+                "map image by default. Do not use this tool for navigation or routing requests; call "
+                "map.route directly for those requests. "
+                "Example: nearby coffee shops -> nearby_search with query=\"coffee\"; "
+                "navigating to Zhujiajiao town -> map.route, not this tool."
             ),
             input_schema=_schema(
                 {
@@ -170,15 +173,17 @@ def _tool_definitions() -> list[types.Tool]:
             title="Plan an offline route",
             description=(
                 "Plan a walking, cycling or driving route on the local OSM road graph. "
-                "Use whenever the user asks 怎么走、路线、导航、步行、骑车 or 开车. "
+                "Use whenever the user asks for directions, routes, navigation, walking, "
+                "cycling or driving. "
                 "Call this tool directly for navigation instead of map.nearby_search. "
                 "origin and destination accept place text or 'latitude,longitude'. Present "
                 "the compact summary, numbered turn steps and navigation.url as a clickable "
-                "打开高德地图导航 link. route_preview is a compact line for UI rendering; "
+                "Amap navigation link. route_preview is a compact line for UI rendering; "
                 "request include_geometry only when exact route coordinates are required. "
                 "Routes over 300 km are rejected; report that limit instead of inventing "
                 "roads, travel time, tolls or fuel cost. Returns a route map image with "
-                "start, destination and turn markers by default."
+                "start, destination and turn markers by default. "
+                "Example: navigate to Zhujiajiao town -> map.route with destination=\"Zhujiajiao\"."
             ),
             input_schema=_schema(
                 {
@@ -281,8 +286,8 @@ class OSMMapMCPApplication:
             instructions=(
                 "Offline China map backed by OpenStreetMap. Coordinates use explicit "
                 "latitude/longitude fields; route text coordinates use latitude,longitude. "
-                "Use map.route for 怎么走/路线/导航 requests and map.nearby_search for "
-                "周边/附近 requests. Spatial tools attach an offline map image by default; "
+                "Use map.route for directions, routes and navigation requests and "
+                "map.nearby_search for nearby points-of-interest requests. Spatial tools attach an offline map image by default; "
                 "match numbered markers to the structured result order or route steps. "
                 "Inspect map://dataset when source age or supported capabilities matter."
             ),

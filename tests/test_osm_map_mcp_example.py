@@ -4,6 +4,7 @@ import hashlib
 import json
 from argparse import Namespace
 from pathlib import Path
+import re
 import sqlite3
 import struct
 import sys
@@ -901,12 +902,25 @@ def test_location_resolution_prefers_real_city_over_local_name(tmp_path: Path) -
 
 def test_map_tool_guidance_and_fruit_taxonomy() -> None:
     tools = {tool.name: tool for tool in _tool_definitions()}
-    assert "怎么走" in tools["map.route"].description
-    assert "附近" in tools["map.nearby_search"].description
+    assert "directions" in tools["map.route"].description
+    assert "nearby" in tools["map.nearby_search"].description
     assert "instead of map.nearby_search" in tools["map.route"].description
     assert (
-        "Do not use this tool for 导航/路线" in tools["map.nearby_search"].description
+        "Do not use this tool for navigation or routing requests"
+        in tools["map.nearby_search"].description
     )
+    assert (
+        "navigating to Zhujiajiao town -> map.route, not this tool"
+        in tools["map.nearby_search"].description
+    )
+    assert (
+        "navigate to Zhujiajiao town -> map.route" in tools["map.route"].description
+    )
+    assert (
+        "show Zhujiajiao town on the map -> search_places" in tools["map.search_places"].description
+    )
+    for tool in tools.values():
+        assert not re.search(r"[\u4e00-\u9fff]", tool.description), tool.name
     assert tools["map.route"].input_schema["properties"]["include_geometry"] == {
         "type": "boolean",
         "default": False,
