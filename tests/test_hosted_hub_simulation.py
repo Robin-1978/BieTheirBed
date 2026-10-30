@@ -8,7 +8,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from knoa_platform.hub.hosted import HostedHubApplication, create_hosted_hub_app
+from knoa_platform.hub.hosted import (
+    HostedControlRepository,
+    HostedHubApplication,
+    PERSISTENT_ACCOUNT_SESSION_EXPIRES_AT,
+    create_hosted_hub_app,
+)
 from knoa_platform.node_identity import NodeIdentityStore
 from knoa_platform.relay_protocol import canonical_json
 
@@ -261,6 +266,47 @@ async def test_hosted_single_node_creates_isolated_personal_workspaces(
         assert account.json()["workspaces"][0]["kind"] == "personal"
         assert health.json()["account_count"] == 2
         assert health.json()["workspace_count"] == 2
+
+
+def test_persistent_account_sessions_extend_current_login_and_remain_revocable(
+    tmp_path: Path,
+) -> None:
+    now = [1_000.0]
+    root = tmp_path / "control.db"
+    expiring = HostedControlRepository(
+        root,
+        hub_id="hub_hosted",
+        clock=lambda: now[0],
+        account_session_ttl_seconds=60,
+    )
+    grant = expiring.create_account_enrollment_grant()
+    account = expiring.create_account(
+        grant_id=grant.grant_id,
+        grant_secret=grant.secret,
+        login_identity="owner@example.com",
+        display_name="Owner",
+        password=PASSWORD,
+    )
+    assert account["expires_at"] == 1_060.0
+
+    now[0] = 1_010.0
+    persistent = HostedControlRepository(
+        root,
+        hub_id="hub_hosted",
+        clock=lambda: now[0],
+        account_session_ttl_seconds=0,
+    )
+    authenticated = persistent.authenticate(account["access_token"])
+    assert authenticated["expires_at"] == PERSISTENT_ACCOUNT_SESSION_EXPIRES_AT
+
+    now[0] = 10_000_000_000.0
+    assert (
+        persistent.authenticate(account["access_token"])["account_id"]
+        == (account["account_id"])
+    )
+    persistent.revoke_session(account["access_token"])
+    with pytest.raises(PermissionError):
+        persistent.authenticate(account["access_token"])
 
 
 @pytest.mark.asyncio

@@ -151,9 +151,15 @@ if [ "$install_hub" -eq 1 ]; then
     install -d -m 700 "$HUB_ROOT"
     bootstrap_token=""
     release_publish_token=""
+ account_session_ttl_seconds="2592000"
     if [ -f "$HUB_ENV" ]; then
         bootstrap_token="$(sed -n 's/^KNOA_HUB_BOOTSTRAP_TOKEN=//p' "$HUB_ENV" | head -n 1)"
         release_publish_token="$(sed -n 's/^KNOA_HUB_RELEASE_PUBLISH_TOKEN=//p' "$HUB_ENV" | head -n 1)"
+ existing_account_session_ttl="$(sed -n 's/^KNOA_HUB_ACCOUNT_SESSION_TTL_SECONDS=//p' "$HUB_ENV" | head -n 1)"
+ if printf '%s' "$existing_account_session_ttl" | grep -Eq '^(0|[1-9][0-9]*)$' &&
+  { [ "$existing_account_session_ttl" -eq 0 ] || [ "$existing_account_session_ttl" -ge 60 ]; }; then
+  account_session_ttl_seconds="$existing_account_session_ttl"
+ fi
     fi
     if [ "${#bootstrap_token}" -lt 32 ]; then
         bootstrap_token="$("$VENV_ROOT/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
@@ -161,8 +167,8 @@ if [ "$install_hub" -eq 1 ]; then
     if [ "${#release_publish_token}" -lt 32 ]; then
         release_publish_token="$("$VENV_ROOT/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
     fi
-    printf 'KNOA_HUB_BOOTSTRAP_TOKEN=%s\nKNOA_HUB_RELEASE_PUBLISH_TOKEN=%s\nKNOA_HUB_PUBLIC_URL=%s\nKNOA_HUB_ADMIN_ENDPOINT=http://127.0.0.1:9529\n' \
-        "$bootstrap_token" "$release_publish_token" "$HUB_PUBLIC_URL" > "$HUB_ENV"
+ printf 'KNOA_HUB_BOOTSTRAP_TOKEN=%s\nKNOA_HUB_RELEASE_PUBLISH_TOKEN=%s\nKNOA_HUB_PUBLIC_URL=%s\nKNOA_HUB_ADMIN_ENDPOINT=http://127.0.0.1:9529\nKNOA_HUB_ACCOUNT_SESSION_TTL_SECONDS=%s\n' \
+ "$bootstrap_token" "$release_publish_token" "$HUB_PUBLIC_URL" "$account_session_ttl_seconds" > "$HUB_ENV"
     chmod 600 "$HUB_ENV"
     bootstrap_token=""
     release_publish_token=""

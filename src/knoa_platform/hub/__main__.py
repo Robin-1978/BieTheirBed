@@ -11,7 +11,10 @@ from pathlib import Path
 import uvicorn
 
 from knoa_platform.hub.app import create_hub_app
-from knoa_platform.hub.hosted import HostedHubApplication
+from knoa_platform.hub.hosted import (
+    DEFAULT_ACCOUNT_SESSION_TTL_SECONDS,
+    HostedHubApplication,
+)
 from knoa_platform.network_tls import is_loopback_host
 
 
@@ -79,12 +82,32 @@ def main() -> int:
         choices=("self_hosted", "hosted_single_node"),
         default=os.environ.get("KNOA_HUB_DEPLOYMENT_MODE", "self_hosted"),
     )
+    parser.add_argument(
+        "--account-session-ttl-seconds",
+        type=int,
+        default=int(
+            os.environ.get(
+                "KNOA_HUB_ACCOUNT_SESSION_TTL_SECONDS",
+                str(DEFAULT_ACCOUNT_SESSION_TTL_SECONDS),
+            )
+        ),
+        help=(
+            "Hosted account session lifetime; 0 keeps sessions until explicitly revoked"
+        ),
+    )
     args = parser.parse_args()
     if not is_loopback_host(args.console_host):
         parser.error("Hub Console must bind to a loopback address")
     if args.console_port == args.port and args.console_host == args.host:
         parser.error("Hub public and Console listeners must be distinct")
     if args.deployment_mode == "hosted_single_node":
+        if (
+            args.account_session_ttl_seconds != 0
+            and args.account_session_ttl_seconds < 60
+        ):
+            parser.error(
+                "account session TTL must be 0 (persistent) or at least 60 seconds"
+            )
         token = os.environ.get("KNOA_HUB_BOOTSTRAP_TOKEN", "")
         if len(token) < 32:
             parser.error("KNOA_HUB_BOOTSTRAP_TOKEN must contain at least 32 characters")
@@ -94,6 +117,7 @@ def main() -> int:
             bootstrap_token=token,
             release_publish_token=os.environ.get("KNOA_HUB_RELEASE_PUBLISH_TOKEN", ""),
             public_url=args.public_url,
+            account_session_ttl_seconds=args.account_session_ttl_seconds,
         )
         asyncio.run(
             _serve_with_console(

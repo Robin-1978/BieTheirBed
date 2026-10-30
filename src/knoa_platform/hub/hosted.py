@@ -37,6 +37,12 @@ from knoa_platform.mobile_releases import (
 from knoa_platform.sqlite_connection import connect_sqlite, initialize_wal
 
 DEPLOYMENT_MODE = "hosted_single_node"
+DEFAULT_ACCOUNT_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+# SQLite keeps a concrete expiry for indexed authentication queries. This
+# sentinel represents a persistent session while remaining valid JSON for the
+# mobile client. Persistent sessions are still revoked by sign-out, password
+# changes, password recovery, or account disablement.
+PERSISTENT_ACCOUNT_SESSION_EXPIRES_AT = 253402300799.0
 _PASSWORD_N = 2**14
 _PASSWORD_R = 8
 _PASSWORD_P = 1
@@ -159,10 +165,22 @@ def _password_hash(password: str, salt: bytes) -> bytes:
 class HostedControlRepository:
     """Account, session, Workspace and membership authority for one Hosted Hub."""
 
-    def __init__(self, path: str | Path, *, hub_id: str, clock=time.time) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        hub_id: str,
+        clock=time.time,
+        account_session_ttl_seconds: int = DEFAULT_ACCOUNT_SESSION_TTL_SECONDS,
+    ) -> None:
+        if account_session_ttl_seconds != 0 and account_session_ttl_seconds < 60:
+            raise ValueError(
+                "Hosted account session TTL must be 0 (persistent) or at least 60 seconds"
+            )
         self.path = Path(path).expanduser().resolve()
         self.hub_id = hub_id
         self._clock = clock
+        self.account_session_ttl_seconds = account_session_ttl_seconds
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         initialize_wal(self.path)
         with self._connect() as db:
@@ -235,6 +253,15 @@ class HostedControlRepository:
                     ON hosted_password_reset_grants(account_id, expires_at);
                 """
             )
+        if self.account_session_ttl_seconds == 0:
+            # Preserve already authenticated devices when an installation switches
+            # from expiring to persistent sessions. Expired sessions stay expired.
+            with self._connect() as db:
+                db.execute(
+                    """UPDATE hosted_account_sessions SET expires_at=?
+                    WHERE revoked_at IS NULL AND expires_at>?""",
+                    (PERSISTENT_ACCOUNT_SESSION_EXPIRES_AT, self._clock()),
+                )
 
     def _connect(self) -> sqlite3.Connection:
         return connect_sqlite(self.path, foreign_keys=True)
@@ -273,7 +300,7 @@ class HostedControlRepository:
         login_identity: str,
         display_name: str,
         password: str,
-        session_ttl_seconds: int = 30 * 24 * 60 * 60,
+        session_ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
         login = _normalize_login(login_identity)
         name = _display_name(display_name)
@@ -347,7 +374,7 @@ class HostedControlRepository:
         login_identity: str,
         password: str,
         *,
-        session_ttl_seconds: int = 30 * 24 * 60 * 60,
+        session_ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
         login = _normalize_login(login_identity)
         with self._connect() as db:
@@ -486,7 +513,7 @@ class HostedControlRepository:
         grant_id: str,
         grant_secret: str,
         new_password: str,
-        session_ttl_seconds: int = 30 * 24 * 60 * 60,
+        session_ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
         if len(new_password) < 12:
             raise ValueError("Hosted account password is too short")
@@ -803,15 +830,26 @@ class HostedControlRepository:
             "workspace_count": int(workspaces["count"]),
         }
 
-    @staticmethod
     def _issue_session(
+        self,
         db: sqlite3.Connection,
         account_id: str,
-        ttl_seconds: int,
+        ttl_seconds: int | None,
         now: float,
     ) -> dict[str, Any]:
+        resolved_ttl = (
+            self.account_session_ttl_seconds if ttl_seconds is None else ttl_seconds
+        )
+        if resolved_ttl != 0 and resolved_ttl < 60:
+            raise ValueError(
+                "Hosted account session TTL must be 0 (persistent) or at least 60 seconds"
+            )
         access_token = f"khs_{secrets.token_urlsafe(36)}"
-        expires_at = now + ttl_seconds
+        expires_at = (
+            PERSISTENT_ACCOUNT_SESSION_EXPIRES_AT
+            if resolved_ttl == 0
+            else now + resolved_ttl
+        )
         db.execute(
             "INSERT INTO hosted_account_sessions VALUES (?, ?, ?, ?, ?, NULL)",
             (
@@ -912,6 +950,7 @@ class HostedHubApplication:
         bootstrap_token: str,
         release_publish_token: str = "",
         public_url: str = "http://127.0.0.1:9529",
+        account_session_ttl_seconds: int = DEFAULT_ACCOUNT_SESSION_TTL_SECONDS,
     ) -> None:
         if len(bootstrap_token) < 32:
             raise ValueError(
@@ -939,6 +978,7 @@ class HostedHubApplication:
         self.control = HostedControlRepository(
             self.root / "control.db",
             hub_id=hub_id,
+            account_session_ttl_seconds=account_session_ttl_seconds,
         )
         self.mobile_releases = AndroidReleaseRepository(
             self.root / "mobile-releases" / "android"
@@ -980,7 +1020,9 @@ class HostedHubApplication:
                     self.download_latest_android_release,
                     methods=["GET"],
                 ),
-                Route("/hooks/v1/{route_id:str}", self.webhook_ingress, methods=["POST"]),
+                Route(
+                    "/hooks/v1/{route_id:str}", self.webhook_ingress, methods=["POST"]
+                ),
                 Route(
                     "/v1/hosted/account/password",
                     self.change_password,
@@ -1366,9 +1408,7 @@ class HostedHubApplication:
         except (LookupError, OSError):
             return JSONResponse({"error": "not_found"}, status_code=404)
         cache_control = (
-            "public, max-age=31536000, immutable"
-            if immutable
-            else "no-store"
+            "public, max-age=31536000, immutable" if immutable else "no-store"
         )
         headers = {
             "Cache-Control": cache_control,
@@ -1639,20 +1679,24 @@ def create_hosted_hub_app(
     hub_id: str,
     bootstrap_token: str,
     release_publish_token: str = "",
+    account_session_ttl_seconds: int = DEFAULT_ACCOUNT_SESSION_TTL_SECONDS,
 ) -> Starlette:
     return HostedHubApplication(
         root,
         hub_id=hub_id,
         bootstrap_token=bootstrap_token,
         release_publish_token=release_publish_token,
+        account_session_ttl_seconds=account_session_ttl_seconds,
     ).app
 
 
 __all__ = [
     "AccountEnrollmentGrant",
+    "DEFAULT_ACCOUNT_SESSION_TTL_SECONDS",
     "HostedControlRepository",
     "HostedHubApplication",
     "HostedTenantDispatcher",
     "PasswordResetGrant",
+    "PERSISTENT_ACCOUNT_SESSION_EXPIRES_AT",
     "create_hosted_hub_app",
 ]

@@ -28,6 +28,12 @@ is created with every Account. Shared Workspaces support owner-managed members;
 members may read and use Workspace resources, while owner/admin authorization is
 required for resource mutation and Node enrollment.
 
+Account sessions expire after 30 days by default. Set
+`KNOA_HUB_ACCOUNT_SESSION_TTL_SECONDS=0` for persistent App login. Persistent
+sessions remain revocable through sign-out, password change/recovery, and
+account disablement. Switching an installation to persistent mode extends only
+currently valid sessions; it does not revive expired or revoked sessions.
+
 `control.db`, `hub-signing.key`, `mobile-releases/android` and every
 `tenants/*/hub.db` form one recovery unit. Never restore only one tenant
 database, APK tree, or signing key.
