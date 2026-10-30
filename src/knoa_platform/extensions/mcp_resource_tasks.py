@@ -441,8 +441,11 @@ class MCPResourceTaskBridge:
         # getattr keeps duck-typed providers working (they are assumed
         # running, as before).
         if not getattr(provider, "is_running", True):
-            last_failure = self._start_failures.get(server_id, 0.0)
-            if time.monotonic() - last_failure < 600.0:
+            # No record means "never failed". Do not default to 0.0: monotonic()
+            # counts seconds since boot, so that would read as a failure a
+            # moment ago for the first 10 minutes after the machine boots.
+            last_failure = self._start_failures.get(server_id)
+            if last_failure is not None and time.monotonic() - last_failure < 600.0:
                 return
             try:
                 await provider.start()

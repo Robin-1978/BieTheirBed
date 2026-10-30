@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from knoa_platform.agent_runtime.contracts import RuntimeScope
+from knoa_platform.extensions import mcp_resource_tasks
 from knoa_platform.extensions.mcp import (
     MCPResourceCapabilities,
     MCPResourceContent,
@@ -535,3 +536,68 @@ async def test_failed_start_backs_off_and_does_not_raise() -> None:
 
     assert provider.start_calls == 1
     assert bridge.catalog() == ()
+
+
+class _BootClock:
+    """Stands in for the ``time`` module inside ``mcp_resource_tasks``.
+
+    ``time.monotonic()`` counts seconds since boot on Linux, so a machine that
+    started a moment ago (a fresh CI runner, or a node right after a reboot)
+    reads a small number.
+    """
+
+    def __init__(self, seconds_since_boot: float) -> None:
+        self.now = seconds_since_boot
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def fresh_boot(monkeypatch: pytest.MonkeyPatch) -> _BootClock:
+    clock = _BootClock(100.0)
+    monkeypatch.setattr(mcp_resource_tasks, "time", clock)
+    return clock
+
+
+@pytest.mark.asyncio
+async def test_reconcile_starts_provider_right_after_boot(fresh_boot: _BootClock) -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _LazyProvider((_resource(event),))
+    provider.snapshots[event] = _snapshot(event, "hello")
+    bridge = MCPResourceTaskBridge((provider,), _Tasks(()), _Sessions(), _Triggers())
+
+    await bridge.reconcile_once()
+
+    assert provider.start_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_start_backs_off_right_after_boot(fresh_boot: _BootClock) -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _LazyProvider((_resource(event),), fail_start=True)
+    bridge = MCPResourceTaskBridge((provider,), _Tasks(()), _Sessions(), _Triggers())
+
+    await bridge.reconcile_once()
+    fresh_boot.now += 30.0
+    await bridge.reconcile_once()
+
+    assert provider.start_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_start_is_retried_once_the_back_off_has_passed(
+    fresh_boot: _BootClock,
+) -> None:
+    event = "jira://assigned-to-me/events/assignment-1"
+    provider = _LazyProvider((_resource(event),), fail_start=True)
+    bridge = MCPResourceTaskBridge((provider,), _Tasks(()), _Sessions(), _Triggers())
+
+    await bridge.reconcile_once()
+    fresh_boot.now += 599.0
+    await bridge.reconcile_once()
+    assert provider.start_calls == 1
+
+    fresh_boot.now += 2.0
+    await bridge.reconcile_once()
+    assert provider.start_calls == 2
