@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -62,6 +63,28 @@ class AppServerClient(Protocol):
 
 ClientFactory = Callable[[Mapping[str, str]], AppServerClient]
 
+_CODEX_HOME_CONFIGURATION_FILES = ("config.toml", "auth.json", "AGENTS.md")
+
+
+def _sync_codex_home_configuration(source: Path, destination: Path) -> None:
+    source = source.expanduser().resolve()
+    destination = destination.expanduser().resolve()
+    if source == destination or not source.is_dir():
+        return
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination.chmod(0o700)
+    for name in _CODEX_HOME_CONFIGURATION_FILES:
+        source_file = source / name
+        if not source_file.is_file():
+            continue
+        temporary = destination / f".{name}.{uuid.uuid4().hex}.tmp"
+        try:
+            shutil.copyfile(source_file, temporary)
+            temporary.chmod(0o600)
+            temporary.replace(destination / name)
+        finally:
+            temporary.unlink(missing_ok=True)
+
 
 @dataclass
 class _ActiveTurn:
@@ -89,6 +112,7 @@ class CodexAgentRuntime(AgentRuntime):
         command: Sequence[str] = ("codex", "app-server"),
         backend: str = "app_server",
         home: str | Path | None = None,
+        bootstrap_home: str | Path | None = None,
         cwd: str | Path,
         model: str = "",
         approval_policy: str = "never",
@@ -119,6 +143,8 @@ class CodexAgentRuntime(AgentRuntime):
         if self._home is not None:
             self._home.mkdir(parents=True, exist_ok=True, mode=0o700)
             self._home.chmod(0o700)
+            if bootstrap_home not in (None, ""):
+                _sync_codex_home_configuration(Path(bootstrap_home), self._home)
         self._cwd = str(Path(cwd).expanduser().resolve())
         self._model = model.strip()
         self._approval_policy = approval_policy

@@ -588,7 +588,9 @@ def _build_agent_runtime_set(
         )
         workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
         runtime_home = (
-            paths.resolve(agent.home, default_parent=paths.root) if agent.home else None
+            paths.resolve(agent.home, default_parent=paths.root)
+            if agent.home
+            else state_root / "home"
         )
         runtimes[agent_id] = CodexAgentRuntime(
             CodexSessionRepository(state_root / "sessions.db"),
@@ -598,6 +600,7 @@ def _build_agent_runtime_set(
             command=agent.command,
             backend=agent.backend,
             home=runtime_home,
+            bootstrap_home=Path.home() / ".codex",
             cwd=workspace,
             model=agent.model_binding.hint,
             approval_policy=agent.approval_policy,

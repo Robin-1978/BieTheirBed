@@ -101,6 +101,35 @@ def test_codex_runtime_reuses_normal_codex_home_when_home_is_not_configured(
     assert client._env == {"KNOA_CAPABILITY_GRANT": "grant-token"}
 
 
+def test_codex_runtime_syncs_user_configuration_into_isolated_home(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "user-codex-home"
+    source.mkdir()
+    (source / "config.toml").write_text('model = "gpt-test"\n')
+    (source / "auth.json").write_text('{"auth_mode":"apikey"}')
+    (source / "AGENTS.md").write_text("Use the user profile.\n")
+    destination = tmp_path / "isolated-codex-home"
+
+    runtime = CodexAgentRuntime(
+        CodexSessionRepository(tmp_path / "sessions.db"),
+        instructions="Test coder profile",
+        home=destination,
+        bootstrap_home=source,
+        cwd=tmp_path,
+    )
+
+    client = runtime._new_stdio_client({})
+
+    assert client._env["CODEX_HOME"] == str(destination)
+    assert (destination / "config.toml").read_text() == 'model = "gpt-test"\n'
+    assert (destination / "auth.json").read_text() == '{"auth_mode":"apikey"}'
+    assert (destination / "AGENTS.md").read_text() == "Use the user profile.\n"
+    assert destination.stat().st_mode & 0o777 == 0o700
+    for name in ("config.toml", "auth.json", "AGENTS.md"):
+        assert (destination / name).stat().st_mode & 0o777 == 0o600
+
+
 def session_repository(tmp_path: Path) -> CodexSessionRepository:
     return CodexSessionRepository(
         tmp_path / "sessions.db",
@@ -133,9 +162,7 @@ def test_codex_runtime_enforces_resolved_native_capability_set(
         "networkAccess": False,
     }
     with pytest.raises(RuntimeError, match="cannot enforce"):
-        runtime._sandbox_policy(
-            {"native_capabilities": "workspace_read"}
-        )
+        runtime._sandbox_policy({"native_capabilities": "workspace_read"})
     with pytest.raises(RuntimeError, match="requires explicit"):
         runtime._sandbox_policy({"native_capabilities": ""})
 
@@ -192,7 +219,9 @@ async def test_codex_runtime_maps_thread_turn_and_stream_events(tmp_path: Path) 
     ]
     assert events[-1].final_output == "done"
     assert client.env == {"KNOA_CAPABILITY_GRANT": "grant-token"}
-    started = next(params for method, params in client.requests if method == "thread/start")
+    started = next(
+        params for method, params in client.requests if method == "thread/start"
+    )
     assert started["config"]["mcp_servers"]["knoa_platform"]["required"] is True
     assert started["config"]["apps"]["_default"]["enabled"] is False
     assert started["developerInstructions"] == "Test coder profile"
@@ -232,7 +261,9 @@ async def test_codex_runtime_sends_collaboration_mode_only_for_pinned_model(
     )
 
     requests = factory.clients[-1].requests
-    thread_started = next(params for method, params in requests if method == "thread/start")
+    thread_started = next(
+        params for method, params in requests if method == "thread/start"
+    )
     turn_started = next(params for method, params in requests if method == "turn/start")
     assert thread_started["model"] == "gpt-5.2-codex"
     assert thread_started["developerInstructions"] == "Pinned coder profile"
@@ -272,7 +303,11 @@ async def test_codex_runtime_receives_platform_context_as_separate_input(
             ),
         )
     )
-    request = next(params for method, params in factory.clients[-1].requests if method == "turn/start")
+    request = next(
+        params
+        for method, params in factory.clients[-1].requests
+        if method == "turn/start"
+    )
     context_text = request["input"][0]["text"]
     assert context_text.startswith("<knoa_runtime_context>")
     assert '"semantic_role":"context_not_user_command"' in context_text
@@ -281,7 +316,9 @@ async def test_codex_runtime_receives_platform_context_as_separate_input(
 
 
 @pytest.mark.asyncio
-async def test_codex_runtime_declines_native_approval_and_allows_steering(tmp_path: Path) -> None:
+async def test_codex_runtime_declines_native_approval_and_allows_steering(
+    tmp_path: Path,
+) -> None:
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
@@ -372,7 +409,9 @@ async def test_codex_runtime_declines_file_change_approval(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_codex_runtime_exposes_user_input_as_generic_schema(tmp_path: Path) -> None:
+async def test_codex_runtime_exposes_user_input_as_generic_schema(
+    tmp_path: Path,
+) -> None:
     factory = ClientFactory()
     runtime = CodexAgentRuntime(
         CodexSessionRepository(tmp_path / "sessions.db"),
